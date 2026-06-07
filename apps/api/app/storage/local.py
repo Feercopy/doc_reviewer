@@ -75,6 +75,17 @@ class LocalDocumentStorage:
             safe_original_filename=safe_original_filename,
         )
 
+    def save_parsed_artifact(self, *, owner_id: UUID, document_id: UUID, parsed_text: str) -> Path:
+        parsed_path = self.parsed_artifact_path(owner_id=owner_id, document_id=document_id)
+        parsed_path.parent.mkdir(parents=True, exist_ok=True)
+        parsed_path.write_text(parsed_text, encoding="utf-8")
+        return parsed_path
+
+    def parsed_artifact_path(self, *, owner_id: UUID, document_id: UUID) -> Path:
+        return self._ensure_under_root(
+            self.storage_root / "documents" / str(owner_id) / str(document_id) / "parsed" / "parsed.txt"
+        )
+
     def _ensure_under_root(self, path: Path) -> Path:
         resolved = path.resolve()
         if not resolved.is_relative_to(self.storage_root):

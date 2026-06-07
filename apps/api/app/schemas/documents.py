@@ -20,6 +20,7 @@ class DocumentRead(BaseModel):
     document_type_confidence: Decimal | None
     document_type_explanation: str | None
     manual_document_type: DocumentType | None
+    parse_error: str | None
     status: EntityStatus
     created_at: datetime
     updated_at: datetime

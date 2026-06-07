@@ -6,6 +6,8 @@ dependencies = [
   "gate-challenger-api",
   "redis",
   "rq",
+  "python-docx",
+  "pypdf",
 ]
 
 [project.optional-dependencies]
@@ -19,4 +21,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["jobs*"]
+include = ["jobs*", "parsers*"]

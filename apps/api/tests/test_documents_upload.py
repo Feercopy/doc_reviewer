@@ -6,7 +6,9 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.main import app
 from app.models.document import Document
+from app.routers import documents as documents_router
 from app.models.user import User
 from app.schemas.enums import Role, UserStatus
 from app.security.passwords import hash_password
@@ -21,7 +23,19 @@ def storage_root(tmp_path, monkeypatch):
 
 
 @pytest.fixture()
-def api_client(storage_root, client):
+def enqueued_parse_jobs():
+    enqueued: list[str] = []
+
+    def fake_enqueue(document_id):
+        enqueued.append(str(document_id))
+
+    app.dependency_overrides[documents_router.get_parse_document_enqueue] = lambda: fake_enqueue
+    yield enqueued
+    app.dependency_overrides.pop(documents_router.get_parse_document_enqueue, None)
+
+
+@pytest.fixture()
+def api_client(storage_root, client, enqueued_parse_jobs):
     return client
 
 
@@ -88,6 +102,16 @@ def test_upload_supported_file_creates_queued_document_and_raw_file(api_client, 
     stored_path = assert_under_storage_root(document.storage_path, storage_root)
     assert stored_path.read_bytes() == content
     assert stored_path.name == f"{hashlib.sha256(content).hexdigest()}-gate-2.md"
+
+
+def test_upload_enqueues_parse_job(api_client, db_session, enqueued_parse_jobs):
+    create_user(db_session, "author", "secret")
+    login(api_client, "author", "secret")
+
+    response = upload_document(api_client, "gate-2.txt", b"Gate 2 MVP metrics")
+
+    assert response.status_code == 201
+    assert enqueued_parse_jobs == [response.json()["id"]]
 
 
 def test_rejects_unsupported_file_with_415(api_client, db_session, storage_root):

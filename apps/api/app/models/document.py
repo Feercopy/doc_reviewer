@@ -31,4 +31,5 @@ class Document(TimestampMixin, Base):
     document_type_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
     manual_document_type: Mapped[str | None] = mapped_column(String, nullable=True)
     parsed_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parse_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default=EntityStatus.ACTIVE.value)

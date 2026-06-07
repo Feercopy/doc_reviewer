@@ -11,6 +11,7 @@ from app.models.document import Document
 from app.models.user import User
 from app.schemas.documents import DocumentRead, DocumentsListResponse
 from app.schemas.enums import DocumentType
+from app.services.document_jobs import ParseDocumentEnqueue, enqueue_parse_document
 from app.services.documents import (
     DocumentNotFoundError,
     DocumentTooLargeError,
@@ -28,6 +29,10 @@ def get_document_storage() -> LocalDocumentStorage:
     return LocalDocumentStorage(get_settings().storage_root)
 
 
+def get_parse_document_enqueue() -> ParseDocumentEnqueue:
+    return enqueue_parse_document
+
+
 @router.post("", response_model=DocumentRead, status_code=status.HTTP_201_CREATED)
 def create_document(
     file: Annotated[UploadFile, File()],
@@ -36,9 +41,10 @@ def create_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_current_user),
     storage: LocalDocumentStorage = Depends(get_document_storage),
+    enqueue: ParseDocumentEnqueue = Depends(get_parse_document_enqueue),
 ) -> Document:
     try:
-        return create_document_from_upload(
+        document = create_document_from_upload(
             db=db,
             actor=current_user,
             storage=storage,
@@ -46,6 +52,8 @@ def create_document(
             title=title,
             manual_document_type=manual_document_type,
         )
+        enqueue(document.id)
+        return document
     except UnsupportedDocumentFileTypeError as exc:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
