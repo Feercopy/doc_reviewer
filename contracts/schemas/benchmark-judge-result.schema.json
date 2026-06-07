@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gate-challenger.local/schemas/benchmark-judge-result.schema.json",
+  "title": "BenchmarkJudgeResult",
+  "type": "object",
+  "required": ["precision", "recall", "f1", "missed_findings", "false_positives", "partial_matches"],
+  "additionalProperties": false,
+  "properties": {
+    "precision": { "type": "number", "minimum": 0, "maximum": 1 },
+    "recall": { "type": "number", "minimum": 0, "maximum": 1 },
+    "f1": { "type": "number", "minimum": 0, "maximum": 1 },
+    "missed_findings": { "type": "array", "items": { "type": "string" } },
+    "false_positives": { "type": "array", "items": { "type": "string" } },
+    "partial_matches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["expected", "actual", "explanation"],
+        "additionalProperties": false,
+        "properties": {
+          "expected": { "type": "string" },
+          "actual": { "type": "string" },
+          "explanation": { "type": "string" }
+        }
+      }
+    }
+  }
+}

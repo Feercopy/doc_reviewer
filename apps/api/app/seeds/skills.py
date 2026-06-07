@@ -1,0 +1,159 @@
+import hashlib
+import subprocess
+from pathlib import Path
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models.skill import Skill
+from app.schemas.enums import DocumentType, EntityStatus, SkillSourceType, SkillType
+
+GATE2_SKILL_PATH = Path("/Users/iseremenko/Projects/Gate2-challenger/skills/gate2-challenger/SKILL.md")
+DEVILS_ADVOCATE_PATH = Path("/Users/iseremenko/Documents/Common GPTs/devils-advocate/ic-voting-prompt.md")
+DEVILS_ADVOCATE_WIKI_PATH = Path("/Users/iseremenko/Documents/Common GPTs/devils-advocate/wiki-ic")
+
+
+def _fingerprint_path(path: Path) -> str | None:
+    if not path.exists():
+        return None
+
+    digest = hashlib.sha256()
+    if path.is_file():
+        digest.update(path.read_bytes())
+    else:
+        for child in sorted(item for item in path.rglob("*") if item.is_file()):
+            digest.update(str(child.relative_to(path)).encode("utf-8"))
+            digest.update(child.read_bytes())
+    return digest.hexdigest()
+
+
+def _git_revision(path: Path) -> str | None:
+    target = path if path.is_dir() else path.parent
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    return result.stdout.strip()
+
+
+def _read_prompt(path: Path, fallback: str) -> str:
+    return path.read_text() if path.exists() and path.is_file() else fallback
+
+
+def _upsert_skill(db: Session, values: dict) -> Skill:
+    skill = db.execute(
+        select(Skill).where(
+            Skill.name == values["name"],
+            Skill.version == values["version"],
+            Skill.skill_type == values["skill_type"],
+        )
+    ).scalar_one_or_none()
+    if skill is None:
+        skill = Skill(**values)
+        db.add(skill)
+    else:
+        for key, value in values.items():
+            setattr(skill, key, value)
+    return skill
+
+
+def seed_baseline_skills(db: Session) -> list[Skill]:
+    gate2_fingerprint = _fingerprint_path(GATE2_SKILL_PATH)
+    devils_fingerprint = _fingerprint_path(DEVILS_ADVOCATE_PATH)
+    wiki_fingerprint = _fingerprint_path(DEVILS_ADVOCATE_WIKI_PATH)
+
+    skills = [
+        {
+            "name": "gate2_challenger_main_analysis",
+            "description": "Gate 2 main analysis skill snapshot source.",
+            "version": "baseline",
+            "skill_type": SkillType.MAIN_ANALYSIS.value,
+            "supported_document_types": [DocumentType.GATE_2.value],
+            "source_type": SkillSourceType.LOCAL_SKILL_REPO.value,
+            "source_uri": str(GATE2_SKILL_PATH),
+            "source_entrypoint": "SKILL.md",
+            "source_revision": _git_revision(GATE2_SKILL_PATH),
+            "source_fingerprint": gate2_fingerprint,
+            "source_metadata": {},
+            "prompt_text": _read_prompt(GATE2_SKILL_PATH, "Gate 2 challenger main analysis baseline prompt."),
+            "result_schema_path": "contracts/schemas/main-analysis-result.schema.json",
+            "status": EntityStatus.ACTIVE.value,
+        },
+        {
+            "name": "devils_advocate_predefense",
+            "description": "Devil's Advocate pre-defense comments skill snapshot source.",
+            "version": "baseline",
+            "skill_type": SkillType.PREDICTED_COMMENTS.value,
+            "supported_document_types": [
+                DocumentType.GATE_1.value,
+                DocumentType.GATE_2.value,
+                DocumentType.GATE_3.value,
+            ],
+            "source_type": SkillSourceType.LOCAL_KNOWLEDGE_BASE.value,
+            "source_uri": str(DEVILS_ADVOCATE_PATH),
+            "source_entrypoint": "ic-voting-prompt.md",
+            "source_revision": _git_revision(DEVILS_ADVOCATE_PATH),
+            "source_fingerprint": devils_fingerprint,
+            "source_metadata": {"wiki_path": str(DEVILS_ADVOCATE_WIKI_PATH), "wiki_fingerprint": wiki_fingerprint},
+            "prompt_text": _read_prompt(DEVILS_ADVOCATE_PATH, "Devil's Advocate pre-defense baseline prompt."),
+            "result_schema_path": "contracts/schemas/devils-advocate-result.schema.json",
+            "status": EntityStatus.ACTIVE.value,
+        },
+        {
+            "name": "generic_predicted_comments_fallback",
+            "description": "Fallback predicted committee comments prompt.",
+            "version": "baseline",
+            "skill_type": SkillType.PREDICTED_COMMENTS.value,
+            "supported_document_types": [DocumentType.UNKNOWN.value],
+            "source_type": SkillSourceType.INLINE_PROMPT.value,
+            "source_uri": None,
+            "source_entrypoint": None,
+            "source_revision": None,
+            "source_fingerprint": None,
+            "source_metadata": {},
+            "prompt_text": "Predict likely committee questions with cited anchors.",
+            "result_schema_path": "contracts/schemas/predicted-comments-result.schema.json",
+            "status": EntityStatus.ACTIVE.value,
+        },
+        {
+            "name": "benchmark_judge",
+            "description": "Baseline benchmark judge prompt.",
+            "version": "baseline",
+            "skill_type": SkillType.BENCHMARK_JUDGE.value,
+            "supported_document_types": [DocumentType.UNKNOWN.value],
+            "source_type": SkillSourceType.INLINE_PROMPT.value,
+            "source_uri": None,
+            "source_entrypoint": None,
+            "source_revision": None,
+            "source_fingerprint": None,
+            "source_metadata": {},
+            "prompt_text": "Compare analysis output with an etalon and calculate precision, recall, and F1.",
+            "result_schema_path": "contracts/schemas/benchmark-judge-result.schema.json",
+            "status": EntityStatus.ACTIVE.value,
+        },
+        {
+            "name": "document_classifier",
+            "description": "Baseline document type classifier prompt.",
+            "version": "baseline",
+            "skill_type": SkillType.DOCUMENT_CLASSIFIER.value,
+            "supported_document_types": [item.value for item in DocumentType],
+            "source_type": SkillSourceType.INLINE_PROMPT.value,
+            "source_uri": None,
+            "source_entrypoint": None,
+            "source_revision": None,
+            "source_fingerprint": None,
+            "source_metadata": {},
+            "prompt_text": "Classify the document into the supported Gate Challenger document type enum.",
+            "result_schema_path": "contracts/schemas/main-analysis-result.schema.json",
+            "status": EntityStatus.ACTIVE.value,
+        },
+    ]
+
+    seeded = [_upsert_skill(db, values) for values in skills]
+    db.commit()
+    return seeded

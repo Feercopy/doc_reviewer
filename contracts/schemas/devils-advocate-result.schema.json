@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gate-challenger.local/schemas/devils-advocate-result.schema.json",
+  "title": "DevilsAdvocateResult",
+  "type": "object",
+  "required": ["run_mode", "anchored_comments", "trailer", "ic_decision", "predicted_questions", "consulted_wiki_pages", "source_citations"],
+  "additionalProperties": false,
+  "properties": {
+    "run_mode": { "type": "string", "enum": ["full_ic_voting"] },
+    "anchored_comments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "anchor", "comment", "severity"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "anchor": { "type": "string", "minLength": 1 },
+          "comment": { "type": "string", "minLength": 1 },
+          "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] }
+        }
+      }
+    },
+    "trailer": {
+      "type": "object",
+      "required": ["executive_summary", "key_risks", "missing_evidence", "next_steps"],
+      "additionalProperties": false,
+      "properties": {
+        "executive_summary": { "type": "string" },
+        "key_risks": { "type": "array", "items": { "type": "string" } },
+        "missing_evidence": { "type": "array", "items": { "type": "string" } },
+        "next_steps": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "ic_decision": {
+      "type": "object",
+      "required": ["verdict", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "verdict": { "type": "string", "enum": ["approve", "approve_with_conditions", "need_evidence", "reject", "unknown"] },
+        "rationale": { "type": "string" }
+      }
+    },
+    "predicted_questions": { "type": "array", "items": { "type": "string" } },
+    "consulted_wiki_pages": { "type": "array", "items": { "type": "string" } },
+    "source_citations": { "type": "array", "items": { "type": "string" } }
+  }
+}
