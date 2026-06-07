@@ -13,6 +13,14 @@ export type ProviderKeysListResponse = {
   provider_keys: ProviderKeyRecord[];
 };
 
+export type ProviderKeyTestResponse = {
+  provider: Provider;
+  status: string;
+  message: string;
+  default_model: string | null;
+  base_url: string | null;
+};
+
 export async function listProviderKeys(): Promise<ProviderKeysListResponse> {
   return apiFetch<ProviderKeysListResponse>("/settings/provider-keys");
 }
@@ -29,4 +37,8 @@ export async function saveProviderKey(
 
 export async function deleteProviderKey(provider: Provider): Promise<{ status: string }> {
   return apiFetch<{ status: string }>(`/settings/provider-keys/${provider}`, { method: "DELETE" });
+}
+
+export async function testProviderKey(provider: Provider): Promise<ProviderKeyTestResponse> {
+  return apiFetch<ProviderKeyTestResponse>(`/settings/provider-keys/${provider}/test`, { method: "POST" });
 }

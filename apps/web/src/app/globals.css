@@ -6,6 +6,7 @@
   --panel: #ffffff;
   --accent: #0f766e;
   --accent-strong: #115e59;
+  --success: #15803d;
   --danger: #b42318;
 }
 
@@ -260,6 +261,10 @@ th {
 
 .error {
   color: var(--danger);
+}
+
+.success {
+  color: var(--success);
 }
 
 .login-shell {

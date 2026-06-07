@@ -19,3 +19,11 @@ class ProviderKeyRead(BaseModel):
 
 class ProviderKeysListResponse(BaseModel):
     provider_keys: list[ProviderKeyRead]
+
+
+class ProviderKeyTestResponse(BaseModel):
+    provider: Provider
+    status: str
+    message: str
+    default_model: str | None
+    base_url: str | None

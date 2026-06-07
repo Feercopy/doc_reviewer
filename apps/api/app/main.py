@@ -23,6 +23,7 @@ def create_app() -> FastAPI:
     api.include_router(admin_users.router)
     api.include_router(provider_settings.router)
     api.include_router(skills.router)
+    api.include_router(skills.admin_router)
     api.include_router(analyses.router)
     api.include_router(feedback.router)
     api.include_router(documents.router)

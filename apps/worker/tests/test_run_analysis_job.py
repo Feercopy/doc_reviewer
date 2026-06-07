@@ -107,6 +107,62 @@ def test_run_analysis_marks_missing_provider_key_failed(tmp_path):
         _close_session(db)
 
 
+def test_run_analysis_marks_changed_external_skill_source_unavailable(tmp_path):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        source = tmp_path / "SKILL.md"
+        source.write_text("Original Gate 2 instructions.", encoding="utf-8")
+        skill = _create_skill(
+            db,
+            source_uri=str(tmp_path),
+            source_entrypoint="SKILL.md",
+            source_fingerprint="expected-old-fingerprint",
+        )
+        db.add(
+            ProviderKey(
+                owner_id=user.id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url=None,
+                default_model="gpt-test",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "skill_source_snapshot": {
+                    "source_type": SkillSourceType.LOCAL_SKILL_REPO.value,
+                    "source_fingerprint": "expected-old-fingerprint",
+                },
+                "mock_provider_result": {
+                    "structured_text": '{"verdict":"need_evidence","summary":"Should not run provider.","findings":[],"checks":[]}',
+                    "raw_output": "provider should not be called",
+                    "latency_ms": 1,
+                },
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        run_analysis(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        assert analysis.status == RunStatus.FAILED.value
+        assert analysis.error_message == "skill_source_unavailable"
+        assert analysis.raw_output is None
+    finally:
+        _close_session(db)
+
+
 def _create_session() -> Session:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
@@ -171,18 +227,24 @@ def _create_document(db: Session, tmp_path, user: User) -> Document:
     return document
 
 
-def _create_skill(db: Session) -> Skill:
+def _create_skill(
+    db: Session,
+    *,
+    source_uri: str | None = None,
+    source_entrypoint: str | None = None,
+    source_fingerprint: str | None = None,
+) -> Skill:
     skill = Skill(
         name="gate2_challenger_main_analysis",
         description="Gate 2",
         version="baseline",
         skill_type=SkillType.MAIN_ANALYSIS.value,
         supported_document_types=[DocumentType.GATE_2.value],
-        source_type=SkillSourceType.INLINE_PROMPT.value,
-        source_uri=None,
-        source_entrypoint=None,
+        source_type=SkillSourceType.LOCAL_SKILL_REPO.value if source_uri else SkillSourceType.INLINE_PROMPT.value,
+        source_uri=source_uri,
+        source_entrypoint=source_entrypoint,
         source_revision=None,
-        source_fingerprint=None,
+        source_fingerprint=source_fingerprint,
         source_metadata={},
         prompt_text="Analyze Gate 2 document.",
         result_schema_path="contracts/schemas/main-analysis-result.schema.json",

@@ -38,7 +38,30 @@ class AnalysisRead(BaseModel):
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
+    predicted_comment_run: "PredictedCommentRunRead | None" = None
 
 
 class AnalysesListResponse(BaseModel):
     analyses: list[AnalysisRead]
+
+
+class PredictedCommentRunRead(BaseModel):
+    id: UUID
+    analysis_id: UUID
+    skill_id: UUID
+    skill_name: str
+    skill_version: str
+    provider: Provider
+    model: str
+    status: RunStatus
+    structured_output: dict | None
+    raw_output: str | None
+    error_message: str | None
+    latency_ms: int | None
+    input_tokens: int | None
+    output_tokens: int | None
+    estimated_cost: Decimal | None
+    run_parameters: dict
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None

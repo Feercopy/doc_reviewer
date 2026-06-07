@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from app.models.analysis import Analysis
+from app.models.analysis import Analysis, PredictedCommentRun
 from app.models.document import Document
 from app.models.provider_key import ProviderKey
 from app.schemas.enums import DocumentParseStatus, DocumentType, Provider, RunStatus
@@ -108,6 +108,50 @@ def test_analysis_detail_hides_raw_output_from_non_admin(client, db_session):
 
     assert response.status_code == 200
     assert response.json()["raw_output"] is None
+
+
+def test_analysis_detail_includes_predicted_comment_run_without_raw_for_non_admin(client, db_session):
+    user = create_user(db_session, "author", "secret")
+    skills = seed_baseline_skills(db_session)
+    analysis = Analysis(
+        document_id=_create_completed_document(client, db_session, user),
+        user_id=user.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="need_evidence",
+        summary="Needs evidence",
+        structured_output={"verdict": "need_evidence", "summary": "Needs evidence", "findings": [], "checks": []},
+        raw_output="raw secret output",
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.flush()
+    predicted = PredictedCommentRun(
+        analysis_id=analysis.id,
+        skill_id=skills[1].id,
+        skill_version=skills[1].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        structured_output={"run_mode": "full_ic_voting", "predicted_questions": ["What is incrementality?"]},
+        raw_output="raw predicted secret",
+        run_parameters={"skill_source_snapshot": {"name": "devils_advocate_predefense"}},
+    )
+    db_session.add(predicted)
+    db_session.commit()
+    login(client, "author", "secret")
+
+    response = client.get(f"/analyses/{analysis.id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted_comment_run"]["id"] == str(predicted.id)
+    assert payload["predicted_comment_run"]["skill_name"] == "devils_advocate_predefense"
+    assert payload["predicted_comment_run"]["structured_output"]["predicted_questions"] == ["What is incrementality?"]
+    assert payload["predicted_comment_run"]["raw_output"] is None
 
 
 def _create_completed_document(client, db_session, user):

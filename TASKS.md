@@ -43,6 +43,12 @@ Primary plan index:
   parsed/raw/reparse endpoints, manual type override, provider key settings,
   skill list, analysis launch/detail, worker main-analysis job, provider
   adapters, and feedback capture.
+- [x] Complete Phase 3 second-stage runtime: Gate2/Devil's Advocate prompt
+  renderers, Devil's Advocate predicted-comments worker job, reproducible
+  second-stage run metadata, API detail embedding, and result UI block.
+- [x] Close Phase 3 skill admin/runtime hardening: admin skill create, archive,
+  patch, source refresh, schema/source validation, provider key test endpoint,
+  and worker skill-source availability checks.
 
 ## Phase 1: Skeleton And Data Foundation
 
@@ -117,20 +123,20 @@ Tasks:
 - [x] Implement encrypted provider key storage and masked settings API.
 - [x] Implement provider adapters for OpenAI-compatible, Anthropic-compatible,
   and Hermes modes.
-- [~] Implement versioned skill registry and source snapshotting.
-- [~] Render Gate2-challenger and Devil's Advocate prompts into normalized
+- [x] Implement versioned skill registry and source snapshotting.
+- [x] Render Gate2-challenger and Devil's Advocate prompts into normalized
   schema contracts.
 - [x] Enqueue and execute analysis jobs in workers.
 - [x] Persist structured output, raw output, run parameters, cost/token metadata,
   and errors.
-- [~] Add analysis result UI and feedback flow.
+- [x] Add analysis result UI and feedback flow.
 
 Exit criteria:
 
 - [x] User can save an encrypted provider key.
 - [x] User can launch an analysis.
 - [x] Worker persists structured and raw outputs.
-- [ ] Predicted-comments or Devil's Advocate second stage runs after main
+- [x] Predicted-comments or Devil's Advocate second stage runs after main
   analysis.
 - [x] User can leave feedback.
 
@@ -260,3 +266,15 @@ Exit criteria:
   validates structured output against shared schemas, and persists raw output,
   token/cost metadata, verdict, summary, status, and errors. Predicted-comments
   and specialized Gate2/Devil's Advocate renderers remain open Phase 3 work.
+- 2026-06-07: Closed the Phase 3 second-stage runtime slice. Added
+  Gate2-challenger and Devil's Advocate prompt renderers, `run_predicted_comments`
+  worker job, second-stage reproducibility metadata on `predicted_comment_runs`,
+  automatic enqueue after successful main analysis, enqueue-failure handling that
+  preserves the completed main analysis, API embedding of the latest predicted
+  comment run, and a Devil's Advocate result UI block.
+- 2026-06-08: Closed the remaining Phase 3 skill/provider gaps. Added admin
+  skill create, patch, archive, and source-refresh endpoints; result schema and
+  local source validation; deterministic source fingerprint refresh; provider
+  key configuration test endpoint without plaintext key exposure; provider-key
+  and skill audit events; and worker failures for unavailable or changed
+  external skill sources before provider calls.

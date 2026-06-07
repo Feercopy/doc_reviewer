@@ -1,5 +1,6 @@
 from cryptography.fernet import InvalidToken
 
+from app.models.audit_log import AuditLog
 from app.models.provider_key import ProviderKey
 from app.schemas.enums import Provider
 from app.security.secrets import decrypt_secret, encrypt_secret
@@ -52,6 +53,44 @@ def test_provider_key_delete_removes_row(client, db_session):
     assert delete.status_code == 200
     assert delete.json() == {"status": "deleted"}
     assert db_session.query(ProviderKey).count() == 0
+
+
+def test_provider_key_test_endpoint_checks_stored_key_without_exposing_plaintext(client, db_session):
+    create_user(db_session, "author", "secret")
+    login(client, "author", "secret")
+    save = client.put(
+        f"/settings/provider-keys/{Provider.OPENAI_COMPATIBLE.value}",
+        json={
+            "api_key": "sk-test-CONNECTION1234",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "gpt-test",
+        },
+    )
+    assert save.status_code == 200
+
+    response = client.post(f"/settings/provider-keys/{Provider.OPENAI_COMPATIBLE.value}/test")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "provider": "openai_compatible",
+        "status": "ok",
+        "message": "Provider key is configured and decryptable.",
+        "default_model": "gpt-test",
+        "base_url": "https://api.example.test/v1",
+    }
+    assert "CONNECTION" not in response.text
+    assert db_session.query(AuditLog).filter_by(action="provider_key.test").count() == 1
+
+
+def test_provider_key_test_endpoint_requires_saved_key(client, db_session):
+    create_user(db_session, "author", "secret")
+    login(client, "author", "secret")
+
+    response = client.post(f"/settings/provider-keys/{Provider.ANTHROPIC_COMPATIBLE.value}/test")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Provider key is not configured"
+    assert db_session.query(AuditLog).filter_by(action="provider_key.test_failure").count() == 1
 
 
 def test_secret_encryption_roundtrip_and_wrong_key_rejection():

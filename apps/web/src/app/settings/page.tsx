@@ -7,6 +7,7 @@ import {
   deleteProviderKey,
   listProviderKeys,
   saveProviderKey,
+  testProviderKey,
   type ProviderKeyRecord,
 } from "@/lib/api/provider-settings";
 import type { Provider } from "@/lib/api/documents";
@@ -20,6 +21,7 @@ export default function SettingsPage() {
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("gpt-test");
   const [error, setError] = useState("");
+  const [testMessage, setTestMessage] = useState("");
   const [pending, setPending] = useState(false);
 
   async function refresh() {
@@ -35,6 +37,7 @@ export default function SettingsPage() {
     event.preventDefault();
     setPending(true);
     setError("");
+    setTestMessage("");
     try {
       await saveProviderKey(provider, {
         api_key: apiKey,
@@ -53,11 +56,26 @@ export default function SettingsPage() {
   async function remove(providerName: Provider) {
     setPending(true);
     setError("");
+    setTestMessage("");
     try {
       await deleteProviderKey(providerName);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete provider key");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function testKey(providerName: Provider) {
+    setPending(true);
+    setError("");
+    setTestMessage("");
+    try {
+      const result = await testProviderKey(providerName);
+      setTestMessage(`${providerName.replaceAll("_", " ")}: ${result.message}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to test provider key");
     } finally {
       setPending(false);
     }
@@ -96,6 +114,7 @@ export default function SettingsPage() {
             </label>
           </div>
           {error ? <div className="error">{error}</div> : null}
+          {testMessage ? <div className="success">{testMessage}</div> : null}
           <div>
             <button disabled={pending || !apiKey || !model} type="submit">
               Save key
@@ -123,6 +142,9 @@ export default function SettingsPage() {
                     <td>{item.api_key_fingerprint}</td>
                     <td>{item.base_url ?? "-"}</td>
                     <td>
+                      <button className="secondary" disabled={pending} type="button" onClick={() => testKey(item.provider)}>
+                        Test
+                      </button>{" "}
                       <button className="secondary" disabled={pending} type="button" onClick={() => remove(item.provider)}>
                         Delete
                       </button>

@@ -54,6 +54,29 @@ export type AnalysisRecord = {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  predicted_comment_run: PredictedCommentRunRecord | null;
+};
+
+export type PredictedCommentRunRecord = {
+  id: string;
+  analysis_id: string;
+  skill_id: string;
+  skill_name: string;
+  skill_version: string;
+  provider: Provider;
+  model: string;
+  status: RunStatus;
+  structured_output: Record<string, unknown> | null;
+  raw_output: string | null;
+  error_message: string | null;
+  latency_ms: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  estimated_cost: string | null;
+  run_parameters: Record<string, unknown>;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
 };
 
 export type AnalysesListResponse = {

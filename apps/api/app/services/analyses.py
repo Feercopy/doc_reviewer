@@ -5,11 +5,11 @@ from sqlalchemy.orm import Session
 
 from app.authz.policies import can_read_analysis
 from app.core.config import get_settings
-from app.models.analysis import Analysis
+from app.models.analysis import Analysis, PredictedCommentRun
 from app.models.document import Document
 from app.models.skill import Skill
 from app.models.user import User
-from app.schemas.analyses import AnalysisRead
+from app.schemas.analyses import AnalysisRead, PredictedCommentRunRead
 from app.schemas.enums import DocumentParseStatus, DocumentType, EntityStatus, Provider, RunStatus, SkillType
 from app.services.documents import DocumentNotFoundError, get_document_for_actor
 from app.services.provider_keys import get_provider_key
@@ -85,6 +85,7 @@ def list_document_analyses_for_actor(*, db: Session, actor: User, document_id: U
 
 def read_analysis(*, db: Session, actor: User, analysis: Analysis) -> AnalysisRead:
     skill = db.get(Skill, analysis.skill_id)
+    predicted_run = _latest_predicted_comment_run(db=db, analysis_id=analysis.id)
     return AnalysisRead(
         id=analysis.id,
         document_id=analysis.document_id,
@@ -108,6 +109,9 @@ def read_analysis(*, db: Session, actor: User, analysis: Analysis) -> AnalysisRe
         created_at=analysis.created_at,
         started_at=analysis.started_at,
         completed_at=analysis.completed_at,
+        predicted_comment_run=(
+            _read_predicted_comment_run(db=db, actor=actor, predicted_run=predicted_run) if predicted_run else None
+        ),
     )
 
 
@@ -128,3 +132,42 @@ def _resolve_skill(*, db: Session, skill_id: UUID | None, document_type: str) ->
     if skill is None:
         raise AnalysisPreconditionError("No active main analysis skill is available")
     return skill
+
+
+def _latest_predicted_comment_run(*, db: Session, analysis_id: UUID) -> PredictedCommentRun | None:
+    statement = (
+        select(PredictedCommentRun)
+        .where(PredictedCommentRun.analysis_id == analysis_id)
+        .order_by(PredictedCommentRun.created_at.desc())
+    )
+    return db.execute(statement).scalars().first()
+
+
+def _read_predicted_comment_run(
+    *,
+    db: Session,
+    actor: User,
+    predicted_run: PredictedCommentRun,
+) -> PredictedCommentRunRead:
+    skill = db.get(Skill, predicted_run.skill_id)
+    return PredictedCommentRunRead(
+        id=predicted_run.id,
+        analysis_id=predicted_run.analysis_id,
+        skill_id=predicted_run.skill_id,
+        skill_name=skill.name if skill else "unknown",
+        skill_version=predicted_run.skill_version,
+        provider=predicted_run.provider,
+        model=predicted_run.model,
+        status=predicted_run.status,
+        structured_output=predicted_run.structured_output,
+        raw_output=predicted_run.raw_output if actor.role == "admin" else None,
+        error_message=predicted_run.error_message,
+        latency_ms=predicted_run.latency_ms,
+        input_tokens=predicted_run.input_tokens,
+        output_tokens=predicted_run.output_tokens,
+        estimated_cost=predicted_run.estimated_cost,
+        run_parameters=predicted_run.run_parameters,
+        created_at=predicted_run.created_at,
+        started_at=predicted_run.started_at,
+        completed_at=predicted_run.completed_at,
+    )
