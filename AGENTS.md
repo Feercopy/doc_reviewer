@@ -39,6 +39,12 @@ cannot write to `~/.gbrain`, not that GBrain is down. Prefer an available GBrain
 MCP tool when present; otherwise rerun the GBrain CLI with the appropriate
 approval instead of deleting lock files.
 
+Before starting or restarting `gbrain serve`, first check whether a GBrain
+process is already running, for example with `pgrep -af gbrain` or by trying the
+available GBrain MCP tools. If a process already exists, do not start a second
+instance; use the existing MCP/service connection or the CLI against that
+running service.
+
 After meaningful decisions, implementation milestones, debugging findings,
 benchmark conclusions, or prompt/skill changes, save a concise note under the
 project namespace:
