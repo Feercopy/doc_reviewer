@@ -3,25 +3,24 @@
   "$id": "https://gate-challenger.local/schemas/benchmark-judge-result.schema.json",
   "title": "BenchmarkJudgeResult",
   "type": "object",
-  "required": ["precision", "recall", "f1", "missed_findings", "false_positives", "partial_matches"],
+  "required": ["layer_1", "layer_2", "summary", "recommendations"],
   "additionalProperties": false,
   "properties": {
-    "precision": { "type": "number", "minimum": 0, "maximum": 1 },
-    "recall": { "type": "number", "minimum": 0, "maximum": 1 },
-    "f1": { "type": "number", "minimum": 0, "maximum": 1 },
-    "missed_findings": { "type": "array", "items": { "type": "string" } },
-    "false_positives": { "type": "array", "items": { "type": "string" } },
-    "partial_matches": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["expected", "actual", "explanation"],
-        "additionalProperties": false,
-        "properties": {
-          "expected": { "type": "string" },
-          "actual": { "type": "string" },
-          "explanation": { "type": "string" }
-        }
+    "layer_1": { "$ref": "#/$defs/layer_judgement" },
+    "layer_2": { "$ref": "#/$defs/layer_judgement" },
+    "summary": { "type": "string" },
+    "recommendations": { "type": "array", "items": {} }
+  },
+  "$defs": {
+    "layer_judgement": {
+      "type": "object",
+      "required": ["exact_matches", "partial_matches", "missed_findings", "false_positives"],
+      "additionalProperties": false,
+      "properties": {
+        "exact_matches": { "type": "array", "items": {} },
+        "partial_matches": { "type": "array", "items": {} },
+        "missed_findings": { "type": "array", "items": {} },
+        "false_positives": { "type": "array", "items": {} }
       }
     }
   }

@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from fastapi import UploadFile
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -8,9 +9,11 @@ from app.models.analysis import Analysis
 from app.models.document import Document
 from app.models.etalon import Etalon
 from app.models.user import User
-from app.schemas.enums import CheckStatus, DocumentType, EtalonSource, EtalonStatus, Role, RunStatus, Severity
+from app.schemas.enums import CheckStatus, DocumentType, EtalonSource, EtalonStatus, Role, RunStatus, Severity, Verdict
 from app.schemas.etalons import EtalonDraftCreate, EtalonPayload, EtalonUpdate
 from app.services.analyses import get_analysis_for_actor
+from app.services.documents import create_document_from_upload
+from app.storage.local import LocalDocumentStorage
 
 
 class EtalonNotFoundError(ValueError):
@@ -65,6 +68,56 @@ def create_etalon_draft_from_analysis(
     db.commit()
     db.refresh(etalon)
     return etalon
+
+
+def create_past_defense_etalon(
+    *,
+    db: Session,
+    actor: User,
+    storage: LocalDocumentStorage,
+    upload: UploadFile,
+    title: str | None,
+    document_type: DocumentType,
+    expected_verdict: Verdict,
+    real_defense_status: str,
+    defense_comments: str,
+    defense_date: str | None,
+    notes: str | None,
+    raw_file_visible_to_all: bool,
+) -> tuple[Document, Etalon]:
+    document = create_document_from_upload(
+        db=db,
+        actor=actor,
+        storage=storage,
+        upload=upload,
+        title=title,
+        manual_document_type=document_type,
+    )
+    etalon = Etalon(
+        document_id=document.id,
+        author_id=actor.id,
+        source=EtalonSource.IMPORTED_DEFENSE.value,
+        document_type=document_type.value,
+        real_defense_status=real_defense_status.strip(),
+        defense_comments=_format_defense_comments(
+            defense_comments=defense_comments,
+            defense_date=defense_date,
+            notes=notes,
+        ),
+        expected_verdict=expected_verdict.value,
+        layer_1=[],
+        layer_2=[],
+        key_findings=[],
+        forbidden_false_findings=[],
+        status=EtalonStatus.DRAFT.value,
+        version=1,
+        raw_file_visible_to_all=raw_file_visible_to_all,
+    )
+    db.add(etalon)
+    db.commit()
+    db.refresh(document)
+    db.refresh(etalon)
+    return document, etalon
 
 
 def list_etalons_for_actor(*, db: Session, actor: User) -> list[Etalon]:
@@ -254,6 +307,17 @@ def _key_findings_from_layer_1(layer_1: list[dict]) -> list[str]:
 
 def _effective_document_type(document: Document) -> str:
     return document.manual_document_type or document.detected_document_type or DocumentType.UNKNOWN.value
+
+
+def _format_defense_comments(*, defense_comments: str, defense_date: str | None, notes: str | None) -> str:
+    parts = []
+    if defense_date and defense_date.strip():
+        parts.append(f"Defense date: {defense_date.strip()}")
+    if defense_comments.strip():
+        parts.append(defense_comments.strip())
+    if notes and notes.strip():
+        parts.append(f"Notes: {notes.strip()}")
+    return "\n\n".join(parts)
 
 
 def _get_existing_etalon(*, db: Session, etalon_id: UUID) -> Etalon:

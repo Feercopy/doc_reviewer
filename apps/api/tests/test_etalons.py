@@ -3,14 +3,33 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
+from app.core.config import get_settings
+from app.main import app
 from app.models.analysis import Analysis
 from app.models.document import Document
 from app.models.etalon import Etalon
+from app.routers import etalons as etalons_router
 from app.schemas.enums import DocumentParseStatus, DocumentType, EtalonSource, EtalonStatus, Provider, Role, RunStatus
 from app.schemas.etalons import EtalonPayload
 from app.seeds.skills import seed_baseline_skills
 
 from test_documents_upload import create_user, login, upload_document
+
+
+@pytest.fixture()
+def storage_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    yield tmp_path
+    get_settings.cache_clear()
+
+
+@pytest.fixture()
+def enqueued_parse_jobs():
+    enqueued: list[str] = []
+    app.dependency_overrides[etalons_router.get_parse_document_enqueue] = lambda: lambda document_id: enqueued.append(str(document_id))
+    yield enqueued
+    app.dependency_overrides.pop(etalons_router.get_parse_document_enqueue, None)
 
 
 def test_etalon_payload_validates_layer_parent_links():
@@ -246,6 +265,45 @@ def test_annotation_queue_requires_admin_or_annotator(client, db_session):
     admin_queue = client.get("/annotation/queue")
     assert admin_queue.status_code == 200
     assert [item["id"] for item in admin_queue.json()["etalons"]] == [str(draft.id)]
+
+
+def test_past_defense_import_creates_document_and_draft_etalon(client, db_session, storage_root, enqueued_parse_jobs):
+    user = create_user(db_session, "author", "secret")
+    login(client, user.login, "secret")
+
+    response = client.post(
+        "/documents/past-defense",
+        data={
+            "title": "Past Gate 2 Defense",
+            "document_type": "gate_2",
+            "expected_verdict": "reject",
+            "real_defense_status": "rejected",
+            "defense_date": "2026-05-12",
+            "defense_comments": "Committee rejected the scaling argument.",
+            "notes": "Use as hard benchmark case.",
+            "raw_file_visible_to_all": "true",
+        },
+        files={"file": ("past-defense.txt", b"Past defense document", "text/plain")},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["source"] == "imported_defense"
+    assert payload["status"] == "draft"
+    assert payload["expected_verdict"] == "reject"
+    assert payload["document_type"] == "gate_2"
+    assert payload["real_defense_status"] == "rejected"
+    assert payload["raw_file_visible_to_all"] is True
+    assert "2026-05-12" in payload["defense_comments"]
+    assert "Committee rejected the scaling argument." in payload["defense_comments"]
+    assert "Use as hard benchmark case." in payload["defense_comments"]
+
+    etalon = db_session.query(Etalon).one()
+    document = db_session.get(Document, etalon.document_id)
+    assert document.title == "Past Gate 2 Defense"
+    assert document.parse_status == DocumentParseStatus.QUEUED.value
+    assert document.manual_document_type == DocumentType.GATE_2.value
+    assert enqueued_parse_jobs == [str(document.id)]
 
 
 def _valid_etalon_payload():

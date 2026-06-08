@@ -35,5 +35,6 @@ class Benchmark(Base):
     false_positives: Mapped[list | None] = mapped_column(JSON, nullable=True)
     partial_matches: Mapped[list | None] = mapped_column(JSON, nullable=True)
     judge_output: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     run_parameters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -54,6 +54,8 @@ Primary plan index:
   admin/annotator active-status guard.
 - [x] Implement Phase 4 backend etalon review lifecycle: list/detail,
   draft editing, annotation queue, publish, and archive endpoints.
+- [x] Complete Phase 4 remaining MVP: past-defense import, benchmark API,
+  benchmark worker scoring/reporting, and etalon/benchmark UI pages.
 
 ## Phase 1: Skeleton And Data Foundation
 
@@ -158,17 +160,17 @@ Tasks:
 
 - [x] Create etalon drafts from analysis results.
 - [x] Implement admin etalon review and activation.
-- [ ] Implement benchmark runs over active etalons.
-- [ ] Persist judge output, aggregate metrics, misses, false positives, and
+- [x] Implement benchmark runs over active etalons.
+- [x] Persist judge output, aggregate metrics, misses, false positives, and
   partial matches.
-- [ ] Add etalon and benchmark UI.
+- [x] Add etalon and benchmark UI.
 
 Exit criteria:
 
-- [ ] User creates etalon draft from analysis.
-- [ ] Admin can activate etalon.
-- [ ] Benchmark runs over active etalons.
-- [ ] Benchmark persists precision, recall, F1, missed findings, false
+- [x] User creates etalon draft from analysis.
+- [x] Admin can activate etalon.
+- [x] Benchmark runs over active etalons.
+- [x] Benchmark persists precision, recall, F1, missed findings, false
   positives, and partial matches.
 
 ## Phase 5: Admin, Audit, Hardening
@@ -294,3 +296,9 @@ Exit criteria:
   through the annotation queue, edit non-archived etalons, publish drafts to
   active, and archive etalons. Draft authors can edit their own drafts, but
   normal users cannot edit active etalons or publish/archive lifecycle state.
+- 2026-06-08: Completed Phase 4 MVP. Added past-defense import with raw document
+  storage, parse enqueue, and imported etalon drafts; benchmark API and worker
+  execution over active etalons; nested benchmark judge output contract;
+  precision/recall/F1 scoring with partial-match reporting; persisted benchmark
+  report JSON; and frontend pages for etalons, annotation, benchmark launch, and
+  benchmark results.

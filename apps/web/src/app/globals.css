@@ -95,6 +95,11 @@ textarea {
   resize: vertical;
 }
 
+.mono-input {
+  min-height: 260px;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 input[type="file"] {
   padding: 8px 10px;
 }
@@ -257,6 +262,10 @@ th {
 
 .muted {
   color: var(--muted);
+}
+
+.error {
+  color: var(--danger);
 }
 
 .error {

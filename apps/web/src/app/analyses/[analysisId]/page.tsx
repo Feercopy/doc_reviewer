@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getAnalysis, type AnalysisRecord } from "@/lib/api/documents";
+import { createEtalonDraft } from "@/lib/api/etalons";
 import { submitFeedback } from "@/lib/api/feedback";
 import { formatDate, formatLabel } from "@/lib/format";
 
@@ -24,6 +25,7 @@ export default function AnalysisDetailPage() {
   const [feedbackComment, setFeedbackComment] = useState("");
   const [usefulness, setUsefulness] = useState<"useful" | "partially_useful" | "useless">("useful");
   const [canUseForBenchmark, setCanUseForBenchmark] = useState(false);
+  const [etalonPending, setEtalonPending] = useState(false);
 
   useEffect(() => {
     getAnalysis(params.analysisId)
@@ -50,6 +52,22 @@ export default function AnalysisDetailPage() {
       setFeedbackComment("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit feedback");
+    }
+  }
+
+  async function createDraft() {
+    if (!analysis) {
+      return;
+    }
+    setEtalonPending(true);
+    setError("");
+    try {
+      const etalon = await createEtalonDraft(analysis.id);
+      window.location.href = `/annotation/${etalon.id}`;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create etalon draft");
+    } finally {
+      setEtalonPending(false);
     }
   }
 
@@ -85,6 +103,11 @@ export default function AnalysisDetailPage() {
               </div>
               {analysis.summary ? <p>{analysis.summary}</p> : null}
               {analysis.error_message ? <div className="error">{analysis.error_message}</div> : null}
+              <div className="button-row">
+                <button disabled={etalonPending || analysis.status !== "completed"} type="button" onClick={createDraft}>
+                  Create etalon draft
+                </button>
+              </div>
             </section>
             <section className="panel stack">
               <h2>Structured Output</h2>

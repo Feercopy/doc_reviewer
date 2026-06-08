@@ -18,7 +18,10 @@
     "checks": {
       "type": "array",
       "items": { "$ref": "#/$defs/check" }
-    }
+    },
+    "key_findings": { "type": "array", "items": { "type": "string" } },
+    "layer_1": { "type": "array", "items": { "type": "object" } },
+    "layer_2": { "type": "array", "items": { "type": "object" } }
   },
   "$defs": {
     "finding": {

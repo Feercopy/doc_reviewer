@@ -1,28 +1,43 @@
 from uuid import UUID
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.dependencies.auth import require_current_user
 from app.models.etalon import Etalon
 from app.models.user import User
+from app.schemas.enums import DocumentType, Verdict
 from app.schemas.etalons import EtalonDraftCreate, EtalonRead, EtalonsListResponse, EtalonUpdate
+from app.services.document_jobs import ParseDocumentEnqueue, enqueue_parse_document
 from app.services.analyses import AnalysisNotFoundError
+from app.services.documents import DocumentTooLargeError, UnsupportedDocumentFileTypeError
 from app.services.etalons import (
     EtalonForbiddenError,
     EtalonNotFoundError,
     EtalonPreconditionError,
     archive_etalon,
     create_etalon_draft_from_analysis,
+    create_past_defense_etalon,
     get_etalon_for_actor,
     list_annotation_queue,
     list_etalons_for_actor,
     publish_etalon,
     update_etalon,
 )
+from app.storage.local import LocalDocumentStorage
 
 router = APIRouter(tags=["etalons"])
+
+
+def get_document_storage() -> LocalDocumentStorage:
+    return LocalDocumentStorage(get_settings().storage_root)
+
+
+def get_parse_document_enqueue() -> ParseDocumentEnqueue:
+    return enqueue_parse_document
 
 
 @router.get("/etalons", response_model=EtalonsListResponse)
@@ -101,6 +116,49 @@ def get_annotation_queue(
         return EtalonsListResponse(etalons=list_annotation_queue(db=db, actor=current_user))
     except EtalonForbiddenError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@router.post("/documents/past-defense", response_model=EtalonRead, status_code=status.HTTP_201_CREATED)
+def create_past_defense(
+    file: Annotated[UploadFile, File()],
+    title: Annotated[str | None, Form()] = None,
+    document_type: Annotated[DocumentType, Form()] = DocumentType.UNKNOWN,
+    expected_verdict: Annotated[Verdict, Form()] = Verdict.UNKNOWN,
+    real_defense_status: Annotated[str, Form()] = "",
+    defense_date: Annotated[str | None, Form()] = None,
+    defense_comments: Annotated[str, Form()] = "",
+    notes: Annotated[str | None, Form()] = None,
+    raw_file_visible_to_all: Annotated[bool, Form()] = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+    storage: LocalDocumentStorage = Depends(get_document_storage),
+    enqueue: ParseDocumentEnqueue = Depends(get_parse_document_enqueue),
+) -> Etalon:
+    try:
+        document, etalon = create_past_defense_etalon(
+            db=db,
+            actor=current_user,
+            storage=storage,
+            upload=file,
+            title=title,
+            document_type=document_type,
+            expected_verdict=expected_verdict,
+            real_defense_status=real_defense_status,
+            defense_comments=defense_comments,
+            defense_date=defense_date,
+            notes=notes,
+            raw_file_visible_to_all=raw_file_visible_to_all,
+        )
+    except UnsupportedDocumentFileTypeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Unsupported document file type",
+        ) from exc
+    except DocumentTooLargeError as exc:
+        raise HTTPException(status_code=413, detail="File exceeds maximum upload size") from exc
+
+    enqueue(document.id)
+    return etalon
 
 
 @router.post("/analyses/{analysis_id}/etalon-draft", response_model=EtalonRead, status_code=status.HTTP_201_CREATED)
