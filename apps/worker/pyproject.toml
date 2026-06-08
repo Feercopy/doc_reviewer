@@ -11,7 +11,7 @@ dependencies = [
   "jsonschema",
   "openai",
   "anthropic",
-  "httpx",
+  "httpx[socks]",
 ]
 
 [project.optional-dependencies]

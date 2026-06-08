@@ -6,7 +6,14 @@ from app.schemas.enums import Provider, RunStatus
 from app.security.secrets import encrypt_secret
 from jobs.run_analysis import run_analysis
 
-from test_run_analysis_job import _close_session, _create_document, _create_session, _create_skill, _create_user
+from test_run_analysis_job import (
+    _close_session,
+    _create_document,
+    _create_session,
+    _create_skill,
+    _create_user,
+    _main_analysis_json,
+)
 
 
 def test_worker_and_provider_logs_include_job_context_without_api_key(tmp_path, caplog):
@@ -35,7 +42,7 @@ def test_worker_and_provider_logs_include_job_context_without_api_key(tmp_path, 
             status=RunStatus.QUEUED.value,
             run_parameters={
                 "mock_provider_result": {
-                    "structured_text": '{"verdict":"need_evidence","summary":"Needs evidence.","findings":[],"checks":[]}',
+                    "structured_text": _main_analysis_json("Needs evidence."),
                     "raw_output": "raw output",
                     "input_tokens": 3,
                     "output_tokens": 4,

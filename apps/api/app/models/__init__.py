@@ -6,6 +6,7 @@ from app.models.etalon import Etalon
 from app.models.feedback import Feedback
 from app.models.provider_key import ProviderKey
 from app.models.skill import Skill
+from app.models.skill_source import RetrievalSnapshot, SkillSource, SkillSourceSnapshot
 from app.models.user import User
 
 __all__ = [
@@ -17,6 +18,9 @@ __all__ = [
     "Feedback",
     "PredictedCommentRun",
     "ProviderKey",
+    "RetrievalSnapshot",
     "Skill",
+    "SkillSource",
+    "SkillSourceSnapshot",
     "User",
 ]

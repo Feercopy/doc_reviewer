@@ -10,13 +10,6 @@ import { createEtalonDraft } from "@/lib/api/etalons";
 import { submitFeedback } from "@/lib/api/feedback";
 import { formatDate, formatLabel } from "@/lib/format";
 
-type AnchoredComment = {
-  id?: string;
-  anchor?: string;
-  comment?: string;
-  severity?: string;
-};
-
 export default function AnalysisDetailPage() {
   const params = useParams<{ analysisId: string }>();
   const [analysis, setAnalysis] = useState<AnalysisRecord | null>(null);
@@ -101,6 +94,14 @@ export default function AnalysisDetailPage() {
                   <strong>{analysis.skill_version}</strong>
                 </div>
               </div>
+              {analysis.source_trace ? (
+                <div className="meta-grid">
+                  <TraceItem label="Source" value={analysis.source_trace.source_slug} />
+                  <TraceItem label="Snapshot" value={shortHash(analysis.source_trace.source_snapshot_id)} />
+                  <TraceItem label="Fingerprint" value={shortHash(analysis.source_trace.source_fingerprint)} />
+                  <TraceItem label="Prompt" value={shortHash(analysis.source_trace.prompt_fingerprint)} />
+                </div>
+              ) : null}
               {analysis.summary ? <p>{analysis.summary}</p> : null}
               {analysis.error_message ? <div className="error">{analysis.error_message}</div> : null}
               <div className="button-row">
@@ -110,8 +111,8 @@ export default function AnalysisDetailPage() {
               </div>
             </section>
             <section className="panel stack">
-              <h2>Structured Output</h2>
-              <pre className="text-preview">{JSON.stringify(analysis.structured_output ?? {}, null, 2)}</pre>
+              <h2>Gate Challenger</h2>
+              <MainAnalysisOutput output={analysis.structured_output} />
             </section>
             {analysis.predicted_comment_run ? (
               <section className="panel stack">
@@ -127,6 +128,26 @@ export default function AnalysisDetailPage() {
                 </div>
                 {analysis.predicted_comment_run.error_message ? (
                   <div className="error">{analysis.predicted_comment_run.error_message}</div>
+                ) : null}
+                {analysis.predicted_comment_run.source_trace || analysis.predicted_comment_run.retrieval_trace ? (
+                  <div className="meta-grid">
+                    <TraceItem
+                      label="DA source"
+                      value={analysis.predicted_comment_run.source_trace?.source_slug}
+                    />
+                    <TraceItem
+                      label="DA snapshot"
+                      value={shortHash(analysis.predicted_comment_run.source_trace?.source_snapshot_id)}
+                    />
+                    <TraceItem
+                      label="Retrieval"
+                      value={analysis.predicted_comment_run.retrieval_trace?.retrieval_mode}
+                    />
+                    <TraceItem
+                      label="Corpus"
+                      value={shortHash(analysis.predicted_comment_run.retrieval_trace?.corpus_fingerprint)}
+                    />
+                  </div>
                 ) : null}
                 <PredictedCommentsOutput output={analysis.predicted_comment_run.structured_output} />
                 {analysis.predicted_comment_run.raw_output ? (
@@ -183,16 +204,71 @@ export default function AnalysisDetailPage() {
   );
 }
 
+function TraceItem({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <div>
+      <div className="muted small">{label}</div>
+      <strong>{value || "n/a"}</strong>
+    </div>
+  );
+}
+
+function shortHash(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  return value.length > 16 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
+}
+
+function MainAnalysisOutput({ output }: { output: Record<string, unknown> | null }) {
+  if (!output) {
+    return <p className="muted">No Gate Challenger output yet.</p>;
+  }
+
+  const assessment = asString(output.assessment_markdown);
+  const layer1 = asString(output.layer_1_markdown);
+  const layer2 = asString(output.layer_2_markdown);
+  const hasNativeGateOutput = Boolean(assessment || layer1 || layer2);
+
+  return (
+    <div className="stack">
+      {assessment ? <pre className="text-preview narrative-output">{assessment}</pre> : null}
+      {layer1 ? <pre className="text-preview narrative-output">{layer1}</pre> : null}
+      {layer2 ? <pre className="text-preview narrative-output">{layer2}</pre> : null}
+      {hasNativeGateOutput ? (
+        <details>
+          <summary>Structured Gate Challenger JSON</summary>
+          <pre className="text-preview">{JSON.stringify(output, null, 2)}</pre>
+        </details>
+      ) : (
+        <pre className="text-preview">{JSON.stringify(output, null, 2)}</pre>
+      )}
+    </div>
+  );
+}
+
 function PredictedCommentsOutput({ output }: { output: Record<string, unknown> | null }) {
   if (!output) {
     return <p className="muted">No predicted comments output yet.</p>;
   }
 
+  const nativeMarkdown = asString(output.native_markdown);
   const icDecision = asRecord(output.ic_decision);
   const trailer = asRecord(output.trailer);
-  const anchoredComments = asRecordArray(output.anchored_comments) as AnchoredComment[];
   const predictedQuestions = asStringArray(output.predicted_questions);
   const consultedPages = asStringArray(output.consulted_wiki_pages);
+
+  if (nativeMarkdown) {
+    return (
+      <div className="stack">
+        <pre className="text-preview narrative-output">{nativeMarkdown}</pre>
+        <details>
+          <summary>Structured Devil&apos;s Advocate JSON</summary>
+          <pre className="text-preview">{JSON.stringify(output, null, 2)}</pre>
+        </details>
+      </div>
+    );
+  }
 
   return (
     <div className="stack">
@@ -210,26 +286,6 @@ function PredictedCommentsOutput({ output }: { output: Record<string, unknown> |
       ) : null}
       {icDecision?.rationale ? <p>{asString(icDecision.rationale)}</p> : null}
       {trailer?.executive_summary ? <p>{asString(trailer.executive_summary)}</p> : null}
-      {anchoredComments.length ? (
-        <table>
-          <thead>
-            <tr>
-              <th>Anchor</th>
-              <th>Comment</th>
-              <th>Severity</th>
-            </tr>
-          </thead>
-          <tbody>
-            {anchoredComments.map((comment, index) => (
-              <tr key={comment.id ?? index}>
-                <td>{comment.anchor ?? "-"}</td>
-                <td>{comment.comment ?? "-"}</td>
-                <td>{formatLabel(comment.severity)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : null}
       {predictedQuestions.length ? (
         <div>
           <h3>Predicted Questions</h3>
@@ -251,10 +307,6 @@ function PredictedCommentsOutput({ output }: { output: Record<string, unknown> |
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function asRecordArray(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value) ? value.filter((item) => asRecord(item)) as Record<string, unknown>[] : [];
 }
 
 function asStringArray(value: unknown): string[] {

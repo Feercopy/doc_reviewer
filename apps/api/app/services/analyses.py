@@ -8,8 +8,9 @@ from app.core.config import get_settings
 from app.models.analysis import Analysis, PredictedCommentRun
 from app.models.document import Document
 from app.models.skill import Skill
+from app.models.skill_source import SkillSource
 from app.models.user import User
-from app.schemas.analyses import AnalysisRead, PredictedCommentRunRead
+from app.schemas.analyses import AnalysisRead, PredictedCommentRunRead, RetrievalTrace, SourceTrace
 from app.schemas.enums import (
     GATE_CHALLENGER_DOCUMENT_TYPES,
     DocumentParseStatus,
@@ -20,9 +21,12 @@ from app.schemas.enums import (
     SkillType,
 )
 from app.services.documents import DocumentNotFoundError, get_document_for_actor
+from app.services.external_sources import SourceUnavailableError
 from app.services.provider_keys import get_provider_key
+from app.services.skill_snapshots import create_skill_source_snapshot
 from app.services.skills import skill_source_snapshot
 from app.services.audit import record_audit
+from app.storage.local import LocalDocumentStorage
 
 
 class AnalysisNotFoundError(ValueError):
@@ -71,9 +75,18 @@ def create_analysis_for_document(
         provider=provider.value,
         model=model,
         status=RunStatus.QUEUED.value,
-        run_parameters=merged_parameters,
+        run_parameters={},
     )
     db.add(analysis)
+    db.flush()
+
+    _attach_source_snapshot(
+        db=db,
+        analysis=analysis,
+        skill=skill,
+        run_parameters=merged_parameters,
+    )
+    analysis.run_parameters = merged_parameters
     record_audit(
         db=db,
         actor_id=actor.id,
@@ -91,6 +104,49 @@ def create_analysis_for_document(
     db.commit()
     db.refresh(analysis)
     return analysis
+
+
+def _attach_source_snapshot(
+    *,
+    db: Session,
+    analysis: Analysis,
+    skill: Skill,
+    run_parameters: dict,
+) -> None:
+    if not skill.skill_source_id or skill.runtime_mode != "snapshot_required":
+        return
+    source = db.get(SkillSource, skill.skill_source_id)
+    if source is None:
+        raise AnalysisPreconditionError("Skill source is not configured")
+    snapshot_mode = run_parameters.get("snapshot_mode", "production_latest")
+    storage = LocalDocumentStorage(get_settings().storage_root)
+    try:
+        snapshot = create_skill_source_snapshot(
+            db=db,
+            storage=storage,
+            source=source,
+            analysis_id=analysis.id,
+            predicted_comment_run_id=None,
+            snapshot_mode=snapshot_mode,
+        )
+    except SourceUnavailableError as exc:
+        raise AnalysisPreconditionError(str(exc)) from exc
+
+    run_parameters["source_snapshot_id"] = str(snapshot.id)
+    run_parameters["source_fingerprint"] = snapshot.source_fingerprint
+    run_parameters["source_revision"] = snapshot.resolved_revision
+    run_parameters["source_snapshot_artifact_path"] = snapshot.artifact_path
+    run_parameters["snapshot_mode"] = snapshot.snapshot_mode
+    run_parameters["skill_source_snapshot"] = {
+        **run_parameters.get("skill_source_snapshot", {}),
+        "id": str(snapshot.id),
+        "source_slug": snapshot.source_slug,
+        "source_revision": snapshot.resolved_revision,
+        "source_fingerprint": snapshot.source_fingerprint,
+        "artifact_path": snapshot.artifact_path,
+        "snapshot_mode": snapshot.snapshot_mode,
+        "is_dirty": snapshot.is_dirty,
+    }
 
 
 def get_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) -> Analysis:
@@ -129,6 +185,7 @@ def read_analysis(*, db: Session, actor: User, analysis: Analysis) -> AnalysisRe
         output_tokens=analysis.output_tokens,
         estimated_cost=analysis.estimated_cost,
         run_parameters=analysis.run_parameters,
+        source_trace=_source_trace(analysis.run_parameters),
         created_at=analysis.created_at,
         started_at=analysis.started_at,
         completed_at=analysis.completed_at,
@@ -191,7 +248,45 @@ def _read_predicted_comment_run(
         output_tokens=predicted_run.output_tokens,
         estimated_cost=predicted_run.estimated_cost,
         run_parameters=predicted_run.run_parameters,
+        source_trace=_source_trace(predicted_run.run_parameters),
+        retrieval_trace=_retrieval_trace(predicted_run.run_parameters),
         created_at=predicted_run.created_at,
         started_at=predicted_run.started_at,
         completed_at=predicted_run.completed_at,
+    )
+
+
+def _source_trace(run_parameters: dict | None) -> SourceTrace | None:
+    parameters = run_parameters or {}
+    snapshot = parameters.get("skill_source_snapshot") or {}
+    snapshot_id = parameters.get("source_snapshot_id") or parameters.get("skill_source_snapshot_id") or snapshot.get("id")
+    source_fingerprint = parameters.get("source_fingerprint") or snapshot.get("source_fingerprint")
+    if not snapshot_id and not source_fingerprint and not snapshot.get("source_slug"):
+        return None
+    return SourceTrace(
+        source_snapshot_id=snapshot_id,
+        source_slug=snapshot.get("source_slug"),
+        source_revision=parameters.get("source_revision") or snapshot.get("source_revision"),
+        source_fingerprint=source_fingerprint,
+        snapshot_mode=parameters.get("snapshot_mode") or snapshot.get("snapshot_mode"),
+        is_dirty=snapshot.get("is_dirty"),
+        prompt_fingerprint=parameters.get("prompt_fingerprint"),
+        rendered_prompt_artifact_path=parameters.get("rendered_prompt_artifact_path"),
+    )
+
+
+def _retrieval_trace(run_parameters: dict | None) -> RetrievalTrace | None:
+    parameters = run_parameters or {}
+    snapshot = parameters.get("retrieval_snapshot") or {}
+    snapshot_id = parameters.get("retrieval_snapshot_id") or snapshot.get("id")
+    if not snapshot_id and not snapshot.get("corpus_fingerprint"):
+        return None
+    return RetrievalTrace(
+        retrieval_snapshot_id=snapshot_id,
+        retrieval_mode=snapshot.get("retrieval_mode"),
+        retrieval_version=snapshot.get("retrieval_version"),
+        corpus_fingerprint=snapshot.get("corpus_fingerprint"),
+        query_fingerprint=snapshot.get("query_fingerprint"),
+        prompt_fingerprint=parameters.get("prompt_fingerprint"),
+        rendered_prompt_artifact_path=parameters.get("rendered_prompt_artifact_path"),
     )

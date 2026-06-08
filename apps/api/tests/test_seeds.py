@@ -1,4 +1,5 @@
 from app.models.user import User
+from app.models.skill_source import SkillSource
 from app.schemas.enums import DocumentType, Role, UserStatus
 from app.seeds.admin import ensure_admin_user
 from app.seeds.skills import seed_baseline_skills
@@ -41,9 +42,24 @@ def test_seeded_gate_challenger_skill_matches_supported_document_types(db_sessio
     main_skill = next(skill for skill in skills if skill.name == "gate2_challenger_main_analysis")
 
     assert main_skill.source_uri.endswith("/skills/gate-challenger/SKILL.md")
+    assert main_skill.skill_source_id is not None
     assert main_skill.supported_document_types == [
         DocumentType.GATE_2.value,
         DocumentType.STREAM_REVIEW_1.value,
         DocumentType.STREAM_REVIEW_2_PLUS.value,
         DocumentType.GATE_3.value,
     ]
+
+
+def test_seed_baseline_skills_creates_external_source_registry(db_session):
+    skills = seed_baseline_skills(db_session)
+    gate_skill = next(skill for skill in skills if skill.name == "gate2_challenger_main_analysis")
+    devils_skill = next(skill for skill in skills if skill.name == "devils_advocate_predefense")
+
+    sources = {source.slug: source for source in db_session.query(SkillSource).all()}
+
+    assert set(sources) == {"gate-challenger", "devils-advocate"}
+    assert gate_skill.skill_source_id == sources["gate-challenger"].id
+    assert devils_skill.skill_source_id == sources["devils-advocate"].id
+    assert sources["gate-challenger"].entrypoint == "skills/gate-challenger/SKILL.md"
+    assert "wiki-ic/cases" in sources["devils-advocate"].required_paths

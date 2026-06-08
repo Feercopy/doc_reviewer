@@ -56,6 +56,12 @@ export type AnalysisRecord = {
   structured_output: Record<string, unknown> | null;
   raw_output: string | null;
   error_message: string | null;
+  latency_ms: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  estimated_cost: string | null;
+  run_parameters: Record<string, unknown>;
+  source_trace: SourceTrace | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
@@ -79,9 +85,32 @@ export type PredictedCommentRunRecord = {
   output_tokens: number | null;
   estimated_cost: string | null;
   run_parameters: Record<string, unknown>;
+  source_trace: SourceTrace | null;
+  retrieval_trace: RetrievalTrace | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+};
+
+export type SourceTrace = {
+  source_snapshot_id: string | null;
+  source_slug: string | null;
+  source_revision: string | null;
+  source_fingerprint: string | null;
+  snapshot_mode: string | null;
+  is_dirty: boolean | null;
+  prompt_fingerprint: string | null;
+  rendered_prompt_artifact_path: string | null;
+};
+
+export type RetrievalTrace = {
+  retrieval_snapshot_id: string | null;
+  retrieval_mode: string | null;
+  retrieval_version: string | null;
+  corpus_fingerprint: string | null;
+  query_fingerprint: string | null;
+  prompt_fingerprint: string | null;
+  rendered_prompt_artifact_path: string | null;
 };
 
 export type AnalysesListResponse = {

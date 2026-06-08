@@ -58,6 +58,14 @@ Primary plan index:
   benchmark worker scoring/reporting, and etalon/benchmark UI pages.
 - [x] Add deletion workflows for documents, admin-only users, and admin-only
   etalons using reproducibility-preserving soft-delete status.
+- [x] Implement external Gate Challenger and Devil's Advocate runtime snapshots:
+  source registry, immutable source artifacts, DA deterministic retrieval
+  dossier, snapshot-aware worker renderers, prompt fingerprints, and API/UI
+  source/retrieval trace summaries.
+- [x] Lock native output contracts for TRX-SE-style runs: Gate Challenger
+  renders assessment summary followed by strict Layer 1 and Layer 2, and
+  Devil's Advocate renders native `ic-voting-prompt.md` IC voting output before
+  structured JSON details.
 
 ## Phase 1: Skeleton And Data Foundation
 
@@ -230,6 +238,12 @@ Exit criteria:
   Runtime verification is blocked by DNS failures to PyPI, GitHub release
   assets, and npm package installation; Docker daemon setup also depends on
   Colima image download.
+- 2026-06-08: Implemented external skill runtime reproducibility. Gate
+  Challenger and Devil's Advocate external sources are configured as
+  `skill_sources`, snapshotted per run into local artifacts, rendered by workers
+  from immutable snapshots, and exposed through API/UI trace summaries. Devil's
+  Advocate now builds deterministic lexical retrieval dossiers from the
+  snapshotted `wiki-ic` corpus before predicted-comments enqueue.
 - 2026-06-07: Frontend dependencies installed using project-local npm cache.
   `npm --prefix apps/web run test`, `npm --prefix apps/web run build`, and
   `npm --prefix apps/web audit --audit-level=critical` pass after updating
@@ -332,3 +346,9 @@ Exit criteria:
   etalons. Deletes mark rows as `deleted`, preserve artifacts/history, filter
   active user-facing lists, and record `document.deleted`, `user.deleted`, and
   `etalon.deleted` audit events.
+- 2026-06-08: Added local SOCKS5 outbound proxy support for API/worker runtime
+  and Python image builds through `OUTBOUND_PROXY_URL`. Provider adapters now
+  pass proxy-aware HTTP clients for OpenAI-compatible, Anthropic-compatible, and
+  Hermes calls while respecting `NO_PROXY` for local service hosts. Verified
+  worker/API tests, Compose config, Python image build, and worker-container
+  SOCKS availability.

@@ -3,7 +3,17 @@
   "$id": "https://gate-challenger.local/schemas/main-analysis-result.schema.json",
   "title": "MainAnalysisResult",
   "type": "object",
-  "required": ["verdict", "summary", "findings", "checks"],
+  "required": [
+    "verdict",
+    "summary",
+    "assessment_markdown",
+    "findings",
+    "checks",
+    "layer_1_markdown",
+    "layer_1",
+    "layer_2_markdown",
+    "layer_2"
+  ],
   "additionalProperties": false,
   "properties": {
     "verdict": {
@@ -11,6 +21,11 @@
       "enum": ["approve", "approve_with_conditions", "need_evidence", "reject", "unknown"]
     },
     "summary": { "type": "string", "minLength": 1 },
+    "assessment_markdown": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Full reader-facing assessment block. Must start with 'Оценка документа' and follow the TRX-SE summary style."
+    },
     "findings": {
       "type": "array",
       "items": { "$ref": "#/$defs/finding" }
@@ -20,8 +35,35 @@
       "items": { "$ref": "#/$defs/check" }
     },
     "key_findings": { "type": "array", "items": { "type": "string" } },
-    "layer_1": { "type": "array", "items": { "type": "object" } },
-    "layer_2": { "type": "array", "items": { "type": "object" } }
+    "layer_1_markdown": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Reader-facing Layer 1 block in the strict Gate Challenger format."
+    },
+    "layer_1": { "type": "array", "items": { "$ref": "#/$defs/layer_1_item" } },
+    "layer_2_markdown": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Reader-facing Layer 2 block in the strict Gate Challenger format."
+    },
+    "layer_2": { "type": "array", "items": { "$ref": "#/$defs/layer_2_item" } },
+    "layer_3": { "type": "array", "items": { "type": "object" } },
+    "narrative_summary": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "stage_routing": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "approval_scope": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "merged_blockers": {
+      "type": "array",
+      "items": { "type": "object" }
+    }
   },
   "$defs": {
     "finding": {
@@ -43,6 +85,44 @@
         "name": { "type": "string", "minLength": 1 },
         "status": { "type": "string", "enum": ["pass", "partial", "fail", "not_applicable"] },
         "explanation": { "type": "string" }
+      }
+    },
+    "layer_1_item": {
+      "type": "object",
+      "required": ["id", "severity", "title", "issue", "evidence", "impact", "recommendation"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "title": { "type": "string", "minLength": 1 },
+        "issue": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string", "minLength": 1 },
+        "impact": { "type": "string", "minLength": 1 },
+        "recommendation": { "type": "string", "minLength": 1 }
+      }
+    },
+    "layer_2_item": {
+      "type": "object",
+      "required": [
+        "id",
+        "parent_layer_1_id",
+        "severity",
+        "title",
+        "atomic_issue",
+        "evidence",
+        "risk",
+        "recommendation"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "parent_layer_1_id": { "type": "string", "minLength": 1 },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "title": { "type": "string", "minLength": 1 },
+        "atomic_issue": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string", "minLength": 1 },
+        "risk": { "type": "string", "minLength": 1 },
+        "recommendation": { "type": "string", "minLength": 1 }
       }
     }
   }

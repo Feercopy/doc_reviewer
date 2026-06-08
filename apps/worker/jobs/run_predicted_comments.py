@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 from uuid import UUID
@@ -6,6 +7,7 @@ from redis import Redis
 from rq import Queue
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
@@ -17,11 +19,13 @@ from app.models.base import utc_now
 from app.schemas.enums import Provider, RunStatus, SkillSourceType
 from app.security.secrets import decrypt_secret
 from app.services.skill_sources import SkillSourceValidationError, refresh_skill_source_material
+from app.storage.local import LocalDocumentStorage
 from providers.base import ProviderRunRequest
 from providers.registry import get_provider_adapter
 from results.schema_validation import parse_and_validate_json_output
 from skills.devils_advocate_renderer import render_devils_advocate_prompt
 from skills.prompt_renderer import render_prompt
+from skills.snapshot_loader import load_retrieval_snapshot, load_skill_source_snapshot
 
 
 ANALYSIS_QUEUE_NAME = "analysis"
@@ -69,10 +73,13 @@ def run_predicted_comments(predicted_comment_run_id: str, *, db: Session | None 
         api_key = decrypt_secret(provider_key.encrypted_api_key) if provider_key else None
 
         schema = json.loads(_resolve_schema_path(skill.result_schema_path).read_text(encoding="utf-8"))
-        prompt = (
-            render_devils_advocate_prompt(document=document, analysis=analysis, skill=skill, response_schema=schema)
-            if skill.name == "devils_advocate_predefense"
-            else render_prompt(document=document, skill=skill, response_schema=schema)
+        prompt = _render_and_persist_prompt(
+            session=session,
+            predicted_run=predicted_run,
+            document=document,
+            analysis=analysis,
+            skill=skill,
+            schema=schema,
         )
         request = ProviderRunRequest(
             provider=provider,
@@ -124,8 +131,61 @@ def _resolve_schema_path(schema_path: str) -> Path:
     return Path(__file__).resolve().parents[3] / schema_path
 
 
+def _render_and_persist_prompt(
+    *,
+    session: Session,
+    predicted_run: PredictedCommentRun,
+    document: Document,
+    analysis: Analysis,
+    skill: Skill,
+    schema: dict,
+) -> str:
+    run_parameters = predicted_run.run_parameters or {}
+    if skill.name == "devils_advocate_predefense":
+        source_snapshot, retrieval_snapshot = _load_devils_snapshots(skill=skill, run_parameters=run_parameters)
+        prompt = render_devils_advocate_prompt(
+            document=document,
+            analysis=analysis,
+            skill=skill,
+            response_schema=schema,
+            source_snapshot=source_snapshot,
+            retrieval_snapshot=retrieval_snapshot,
+        )
+    else:
+        prompt = render_prompt(document=document, skill=skill, response_schema=schema, run_parameters=run_parameters)
+
+    storage = LocalDocumentStorage(get_settings().storage_root)
+    prompt_path = storage.save_rendered_prompt(analysis_id=predicted_run.id, prompt=prompt)
+    updated_parameters = dict(run_parameters)
+    updated_parameters["rendered_prompt_artifact_path"] = str(prompt_path)
+    updated_parameters["prompt_fingerprint"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    predicted_run.run_parameters = updated_parameters
+    flag_modified(predicted_run, "run_parameters")
+    session.commit()
+    return prompt
+
+
+def _load_devils_snapshots(*, skill: Skill, run_parameters: dict):
+    skill_snapshot = run_parameters.get("skill_source_snapshot") or {}
+    retrieval_snapshot = run_parameters.get("retrieval_snapshot") or {}
+    source_artifact_path = run_parameters.get("skill_source_snapshot_artifact_path") or skill_snapshot.get("artifact_path")
+    retrieval_artifact_path = run_parameters.get("retrieval_snapshot_artifact_path") or retrieval_snapshot.get("artifact_path")
+    requires_snapshot = bool(skill.skill_source_id) and skill.runtime_mode == "snapshot_required"
+    if not source_artifact_path:
+        if requires_snapshot:
+            raise RuntimeError("source_snapshot_required")
+        return None, None
+    if not retrieval_artifact_path and requires_snapshot:
+        raise RuntimeError("retrieval_snapshot_missing")
+    source_snapshot_material = load_skill_source_snapshot(str(source_artifact_path))
+    retrieval_snapshot_material = load_retrieval_snapshot(str(retrieval_artifact_path)) if retrieval_artifact_path else None
+    return source_snapshot_material, retrieval_snapshot_material
+
+
 def _validate_skill_source_available(*, skill: Skill, snapshot: dict | None) -> None:
     if not snapshot:
+        return
+    if snapshot.get("id") or snapshot.get("artifact_path"):
         return
     source_type = snapshot.get("source_type") or skill.source_type
     if source_type == SkillSourceType.INLINE_PROMPT.value:

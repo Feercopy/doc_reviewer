@@ -1,4 +1,5 @@
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 
@@ -7,11 +8,37 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models.skill import Skill
+from app.models.skill_source import SkillSource
 from app.schemas.enums import GATE_CHALLENGER_DOCUMENT_TYPES, DocumentType, EntityStatus, SkillSourceType, SkillType
 
-GATE_CHALLENGER_SKILL_PATH = Path("/Users/iseremenko/Projects/Gate2-challenger/skills/gate-challenger/SKILL.md")
-DEVILS_ADVOCATE_PATH = Path("/Users/iseremenko/Documents/Common GPTs/devils-advocate/ic-voting-prompt.md")
-DEVILS_ADVOCATE_WIKI_PATH = Path("/Users/iseremenko/Documents/Common GPTs/devils-advocate/wiki-ic")
+GATE_CHALLENGER_SOURCE_PATH = Path(
+    os.getenv("GATE_CHALLENGER_SOURCE_PATH", "/Users/iseremenko/Projects/Gate2-challenger")
+)
+DEVILS_ADVOCATE_SOURCE_PATH = Path(
+    os.getenv("DEVILS_ADVOCATE_SOURCE_PATH", "/Users/iseremenko/Documents/Common GPTs/devils-advocate")
+)
+GATE_CHALLENGER_ENTRYPOINT = "skills/gate-challenger/SKILL.md"
+DEVILS_ADVOCATE_ENTRYPOINT = "ic-voting-prompt.md"
+GATE_CHALLENGER_SKILL_PATH = GATE_CHALLENGER_SOURCE_PATH / GATE_CHALLENGER_ENTRYPOINT
+DEVILS_ADVOCATE_PATH = DEVILS_ADVOCATE_SOURCE_PATH / DEVILS_ADVOCATE_ENTRYPOINT
+DEVILS_ADVOCATE_WIKI_PATH = DEVILS_ADVOCATE_SOURCE_PATH / "wiki-ic"
+GATE_CHALLENGER_REQUIRED_PATHS = [
+    GATE_CHALLENGER_ENTRYPOINT,
+    "skills/gate-challenger/references",
+]
+DEVILS_ADVOCATE_REQUIRED_PATHS = [
+    DEVILS_ADVOCATE_ENTRYPOINT,
+    "workflow-ic-cases.md",
+    "wiki-ic/CLAUDE.md",
+    "wiki-ic/schema.md",
+    "wiki-ic/meta/output-format.md",
+    "wiki-ic/cases",
+    "wiki-ic/patterns",
+    "wiki-ic/heuristics",
+    "wiki-ic/domains",
+    "wiki-ic/personas",
+    "wiki-ic/eval",
+]
 
 
 def _fingerprint_path(path: Path) -> str | None:
@@ -63,11 +90,53 @@ def _upsert_skill(db: Session, values: dict) -> Skill:
     return skill
 
 
+def _upsert_skill_source(db: Session, values: dict) -> SkillSource:
+    source = db.execute(select(SkillSource).where(SkillSource.slug == values["slug"])).scalar_one_or_none()
+    if source is None:
+        source = SkillSource(**values)
+        db.add(source)
+        db.flush()
+    else:
+        for key, value in values.items():
+            setattr(source, key, value)
+    return source
+
+
 def seed_baseline_skills(db: Session) -> list[Skill]:
     gate_challenger_fingerprint = _fingerprint_path(GATE_CHALLENGER_SKILL_PATH)
     devils_fingerprint = _fingerprint_path(DEVILS_ADVOCATE_PATH)
     wiki_fingerprint = _fingerprint_path(DEVILS_ADVOCATE_WIKI_PATH)
     gate_challenger_document_types = [item.value for item in GATE_CHALLENGER_DOCUMENT_TYPES]
+    gate_source = _upsert_skill_source(
+        db,
+        {
+            "slug": "gate-challenger",
+            "display_name": "Gate Challenger",
+            "source_kind": "local_git_repo",
+            "local_path": str(GATE_CHALLENGER_SOURCE_PATH),
+            "repo_url": None,
+            "default_ref": "main",
+            "entrypoint": GATE_CHALLENGER_ENTRYPOINT,
+            "required_paths": GATE_CHALLENGER_REQUIRED_PATHS,
+            "update_policy": "require_latest",
+            "status": EntityStatus.ACTIVE.value,
+        },
+    )
+    devils_source = _upsert_skill_source(
+        db,
+        {
+            "slug": "devils-advocate",
+            "display_name": "Devil's Advocate",
+            "source_kind": "local_git_repo",
+            "local_path": str(DEVILS_ADVOCATE_SOURCE_PATH),
+            "repo_url": None,
+            "default_ref": "main",
+            "entrypoint": DEVILS_ADVOCATE_ENTRYPOINT,
+            "required_paths": DEVILS_ADVOCATE_REQUIRED_PATHS,
+            "update_policy": "require_latest",
+            "status": EntityStatus.ACTIVE.value,
+        },
+    )
 
     skills = [
         {
@@ -77,6 +146,7 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "skill_type": SkillType.MAIN_ANALYSIS.value,
             "supported_document_types": gate_challenger_document_types,
             "source_type": SkillSourceType.LOCAL_SKILL_REPO.value,
+            "skill_source_id": gate_source.id,
             "source_uri": str(GATE_CHALLENGER_SKILL_PATH),
             "source_entrypoint": "SKILL.md",
             "source_revision": _git_revision(GATE_CHALLENGER_SKILL_PATH),
@@ -87,6 +157,7 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
                 "Gate Challenger main analysis baseline prompt.",
             ),
             "result_schema_path": "contracts/schemas/main-analysis-result.schema.json",
+            "runtime_mode": "snapshot_required",
             "status": EntityStatus.ACTIVE.value,
         },
         {
@@ -96,6 +167,7 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "skill_type": SkillType.PREDICTED_COMMENTS.value,
             "supported_document_types": gate_challenger_document_types,
             "source_type": SkillSourceType.LOCAL_KNOWLEDGE_BASE.value,
+            "skill_source_id": devils_source.id,
             "source_uri": str(DEVILS_ADVOCATE_PATH),
             "source_entrypoint": "ic-voting-prompt.md",
             "source_revision": _git_revision(DEVILS_ADVOCATE_PATH),
@@ -103,6 +175,7 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "source_metadata": {"wiki_path": str(DEVILS_ADVOCATE_WIKI_PATH), "wiki_fingerprint": wiki_fingerprint},
             "prompt_text": _read_prompt(DEVILS_ADVOCATE_PATH, "Devil's Advocate pre-defense baseline prompt."),
             "result_schema_path": "contracts/schemas/devils-advocate-result.schema.json",
+            "runtime_mode": "snapshot_required",
             "status": EntityStatus.ACTIVE.value,
         },
         {
@@ -119,6 +192,7 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "source_metadata": {},
             "prompt_text": "Predict likely committee questions with cited anchors.",
             "result_schema_path": "contracts/schemas/predicted-comments-result.schema.json",
+            "runtime_mode": "inline",
             "status": EntityStatus.ACTIVE.value,
         },
         {
@@ -135,6 +209,7 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "source_metadata": {},
             "prompt_text": "Compare analysis output with an etalon and calculate precision, recall, and F1.",
             "result_schema_path": "contracts/schemas/benchmark-judge-result.schema.json",
+            "runtime_mode": "inline",
             "status": EntityStatus.ACTIVE.value,
         },
         {
@@ -151,6 +226,7 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "source_metadata": {},
             "prompt_text": "Classify the document into the supported Gate Challenger document type enum.",
             "result_schema_path": "contracts/schemas/main-analysis-result.schema.json",
+            "runtime_mode": "inline",
             "status": EntityStatus.ACTIVE.value,
         },
     ]

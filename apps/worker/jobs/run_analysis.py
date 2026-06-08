@@ -1,22 +1,29 @@
+import hashlib
 import json
 from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
+from app.core.config import get_settings
 from app.logging import worker_logger
 from app.models.analysis import Analysis, PredictedCommentRun
 from app.models.document import Document
 from app.models.provider_key import ProviderKey
 from app.models.skill import Skill
+from app.models.skill_source import SkillSource
 from app.models.base import utc_now
 from app.schemas.enums import EntityStatus, Provider, RunStatus, SkillSourceType, SkillType
 from app.security.secrets import decrypt_secret
 from app.services.audit import record_audit
+from app.services.devils_retrieval import create_devils_retrieval_snapshot
+from app.services.skill_snapshots import create_skill_source_snapshot
 from app.services.skill_sources import SkillSourceValidationError, refresh_skill_source_material
 from app.services.skills import skill_source_snapshot
+from app.storage.local import LocalDocumentStorage
 from jobs.run_predicted_comments import enqueue_run_predicted_comments
 from providers.base import ProviderRunRequest
 from providers.registry import get_provider_adapter
@@ -55,12 +62,13 @@ def run_analysis(analysis_id: str, *, db: Session | None = None, enqueue_predict
         api_key = decrypt_secret(provider_key.encrypted_api_key) if provider_key else None
 
         schema = json.loads(_resolve_schema_path(skill.result_schema_path).read_text(encoding="utf-8"))
+        prompt = _render_and_persist_prompt(session=session, analysis=analysis, document=document, skill=skill, schema=schema)
         request = ProviderRunRequest(
             provider=provider,
             model=analysis.model,
             api_key=api_key,
             base_url=provider_key.base_url if provider_key else None,
-            prompt=render_prompt(document=document, skill=skill, response_schema=schema),
+            prompt=prompt,
             response_schema=schema,
             run_parameters=analysis.run_parameters,
         )
@@ -156,8 +164,35 @@ def _resolve_schema_path(schema_path: str) -> Path:
     return Path(__file__).resolve().parents[3] / schema_path
 
 
+def _render_and_persist_prompt(
+    *,
+    session: Session,
+    analysis: Analysis,
+    document: Document,
+    skill: Skill,
+    schema: dict,
+) -> str:
+    prompt = render_prompt(
+        document=document,
+        skill=skill,
+        response_schema=schema,
+        run_parameters=analysis.run_parameters,
+    )
+    storage = LocalDocumentStorage(get_settings().storage_root)
+    prompt_path = storage.save_rendered_prompt(analysis_id=analysis.id, prompt=prompt)
+    run_parameters = dict(analysis.run_parameters or {})
+    run_parameters["rendered_prompt_artifact_path"] = str(prompt_path)
+    run_parameters["prompt_fingerprint"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    analysis.run_parameters = run_parameters
+    flag_modified(analysis, "run_parameters")
+    session.commit()
+    return prompt
+
+
 def _validate_skill_source_available(*, skill: Skill, snapshot: dict | None) -> None:
     if not snapshot:
+        return
+    if snapshot.get("id") or snapshot.get("artifact_path"):
         return
     source_type = snapshot.get("source_type") or skill.source_type
     if source_type == SkillSourceType.INLINE_PROMPT.value:
@@ -198,6 +233,17 @@ def _create_and_enqueue_predicted_comments(*, session: Session, analysis: Analys
             run_parameters=run_parameters,
         )
         session.add(predicted_run)
+        session.flush()
+        _attach_predicted_comment_snapshots(
+            session=session,
+            predicted_run=predicted_run,
+            skill=skill,
+            document=document,
+            analysis=analysis,
+            run_parameters=run_parameters,
+        )
+        predicted_run.run_parameters = dict(run_parameters)
+        flag_modified(predicted_run, "run_parameters")
         session.commit()
         predicted_run_id = predicted_run.id
         try:
@@ -232,6 +278,64 @@ def _create_and_enqueue_predicted_comments(*, session: Session, analysis: Analys
         )
         session.add(failed_run)
         session.commit()
+
+
+def _attach_predicted_comment_snapshots(
+    *,
+    session: Session,
+    predicted_run: PredictedCommentRun,
+    skill: Skill,
+    document: Document,
+    analysis: Analysis,
+    run_parameters: dict,
+) -> None:
+    if not skill.skill_source_id or skill.runtime_mode != "snapshot_required":
+        return
+    source = session.get(SkillSource, skill.skill_source_id)
+    if source is None:
+        raise RuntimeError("skill_source_missing")
+    storage = LocalDocumentStorage(get_settings().storage_root)
+    snapshot_mode = run_parameters.get("snapshot_mode", "production_latest")
+    source_snapshot = create_skill_source_snapshot(
+        db=session,
+        storage=storage,
+        source=source,
+        analysis_id=None,
+        predicted_comment_run_id=predicted_run.id,
+        snapshot_mode=snapshot_mode,
+    )
+    retrieval_snapshot = create_devils_retrieval_snapshot(
+        db=session,
+        storage=storage,
+        source_snapshot=source_snapshot,
+        predicted_run=predicted_run,
+        document=document,
+        analysis=analysis,
+    )
+    analysis_run_parameters = analysis.run_parameters or {}
+    base_skill_snapshot = run_parameters.get("skill_source_snapshot") or {}
+    run_parameters["main_analysis_source_snapshot_id"] = analysis_run_parameters.get("source_snapshot_id")
+    run_parameters["skill_source_snapshot_id"] = str(source_snapshot.id)
+    run_parameters["retrieval_snapshot_id"] = str(retrieval_snapshot.id)
+    run_parameters["skill_source_snapshot"] = {
+        **base_skill_snapshot,
+        "id": str(source_snapshot.id),
+        "source_slug": source_snapshot.source_slug,
+        "source_revision": source_snapshot.resolved_revision,
+        "source_fingerprint": source_snapshot.source_fingerprint,
+        "artifact_path": source_snapshot.artifact_path,
+        "snapshot_mode": source_snapshot.snapshot_mode,
+        "is_dirty": source_snapshot.is_dirty,
+    }
+    run_parameters["retrieval_snapshot"] = {
+        "id": str(retrieval_snapshot.id),
+        "artifact_path": retrieval_snapshot.artifact_path,
+        "retrieval_mode": retrieval_snapshot.retrieval_mode,
+        "retrieval_version": retrieval_snapshot.retrieval_version,
+        "corpus_fingerprint": retrieval_snapshot.corpus_fingerprint,
+        "query_fingerprint": retrieval_snapshot.query_fingerprint,
+        "selected_items": retrieval_snapshot.selected_items,
+    }
 
 
 def _resolve_predicted_comments_skill(*, session: Session, document: Document) -> Skill | None:

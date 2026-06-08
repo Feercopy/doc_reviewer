@@ -30,6 +30,19 @@ class Settings(BaseSettings):
         default="http://127.0.0.1:8787",
         alias="HERMES_HTTP_URL",
     )
+    outbound_proxy_url: str | None = Field(default=None, alias="OUTBOUND_PROXY_URL")
+    no_proxy: str = Field(
+        default="localhost,127.0.0.1,::1,postgres,redis,api,worker,web",
+        alias="NO_PROXY",
+    )
+    gate_challenger_source_path: str = Field(
+        default="/external/gate-challenger",
+        alias="GATE_CHALLENGER_SOURCE_PATH",
+    )
+    devils_advocate_source_path: str = Field(
+        default="/external/devils-advocate",
+        alias="DEVILS_ADVOCATE_SOURCE_PATH",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

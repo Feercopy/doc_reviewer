@@ -2,6 +2,7 @@ import time
 from collections.abc import Callable
 
 from providers.base import AnalysisProviderResult, ProviderAdapter, ProviderRunRequest
+from providers.proxy import outbound_proxy_kwargs
 
 
 class OpenAICompatibleAdapter(ProviderAdapter):
@@ -18,7 +19,7 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             "json_schema": {
                 "name": "analysis_result",
                 "schema": request.response_schema,
-                "strict": True,
+                "strict": bool(request.run_parameters.get("json_schema_strict", False)),
             },
         }
         kwargs = {
@@ -49,11 +50,14 @@ class OpenAICompatibleAdapter(ProviderAdapter):
 
     @staticmethod
     def _default_client_factory(*, api_key: str, base_url: str | None) -> object:
-        from openai import OpenAI
+        from openai import DefaultHttpxClient, OpenAI
 
-        kwargs: dict[str, str] = {"api_key": api_key}
+        kwargs: dict[str, object] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
+        proxy_kwargs = outbound_proxy_kwargs(base_url)
+        if proxy_kwargs:
+            kwargs["http_client"] = DefaultHttpxClient(**proxy_kwargs)
         return OpenAI(**kwargs)
 
 

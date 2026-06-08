@@ -2,6 +2,7 @@ import time
 from collections.abc import Callable
 
 from providers.base import AnalysisProviderResult, ProviderAdapter, ProviderRunRequest
+from providers.proxy import outbound_proxy_kwargs
 
 
 class AnthropicCompatibleAdapter(ProviderAdapter):
@@ -37,11 +38,14 @@ class AnthropicCompatibleAdapter(ProviderAdapter):
 
     @staticmethod
     def _default_client_factory(*, api_key: str, base_url: str | None) -> object:
-        from anthropic import Anthropic
+        from anthropic import Anthropic, DefaultHttpxClient
 
-        kwargs: dict[str, str] = {"api_key": api_key}
+        kwargs: dict[str, object] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
+        proxy_kwargs = outbound_proxy_kwargs(base_url)
+        if proxy_kwargs:
+            kwargs["http_client"] = DefaultHttpxClient(**proxy_kwargs)
         return Anthropic(**kwargs)
 
 

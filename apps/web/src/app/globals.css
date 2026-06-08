@@ -255,6 +255,10 @@ th {
   font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+.narrative-output {
+  max-height: none;
+}
+
 .checkbox-label {
   grid-template-columns: auto 1fr;
   align-items: center;

@@ -31,6 +31,10 @@ services:
       dockerfile: apps/api/Dockerfile
       args:
         PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-mirror.gcr.io/library/python:3.12-slim}
+        HTTP_PROXY: ${OUTBOUND_PROXY_URL:-}
+        HTTPS_PROXY: ${OUTBOUND_PROXY_URL:-}
+        ALL_PROXY: ${OUTBOUND_PROXY_URL:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
     environment:
       APP_ENV: development
       APP_SECRET_KEY: ${APP_SECRET_KEY:-replace-with-32-byte-random-value}
@@ -41,10 +45,23 @@ services:
       HERMES_ENABLED: "false"
       HERMES_MODE: http
       HERMES_HTTP_URL: http://127.0.0.1:8787
+      GATE_CHALLENGER_SOURCE_PATH: /external/gate-challenger
+      DEVILS_ADVOCATE_SOURCE_PATH: /external/devils-advocate
+      OUTBOUND_PROXY_URL: ${OUTBOUND_PROXY_URL:-}
+      ALL_PROXY: ${OUTBOUND_PROXY_URL:-}
+      HTTP_PROXY: ${OUTBOUND_PROXY_URL:-}
+      HTTPS_PROXY: ${OUTBOUND_PROXY_URL:-}
+      all_proxy: ${OUTBOUND_PROXY_URL:-}
+      http_proxy: ${OUTBOUND_PROXY_URL:-}
+      https_proxy: ${OUTBOUND_PROXY_URL:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
     ports:
       - "8000:8000"
     volumes:
       - storage_data:/var/lib/gate-challenger/storage
+      - "${GATE_CHALLENGER_HOST_PATH:-/Users/iseremenko/Projects/Gate2-challenger}:/external/gate-challenger:ro"
+      - "${DEVILS_ADVOCATE_HOST_PATH:-/Users/iseremenko/Documents/Common GPTs/devils-advocate}:/external/devils-advocate:ro"
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,6 +74,10 @@ services:
       dockerfile: apps/worker/Dockerfile
       args:
         PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-mirror.gcr.io/library/python:3.12-slim}
+        HTTP_PROXY: ${OUTBOUND_PROXY_URL:-}
+        HTTPS_PROXY: ${OUTBOUND_PROXY_URL:-}
+        ALL_PROXY: ${OUTBOUND_PROXY_URL:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
     environment:
       APP_ENV: development
       APP_SECRET_KEY: ${APP_SECRET_KEY:-replace-with-32-byte-random-value}
@@ -66,8 +87,21 @@ services:
       HERMES_ENABLED: "false"
       HERMES_MODE: http
       HERMES_HTTP_URL: http://127.0.0.1:8787
+      GATE_CHALLENGER_SOURCE_PATH: /external/gate-challenger
+      DEVILS_ADVOCATE_SOURCE_PATH: /external/devils-advocate
+      OUTBOUND_PROXY_URL: ${OUTBOUND_PROXY_URL:-}
+      ALL_PROXY: ${OUTBOUND_PROXY_URL:-}
+      HTTP_PROXY: ${OUTBOUND_PROXY_URL:-}
+      HTTPS_PROXY: ${OUTBOUND_PROXY_URL:-}
+      all_proxy: ${OUTBOUND_PROXY_URL:-}
+      http_proxy: ${OUTBOUND_PROXY_URL:-}
+      https_proxy: ${OUTBOUND_PROXY_URL:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
     volumes:
       - storage_data:/var/lib/gate-challenger/storage
+      - "${GATE_CHALLENGER_HOST_PATH:-/Users/iseremenko/Projects/Gate2-challenger}:/external/gate-challenger:ro"
+      - "${DEVILS_ADVOCATE_HOST_PATH:-/Users/iseremenko/Documents/Common GPTs/devils-advocate}:/external/devils-advocate:ro"
     depends_on:
       postgres:
         condition: service_healthy

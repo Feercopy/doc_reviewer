@@ -1,3 +1,4 @@
+import json
 from uuid import UUID
 
 from app.main import app
@@ -33,7 +34,7 @@ def test_admin_can_create_queued_benchmark_over_active_etalons(client, db_sessio
                 "evaluation_mode": "layer_1_and_layer_2",
                 "run_parameters": {
                     "mock_provider_result": {
-                        "structured_text": '{"verdict":"need_evidence","summary":"Needs evidence.","findings":[],"checks":[]}',
+                        "structured_text": _main_analysis_json(),
                         "raw_output": "raw analysis",
                         "latency_ms": 1,
                     },
@@ -94,6 +95,43 @@ def test_non_admin_cannot_manage_benchmarks(client, db_session):
     response = client.get("/benchmarks")
 
     assert response.status_code == 403
+
+
+def _main_analysis_json() -> str:
+    return json.dumps(
+        {
+            "verdict": "need_evidence",
+            "summary": "Needs evidence.",
+            "assessment_markdown": "Оценка документа\nРекомендация: Needs evidence.",
+            "findings": [],
+            "checks": [],
+            "layer_1_markdown": "Layer 1\nL1-001 — Weak traction.",
+            "layer_1": [
+                {
+                    "id": "L1-001",
+                    "severity": "critical",
+                    "title": "Weak traction",
+                    "issue": "The document does not prove traction readiness.",
+                    "evidence": "The mock document omits incrementality proof.",
+                    "impact": "Committee cannot approve the ask as-is.",
+                    "recommendation": "Add proof before approval.",
+                }
+            ],
+            "layer_2_markdown": "Layer 2\nL2-001 — No incrementality evidence.",
+            "layer_2": [
+                {
+                    "id": "L2-001",
+                    "parent_layer_1_id": "L1-001",
+                    "severity": "high",
+                    "title": "No incrementality evidence",
+                    "atomic_issue": "The metric uplift is not separated from baseline effects.",
+                    "evidence": "No control group or holdout is shown.",
+                    "risk": "The output can overstate readiness.",
+                    "recommendation": "Provide experiment or holdout evidence.",
+                }
+            ],
+        }
+    )
 
 
 def _create_etalon(client, db_session, user, status: EtalonStatus) -> Etalon:

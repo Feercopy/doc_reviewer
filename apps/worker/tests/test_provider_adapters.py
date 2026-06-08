@@ -38,6 +38,71 @@ def test_openai_compatible_adapter_normalizes_chat_completion():
     assert result.output_tokens == 22
 
 
+def test_openai_compatible_adapter_uses_non_strict_schema_for_optional_contract_fields():
+    captured = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"summary":"ok"}'))],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=2),
+                model_dump_json=lambda: '{"raw":true}',
+            )
+
+    class FakeClient:
+        chat = SimpleNamespace(completions=FakeCompletions())
+
+    schema_with_optional_field = {
+        "type": "object",
+        "required": ["name", "status"],
+        "properties": {
+            "name": {"type": "string"},
+            "status": {"type": "string"},
+            "explanation": {"type": "string"},
+        },
+    }
+    request = _request(
+        Provider.OPENAI_COMPATIBLE,
+        api_key="sk-test",
+        base_url="https://openrouter.ai/api/v1",
+        response_schema=schema_with_optional_field,
+    )
+
+    OpenAICompatibleAdapter(client_factory=lambda **_: FakeClient()).run(request)
+
+    json_schema = captured["response_format"]["json_schema"]
+    assert json_schema["strict"] is False
+    assert json_schema["schema"]["required"] == ["name", "status"]
+    assert "explanation" in json_schema["schema"]["properties"]
+
+
+def test_openai_compatible_adapter_builds_proxy_http_client(monkeypatch):
+    monkeypatch.setenv("OUTBOUND_PROXY_URL", "socks5h://proxy.test:44435")
+    get_settings.cache_clear()
+    captured = {}
+
+    class FakeHttpClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("openai.DefaultHttpxClient", FakeHttpClient)
+    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+
+    OpenAICompatibleAdapter._default_client_factory(api_key="sk-test", base_url="https://openai.test/v1")
+
+    assert captured["base_url"] == "https://openai.test/v1"
+    assert captured["http_client"].kwargs == {
+        "proxy": "socks5h://proxy.test:44435",
+        "trust_env": False,
+    }
+    get_settings.cache_clear()
+
+
 def test_anthropic_compatible_adapter_normalizes_message_response():
     captured = {}
 
@@ -62,6 +127,32 @@ def test_anthropic_compatible_adapter_normalizes_message_response():
     assert result.structured_text == '{"summary":"claude"}'
     assert result.input_tokens == 33
     assert result.output_tokens == 44
+
+
+def test_anthropic_compatible_adapter_builds_proxy_http_client(monkeypatch):
+    monkeypatch.setenv("OUTBOUND_PROXY_URL", "socks5h://proxy.test:44435")
+    get_settings.cache_clear()
+    captured = {}
+
+    class FakeHttpClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeAnthropic:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("anthropic.DefaultHttpxClient", FakeHttpClient)
+    monkeypatch.setattr("anthropic.Anthropic", FakeAnthropic)
+
+    AnthropicCompatibleAdapter._default_client_factory(api_key="anthropic-test", base_url="https://claude.test")
+
+    assert captured["base_url"] == "https://claude.test"
+    assert captured["http_client"].kwargs == {
+        "proxy": "socks5h://proxy.test:44435",
+        "trust_env": False,
+    }
+    get_settings.cache_clear()
 
 
 def test_hermes_adapter_returns_provider_unavailable_when_disabled(monkeypatch):
@@ -106,13 +197,100 @@ def test_hermes_adapter_normalizes_http_response(monkeypatch):
     get_settings.cache_clear()
 
 
-def _request(provider: Provider, *, api_key: str | None, base_url: str | None = None) -> ProviderRunRequest:
+def test_hermes_adapter_builds_proxy_http_client(monkeypatch):
+    monkeypatch.setenv("HERMES_ENABLED", "true")
+    monkeypatch.setenv("OUTBOUND_PROXY_URL", "socks5h://proxy.test:44435")
+    get_settings.cache_clear()
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"structured_text": '{"summary":"hermes"}'}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def post(self, url, **kwargs):
+            captured["url"] = url
+            captured.update(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.Client", FakeClient)
+
+    result = HermesAdapter().run(_request(Provider.HERMES, api_key=None, base_url="http://hermes.test"))
+
+    assert captured["client_kwargs"] == {
+        "timeout": 60,
+        "proxy": "socks5h://proxy.test:44435",
+        "trust_env": False,
+    }
+    assert captured["url"] == "http://hermes.test/v1/analysis"
+    assert result.structured_text == '{"summary":"hermes"}'
+    get_settings.cache_clear()
+
+
+def test_hermes_adapter_skips_proxy_for_no_proxy_host(monkeypatch):
+    monkeypatch.setenv("HERMES_ENABLED", "true")
+    monkeypatch.setenv("OUTBOUND_PROXY_URL", "socks5h://proxy.test:44435")
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    get_settings.cache_clear()
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"structured_text": '{"summary":"local hermes"}'}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def post(self, url, **kwargs):
+            captured["url"] = url
+            captured.update(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.Client", FakeClient)
+
+    result = HermesAdapter().run(_request(Provider.HERMES, api_key=None, base_url="http://127.0.0.1:8787"))
+
+    assert captured["client_kwargs"] == {"timeout": 60}
+    assert captured["url"] == "http://127.0.0.1:8787/v1/analysis"
+    assert result.structured_text == '{"summary":"local hermes"}'
+    get_settings.cache_clear()
+
+
+def _request(
+    provider: Provider,
+    *,
+    api_key: str | None,
+    base_url: str | None = None,
+    response_schema: dict | None = None,
+) -> ProviderRunRequest:
     return ProviderRunRequest(
         provider=provider,
         model="model-test",
         api_key=api_key,
         base_url=base_url,
         prompt="Prompt",
-        response_schema={"type": "object"},
+        response_schema=response_schema or {"type": "object"},
         run_parameters={},
     )

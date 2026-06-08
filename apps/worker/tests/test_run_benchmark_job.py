@@ -1,3 +1,4 @@
+import json
 from io import BytesIO
 from uuid import uuid4
 
@@ -50,7 +51,7 @@ def test_run_benchmark_persists_scores_judge_output_and_report(tmp_path):
             started_by_id=user.id,
             run_parameters={
                 "mock_provider_result": {
-                    "structured_text": '{"verdict":"need_evidence","summary":"Needs evidence.","layer_1":[{"id":"A1"}],"layer_2":[{"id":"A2"}],"findings":[],"checks":[]}',
+                    "structured_text": _main_analysis_json_with_benchmark_ids(),
                     "raw_output": "raw analysis",
                     "latency_ms": 10,
                 },
@@ -76,6 +77,43 @@ def test_run_benchmark_persists_scores_judge_output_and_report(tmp_path):
         assert benchmark.report["overall"]["f1"] == 0.5
     finally:
         _close_session(db)
+
+
+def _main_analysis_json_with_benchmark_ids() -> str:
+    return json.dumps(
+        {
+            "verdict": "need_evidence",
+            "summary": "Needs evidence.",
+            "assessment_markdown": "Оценка документа\nРекомендация: Needs evidence.",
+            "findings": [],
+            "checks": [],
+            "layer_1_markdown": "Layer 1\nA1 — Weak traction.",
+            "layer_1": [
+                {
+                    "id": "A1",
+                    "severity": "critical",
+                    "title": "Weak traction",
+                    "issue": "The document does not prove traction readiness.",
+                    "evidence": "The mock document omits incrementality proof.",
+                    "impact": "Committee cannot approve the ask as-is.",
+                    "recommendation": "Add proof before approval.",
+                }
+            ],
+            "layer_2_markdown": "Layer 2\nA2 — No incrementality evidence.",
+            "layer_2": [
+                {
+                    "id": "A2",
+                    "parent_layer_1_id": "A1",
+                    "severity": "high",
+                    "title": "No incrementality evidence",
+                    "atomic_issue": "The metric uplift is not separated from baseline effects.",
+                    "evidence": "No control group or holdout is shown.",
+                    "risk": "The benchmark should score this as only a partial Layer 2 match.",
+                    "recommendation": "Provide experiment or holdout evidence.",
+                }
+            ],
+        }
+    )
 
 
 def _create_session() -> Session:

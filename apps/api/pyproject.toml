@@ -16,6 +16,7 @@ dependencies = [
   "rq",
   "python-docx",
   "pypdf",
+  "httpx[socks]",
   "anthropic",
   "openai",
   "jsonschema",

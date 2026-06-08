@@ -6,6 +6,7 @@ import httpx
 
 from app.core.config import get_settings
 from providers.base import AnalysisProviderResult, ProviderAdapter, ProviderRunRequest
+from providers.proxy import outbound_proxy_kwargs
 
 
 class HermesAdapter(ProviderAdapter):
@@ -33,7 +34,9 @@ class HermesAdapter(ProviderAdapter):
             response = self._post(url, json=payload, headers=headers)
         else:
             timeout = request.run_parameters.get("timeout_seconds", 60)
-            with httpx.Client(timeout=timeout) as client:
+            client_kwargs: dict[str, object] = {"timeout": timeout}
+            client_kwargs.update(outbound_proxy_kwargs(url))
+            with httpx.Client(**client_kwargs) as client:
                 response = client.post(url, json=payload, headers=headers)
         latency_ms = int((time.monotonic() - started) * 1000)
         response.raise_for_status()

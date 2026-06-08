@@ -15,6 +15,27 @@ class AnalysisCreate(BaseModel):
     run_parameters: dict = Field(default_factory=dict)
 
 
+class SourceTrace(BaseModel):
+    source_snapshot_id: UUID | None = None
+    source_slug: str | None = None
+    source_revision: str | None = None
+    source_fingerprint: str | None = None
+    snapshot_mode: str | None = None
+    is_dirty: bool | None = None
+    prompt_fingerprint: str | None = None
+    rendered_prompt_artifact_path: str | None = None
+
+
+class RetrievalTrace(BaseModel):
+    retrieval_snapshot_id: UUID | None = None
+    retrieval_mode: str | None = None
+    retrieval_version: str | None = None
+    corpus_fingerprint: str | None = None
+    query_fingerprint: str | None = None
+    prompt_fingerprint: str | None = None
+    rendered_prompt_artifact_path: str | None = None
+
+
 class AnalysisRead(BaseModel):
     id: UUID
     document_id: UUID
@@ -35,6 +56,7 @@ class AnalysisRead(BaseModel):
     output_tokens: int | None
     estimated_cost: Decimal | None
     run_parameters: dict
+    source_trace: SourceTrace | None = None
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
@@ -62,6 +84,8 @@ class PredictedCommentRunRead(BaseModel):
     output_tokens: int | None
     estimated_cost: Decimal | None
     run_parameters: dict
+    source_trace: SourceTrace | None = None
+    retrieval_trace: RetrievalTrace | None = None
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None

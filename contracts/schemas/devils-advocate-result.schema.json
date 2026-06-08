@@ -3,10 +3,55 @@
   "$id": "https://gate-challenger.local/schemas/devils-advocate-result.schema.json",
   "title": "DevilsAdvocateResult",
   "type": "object",
-  "required": ["run_mode", "anchored_comments", "trailer", "ic_decision", "predicted_questions", "consulted_wiki_pages", "source_citations"],
+  "required": [
+    "run_mode",
+    "native_markdown",
+    "preflight_summary",
+    "brutal_truth",
+    "detected_contradictions",
+    "role_comments",
+    "tough_questions",
+    "actionable_jtbds",
+    "ic_decision",
+    "consulted_wiki_pages",
+    "source_citations",
+    "retrieval"
+  ],
   "additionalProperties": false,
   "properties": {
     "run_mode": { "type": "string", "enum": ["full_ic_voting"] },
+    "native_markdown": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Full native Devil's Advocate markdown in ic-voting-prompt.md order: Pre-flight summary, The Brutal Truth, Detected Contradictions & Missing Proofs, The Tough Co-CEO Questions, Actionable JTBDs, IC Decision."
+    },
+    "preflight_summary": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "brutal_truth": { "type": "string", "minLength": 1 },
+    "detected_contradictions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/detected_contradiction" }
+    },
+    "role_comments": {
+      "type": "array",
+      "minItems": 4,
+      "items": { "$ref": "#/$defs/role_comment" }
+    },
+    "tough_questions": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/tough_question" }
+    },
+    "actionable_jtbds": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "string", "minLength": 1 }
+    },
     "anchored_comments": {
       "type": "array",
       "items": {
@@ -34,15 +79,108 @@
     },
     "ic_decision": {
       "type": "object",
-      "required": ["verdict", "rationale"],
+      "required": ["verdict", "vote_tally", "rationale", "conditions", "heuristics_fired", "patterns_fired", "precedents_anchored", "next_ic"],
       "additionalProperties": false,
       "properties": {
-        "verdict": { "type": "string", "enum": ["approve", "approve_with_conditions", "need_evidence", "reject", "unknown"] },
-        "rationale": { "type": "string" }
+        "verdict": { "type": "string", "enum": ["approve", "conditional_approve", "rework", "reject", "unknown"] },
+        "vote_tally": {
+          "type": "object",
+          "required": ["MP", "CPO", "TechDir", "VertDir"],
+          "additionalProperties": false,
+          "properties": {
+            "MP": { "type": "string", "enum": ["approve", "reject"] },
+            "CPO": { "type": "string", "enum": ["approve", "reject"] },
+            "TechDir": { "type": "string", "enum": ["approve", "reject"] },
+            "VertDir": { "type": "string", "enum": ["approve", "reject"] }
+          }
+        },
+        "rationale": { "type": "string", "minLength": 1 },
+        "conditions": { "type": "array", "items": { "type": "string" } },
+        "heuristics_fired": { "type": "array", "items": { "type": "string" } },
+        "patterns_fired": { "type": "array", "items": { "type": "string" } },
+        "precedents_anchored": { "type": "array", "items": { "type": "string" } },
+        "next_ic": { "type": "string" }
       }
     },
     "predicted_questions": { "type": "array", "items": { "type": "string" } },
     "consulted_wiki_pages": { "type": "array", "items": { "type": "string" } },
-    "source_citations": { "type": "array", "items": { "type": "string" } }
+    "source_citations": { "type": "array", "items": { "type": "string" } },
+    "retrieval": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "retrieval_mode": { "type": "string" },
+        "retrieval_version": { "type": "string" },
+        "corpus_fingerprint": { "type": "string" },
+        "query_fingerprint": { "type": "string" },
+        "selected_cases": { "type": "array", "items": { "type": "string" } },
+        "selected_patterns": { "type": "array", "items": { "type": "string" } },
+        "selected_heuristics": { "type": "array", "items": { "type": "string" } },
+        "selected_questions": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "detected_contradiction": {
+      "type": "object",
+      "required": ["section", "title", "body", "comment_type", "severity", "citations"],
+      "additionalProperties": false,
+      "properties": {
+        "section": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "body": { "type": "string", "minLength": 1 },
+        "comment_type": {
+          "type": "string",
+          "enum": [
+            "missing_data",
+            "weak_argument",
+            "unrealistic_estimate",
+            "missing_alternative",
+            "scope_concern",
+            "strategic_misalignment",
+            "methodology_issue",
+            "risk_not_addressed",
+            "clarification_request",
+            "positive_feedback"
+          ]
+        },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical", "important", "minor"] },
+        "citations": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "role_comment": {
+      "type": "object",
+      "required": ["voter", "vote", "rationale", "comments"],
+      "additionalProperties": false,
+      "properties": {
+        "voter": { "type": "string", "enum": ["MP", "CPO", "TechDir", "VertDir"] },
+        "vote": { "type": "string", "enum": ["approve", "reject"] },
+        "rationale": { "type": "string", "minLength": 1 },
+        "comments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/role_comment_item" }
+        }
+      }
+    },
+    "role_comment_item": {
+      "type": "object",
+      "required": ["anchor", "comment", "comment_type", "severity"],
+      "additionalProperties": false,
+      "properties": {
+        "anchor": { "type": "string" },
+        "comment": { "type": "string", "minLength": 1 },
+        "comment_type": { "type": "string" },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical", "important", "minor"] }
+      }
+    },
+    "tough_question": {
+      "type": "object",
+      "required": ["question", "persona"],
+      "additionalProperties": false,
+      "properties": {
+        "question": { "type": "string", "minLength": 1 },
+        "persona": { "type": "string", "minLength": 1 }
+      }
+    }
   }
 }

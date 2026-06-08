@@ -21,7 +21,7 @@ cp .env.example .env
 Start the MVP stack:
 
 ```bash
-docker compose -f infra/docker-compose.yml up --build
+docker compose --env-file .env -f infra/docker-compose.yml up --build
 ```
 
 The Compose defaults use the public `mirror.gcr.io` mirror for official
@@ -29,6 +29,11 @@ PostgreSQL, Redis, Python, and Node images because Docker Hub DNS can be flaky
 in local Codex environments. Override `POSTGRES_IMAGE`, `REDIS_IMAGE`,
 `PYTHON_BASE_IMAGE`, or `NODE_BASE_IMAGE` in `.env` if your environment should
 pull directly from Docker Hub or an internal registry.
+
+For temporary local provider egress through a SOCKS5 proxy, set
+`OUTBOUND_PROXY_URL=socks5h://user:password@host:port` in the untracked `.env`.
+The API and worker containers keep `postgres`, `redis`, and other local Compose
+hosts in `NO_PROXY` so internal service traffic stays direct.
 
 Run migrations from the API container or a local API environment:
 

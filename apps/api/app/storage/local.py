@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import BinaryIO
 from uuid import UUID
 import hashlib
+import json
 import re
 import unicodedata
 
@@ -86,8 +87,61 @@ class LocalDocumentStorage:
             self.storage_root / "documents" / str(owner_id) / str(document_id) / "parsed" / "parsed.txt"
         )
 
+    def save_rendered_prompt(self, *, analysis_id: UUID, prompt: str) -> Path:
+        prompt_path = self._ensure_under_root(self.storage_root / "rendered-prompts" / str(analysis_id) / "prompt.txt")
+        prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        prompt_path.write_text(prompt, encoding="utf-8")
+        return prompt_path
+
+    def save_skill_source_snapshot(self, *, snapshot_id: UUID, manifest: dict) -> Path:
+        snapshot_dir = self._ensure_under_root(self.storage_root / "skill-snapshots" / str(snapshot_id))
+        files_dir = self._ensure_under_root(snapshot_dir / "files")
+        files_dir.mkdir(parents=True, exist_ok=True)
+
+        for item in manifest.get("files", []):
+            relative_path = self._safe_relative_path(item["path"])
+            source_path = Path(item["source_path"])
+            target_path = self._ensure_under_root(files_dir / relative_path)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_bytes(source_path.read_bytes())
+
+        manifest_path = self._ensure_under_root(snapshot_dir / "manifest.json")
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        return snapshot_dir
+
+    def save_retrieval_snapshot(
+        self,
+        *,
+        snapshot_id: UUID,
+        dossier: dict,
+        source_snapshot_artifact_path: str,
+    ) -> Path:
+        snapshot_dir = self._ensure_under_root(self.storage_root / "retrieval-snapshots" / str(snapshot_id))
+        selected_dir = self._ensure_under_root(snapshot_dir / "selected")
+        selected_dir.mkdir(parents=True, exist_ok=True)
+        source_files_dir = Path(source_snapshot_artifact_path).expanduser().resolve() / "files"
+
+        for path in dossier.get("selected_paths", []):
+            relative_path = self._safe_relative_path(path)
+            source_path = (source_files_dir / relative_path).resolve()
+            if not source_path.is_relative_to(source_files_dir) or not source_path.is_file():
+                continue
+            target_path = self._ensure_under_root(selected_dir / relative_path)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_bytes(source_path.read_bytes())
+
+        dossier_path = self._ensure_under_root(snapshot_dir / "dossier.json")
+        dossier_path.write_text(json.dumps(dossier, ensure_ascii=False, indent=2), encoding="utf-8")
+        return snapshot_dir
+
     def _ensure_under_root(self, path: Path) -> Path:
         resolved = path.resolve()
         if not resolved.is_relative_to(self.storage_root):
             raise ValueError("Storage path escapes STORAGE_ROOT")
         return resolved
+
+    def _safe_relative_path(self, path: str) -> Path:
+        relative = Path(path)
+        if relative.is_absolute() or any(part == ".." for part in relative.parts):
+            raise ValueError("Storage path escapes STORAGE_ROOT")
+        return relative
