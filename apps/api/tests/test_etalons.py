@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from app.models.analysis import Analysis
 from app.models.document import Document
 from app.models.etalon import Etalon
-from app.schemas.enums import DocumentParseStatus, DocumentType, EtalonStatus, Provider, Role, RunStatus
+from app.schemas.enums import DocumentParseStatus, DocumentType, EtalonSource, EtalonStatus, Provider, Role, RunStatus
 from app.schemas.etalons import EtalonPayload
 from app.seeds.skills import seed_baseline_skills
 
@@ -105,6 +105,149 @@ def test_normal_user_cannot_create_active_etalon_from_analysis(client, db_sessio
     assert db_session.query(Etalon).count() == 0
 
 
+def test_etalon_list_shows_active_etalons_and_own_drafts(client, db_session):
+    alice = create_user(db_session, "alice", "secret")
+    bob = create_user(db_session, "bob", "secret")
+    active = _create_etalon(client, db_session, alice, EtalonStatus.ACTIVE)
+    alice_draft = _create_etalon(client, db_session, alice, EtalonStatus.DRAFT)
+    bob_draft = _create_etalon(client, db_session, bob, EtalonStatus.DRAFT)
+
+    login(client, "bob", "secret")
+    bob_response = client.get("/etalons")
+
+    assert bob_response.status_code == 200
+    assert {item["id"] for item in bob_response.json()["etalons"]} == {str(active.id), str(bob_draft.id)}
+
+    client.post("/auth/logout")
+    login(client, "alice", "secret")
+    alice_response = client.get("/etalons")
+
+    assert alice_response.status_code == 200
+    assert {item["id"] for item in alice_response.json()["etalons"]} == {str(active.id), str(alice_draft.id)}
+
+
+def test_etalon_detail_respects_visibility(client, db_session):
+    alice = create_user(db_session, "alice", "secret")
+    create_user(db_session, "bob", "secret")
+    draft = _create_etalon(client, db_session, alice, EtalonStatus.DRAFT)
+    active = _create_etalon(client, db_session, alice, EtalonStatus.ACTIVE)
+
+    login(client, "bob", "secret")
+
+    forbidden = client.get(f"/etalons/{draft.id}")
+    visible = client.get(f"/etalons/{active.id}")
+
+    assert forbidden.status_code == 404
+    assert visible.status_code == 200
+    assert visible.json()["id"] == str(active.id)
+
+
+def test_author_can_patch_own_draft_and_version_increments(client, db_session):
+    author = create_user(db_session, "author", "secret")
+    etalon = _create_etalon(client, db_session, author, EtalonStatus.DRAFT)
+    update_payload = _valid_etalon_payload()
+    update_payload["expected_verdict"] = "reject"
+    update_payload["defense_comments"] = "Real committee rejected this defense."
+    update_payload["key_findings"] = ["No incrementality", "No scale proof"]
+    login(client, "author", "secret")
+
+    response = client.patch(f"/etalons/{etalon.id}", json=update_payload)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["expected_verdict"] == "reject"
+    assert payload["defense_comments"] == "Real committee rejected this defense."
+    assert payload["key_findings"] == ["No incrementality", "No scale proof"]
+    assert payload["version"] == 2
+
+
+def test_normal_user_cannot_patch_active_etalon(client, db_session):
+    author = create_user(db_session, "author", "secret")
+    etalon = _create_etalon(client, db_session, author, EtalonStatus.ACTIVE)
+    update_payload = _valid_etalon_payload()
+    update_payload["expected_verdict"] = "reject"
+    login(client, "author", "secret")
+
+    response = client.patch(f"/etalons/{etalon.id}", json=update_payload)
+
+    assert response.status_code == 403
+
+
+def test_patch_rejects_invalid_layer_parent_before_write(client, db_session):
+    author = create_user(db_session, "author", "secret")
+    etalon = _create_etalon(client, db_session, author, EtalonStatus.DRAFT)
+    update_payload = _valid_etalon_payload()
+    update_payload["layer_2"][0]["parent_layer_1_id"] = "L1-missing"
+    login(client, "author", "secret")
+
+    response = client.patch(f"/etalons/{etalon.id}", json=update_payload)
+
+    assert response.status_code == 409
+    db_session.refresh(etalon)
+    assert etalon.version == 1
+    assert etalon.layer_2[0]["parent_layer_1_id"] == "L1-001"
+
+
+def test_admin_can_publish_draft_and_normal_user_cannot(client, db_session):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    author = create_user(db_session, "author", "secret")
+    draft = _create_etalon(client, db_session, author, EtalonStatus.DRAFT)
+    login(client, "author", "secret")
+
+    forbidden = client.post(f"/etalons/{draft.id}/publish")
+    assert forbidden.status_code == 403
+    client.post("/auth/logout")
+
+    login(client, admin.login, "secret")
+    response = client.post(f"/etalons/{draft.id}/publish")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "active"
+    assert db_session.get(Etalon, draft.id).status == EtalonStatus.ACTIVE.value
+
+
+def test_admin_can_archive_etalon_and_remove_it_from_normal_list(client, db_session):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    author = create_user(db_session, "author", "secret")
+    active = _create_etalon(client, db_session, author, EtalonStatus.ACTIVE)
+    login(client, admin.login, "secret")
+
+    archive = client.post(f"/etalons/{active.id}/archive")
+    assert archive.status_code == 200
+    assert archive.json()["status"] == "archived"
+    client.post("/auth/logout")
+
+    login(client, "author", "secret")
+    listing = client.get("/etalons")
+
+    assert listing.status_code == 200
+    assert listing.json()["etalons"] == []
+
+
+def test_annotation_queue_requires_admin_or_annotator(client, db_session):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    annotator = create_user(db_session, "annotator", "secret", Role.ANNOTATOR)
+    author = create_user(db_session, "author", "secret")
+    draft = _create_etalon(client, db_session, author, EtalonStatus.DRAFT)
+    _create_etalon(client, db_session, author, EtalonStatus.ACTIVE)
+
+    login(client, "author", "secret")
+    forbidden = client.get("/annotation/queue")
+    assert forbidden.status_code == 403
+    client.post("/auth/logout")
+
+    login(client, annotator.login, "secret")
+    annotator_queue = client.get("/annotation/queue")
+    assert annotator_queue.status_code == 200
+    assert [item["id"] for item in annotator_queue.json()["etalons"]] == [str(draft.id)]
+    client.post("/auth/logout")
+
+    login(client, admin.login, "secret")
+    admin_queue = client.get("/annotation/queue")
+    assert admin_queue.status_code == 200
+    assert [item["id"] for item in admin_queue.json()["etalons"]] == [str(draft.id)]
+
+
 def _valid_etalon_payload():
     return {
         "expected_verdict": "need_evidence",
@@ -136,6 +279,32 @@ def _valid_etalon_payload():
         ],
         "key_findings": ["Missing incrementality"],
     }
+
+
+def _create_etalon(client, db_session, user, status: EtalonStatus) -> Etalon:
+    analysis = _create_completed_analysis(client, db_session, user)
+    payload = _valid_etalon_payload()
+    document = db_session.get(Document, analysis.document_id)
+    etalon = Etalon(
+        document_id=document.id,
+        author_id=user.id,
+        source=EtalonSource.AI_POST_ANNOTATION.value,
+        document_type=DocumentType.GATE_2.value,
+        real_defense_status=None,
+        defense_comments=None,
+        expected_verdict=payload["expected_verdict"],
+        layer_1=payload["layer_1"],
+        layer_2=payload["layer_2"],
+        key_findings=payload["key_findings"],
+        forbidden_false_findings=[],
+        status=status.value,
+        version=1,
+        raw_file_visible_to_all=False,
+    )
+    db_session.add(etalon)
+    db_session.commit()
+    db_session.refresh(etalon)
+    return etalon
 
 
 def _create_completed_analysis(client, db_session, user):

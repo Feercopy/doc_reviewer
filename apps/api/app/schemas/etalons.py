@@ -55,6 +55,17 @@ class EtalonDraftCreate(BaseModel):
     status: EtalonStatus = EtalonStatus.DRAFT
 
 
+class EtalonUpdate(BaseModel):
+    expected_verdict: Verdict | None = None
+    layer_1: list[EtalonLayer1Item] | None = None
+    layer_2: list[EtalonLayer2Item] | None = None
+    key_findings: list[str] | None = None
+    forbidden_false_findings: list[str] | None = None
+    real_defense_status: str | None = None
+    defense_comments: str | None = None
+    raw_file_visible_to_all: bool | None = None
+
+
 class EtalonRead(BaseModel):
     id: UUID
     document_id: UUID

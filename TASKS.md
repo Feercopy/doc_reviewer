@@ -52,6 +52,8 @@ Primary plan index:
 - [x] Implement Phase 4 backend etalon foundation: Layer 1/Layer 2 payload
   validation, draft creation from completed analyses, ownership checks, and
   admin/annotator active-status guard.
+- [x] Implement Phase 4 backend etalon review lifecycle: list/detail,
+  draft editing, annotation queue, publish, and archive endpoints.
 
 ## Phase 1: Skeleton And Data Foundation
 
@@ -155,7 +157,7 @@ Source plans:
 Tasks:
 
 - [x] Create etalon drafts from analysis results.
-- [ ] Implement admin etalon review and activation.
+- [x] Implement admin etalon review and activation.
 - [ ] Implement benchmark runs over active etalons.
 - [ ] Persist judge output, aggregate metrics, misses, false positives, and
   partial matches.
@@ -287,3 +289,8 @@ Exit criteria:
   draft creation now enforces analysis ownership, completed-analysis
   precondition, source `ai_post_annotation`, and admin/annotator-only active
   status.
+- 2026-06-08: Added the backend etalon review lifecycle. Authenticated users can
+  list active etalons and their own drafts; admin/annotator can review drafts
+  through the annotation queue, edit non-archived etalons, publish drafts to
+  active, and archive etalons. Draft authors can edit their own drafts, but
+  normal users cannot edit active etalons or publish/archive lifecycle state.

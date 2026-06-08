@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.authz.policies import can_publish_etalon
@@ -7,9 +8,13 @@ from app.models.analysis import Analysis
 from app.models.document import Document
 from app.models.etalon import Etalon
 from app.models.user import User
-from app.schemas.enums import CheckStatus, DocumentType, EtalonSource, EtalonStatus, RunStatus, Severity
-from app.schemas.etalons import EtalonDraftCreate, EtalonPayload
+from app.schemas.enums import CheckStatus, DocumentType, EtalonSource, EtalonStatus, Role, RunStatus, Severity
+from app.schemas.etalons import EtalonDraftCreate, EtalonPayload, EtalonUpdate
 from app.services.analyses import get_analysis_for_actor
+
+
+class EtalonNotFoundError(ValueError):
+    pass
 
 
 class EtalonForbiddenError(ValueError):
@@ -60,6 +65,98 @@ def create_etalon_draft_from_analysis(
     db.commit()
     db.refresh(etalon)
     return etalon
+
+
+def list_etalons_for_actor(*, db: Session, actor: User) -> list[Etalon]:
+    statement = select(Etalon)
+    if _can_review_etalon(actor):
+        statement = statement.where(Etalon.status != EtalonStatus.ARCHIVED.value)
+    else:
+        statement = statement.where(
+            or_(
+                Etalon.status == EtalonStatus.ACTIVE.value,
+                (Etalon.status == EtalonStatus.DRAFT.value) & (Etalon.author_id == actor.id),
+            )
+        )
+    statement = statement.order_by(Etalon.created_at.desc())
+    return list(db.execute(statement).scalars().all())
+
+
+def get_etalon_for_actor(*, db: Session, actor: User, etalon_id: UUID) -> Etalon:
+    etalon = db.get(Etalon, etalon_id)
+    if etalon is None or not _can_read_etalon(actor, etalon):
+        raise EtalonNotFoundError("Etalon not found")
+    return etalon
+
+
+def update_etalon(*, db: Session, actor: User, etalon_id: UUID, payload: EtalonUpdate) -> Etalon:
+    etalon = get_etalon_for_actor(db=db, actor=actor, etalon_id=etalon_id)
+    if not _can_edit_etalon(actor, etalon):
+        raise EtalonForbiddenError("Etalon cannot be edited by current user")
+
+    try:
+        merged_payload = EtalonPayload.model_validate(
+            {
+                "expected_verdict": payload.expected_verdict or etalon.expected_verdict,
+                "layer_1": payload.layer_1 if payload.layer_1 is not None else etalon.layer_1,
+                "layer_2": payload.layer_2 if payload.layer_2 is not None else etalon.layer_2,
+                "key_findings": payload.key_findings if payload.key_findings is not None else etalon.key_findings,
+                "forbidden_false_findings": (
+                    payload.forbidden_false_findings
+                    if payload.forbidden_false_findings is not None
+                    else etalon.forbidden_false_findings
+                ),
+            }
+        )
+    except ValueError as exc:
+        raise EtalonPreconditionError(str(exc)) from exc
+
+    etalon.expected_verdict = merged_payload.expected_verdict.value
+    etalon.layer_1 = [item.model_dump(mode="json") for item in merged_payload.layer_1]
+    etalon.layer_2 = [item.model_dump(mode="json") for item in merged_payload.layer_2]
+    etalon.key_findings = merged_payload.key_findings
+    etalon.forbidden_false_findings = merged_payload.forbidden_false_findings
+    if "real_defense_status" in payload.model_fields_set:
+        etalon.real_defense_status = payload.real_defense_status
+    if "defense_comments" in payload.model_fields_set:
+        etalon.defense_comments = payload.defense_comments
+    if "raw_file_visible_to_all" in payload.model_fields_set:
+        etalon.raw_file_visible_to_all = bool(payload.raw_file_visible_to_all)
+    etalon.version += 1
+    db.commit()
+    db.refresh(etalon)
+    return etalon
+
+
+def publish_etalon(*, db: Session, actor: User, etalon_id: UUID) -> Etalon:
+    etalon = _get_existing_etalon(db=db, etalon_id=etalon_id)
+    if not can_publish_etalon(actor):
+        raise EtalonForbiddenError("Only admin or annotator can publish etalons")
+    if etalon.status == EtalonStatus.ARCHIVED.value:
+        raise EtalonPreconditionError("Archived etalon cannot be published")
+    etalon.status = EtalonStatus.ACTIVE.value
+    etalon.version += 1
+    db.commit()
+    db.refresh(etalon)
+    return etalon
+
+
+def archive_etalon(*, db: Session, actor: User, etalon_id: UUID) -> Etalon:
+    etalon = _get_existing_etalon(db=db, etalon_id=etalon_id)
+    if not _can_review_etalon(actor):
+        raise EtalonForbiddenError("Only admin or annotator can archive etalons")
+    etalon.status = EtalonStatus.ARCHIVED.value
+    etalon.version += 1
+    db.commit()
+    db.refresh(etalon)
+    return etalon
+
+
+def list_annotation_queue(*, db: Session, actor: User) -> list[Etalon]:
+    if not _can_review_etalon(actor):
+        raise EtalonForbiddenError("Only admin or annotator can read annotation queue")
+    statement = select(Etalon).where(Etalon.status == EtalonStatus.DRAFT.value).order_by(Etalon.created_at.desc())
+    return list(db.execute(statement).scalars().all())
 
 
 def _payload_from_analysis(analysis: Analysis) -> EtalonPayload:
@@ -157,3 +254,28 @@ def _key_findings_from_layer_1(layer_1: list[dict]) -> list[str]:
 
 def _effective_document_type(document: Document) -> str:
     return document.manual_document_type or document.detected_document_type or DocumentType.UNKNOWN.value
+
+
+def _get_existing_etalon(*, db: Session, etalon_id: UUID) -> Etalon:
+    etalon = db.get(Etalon, etalon_id)
+    if etalon is None:
+        raise EtalonNotFoundError("Etalon not found")
+    return etalon
+
+
+def _can_read_etalon(actor: User, etalon: Etalon) -> bool:
+    if _can_review_etalon(actor):
+        return True
+    if etalon.status == EtalonStatus.ACTIVE.value:
+        return True
+    return etalon.status == EtalonStatus.DRAFT.value and etalon.author_id == actor.id
+
+
+def _can_edit_etalon(actor: User, etalon: Etalon) -> bool:
+    if _can_review_etalon(actor):
+        return etalon.status != EtalonStatus.ARCHIVED.value
+    return etalon.status == EtalonStatus.DRAFT.value and etalon.author_id == actor.id
+
+
+def _can_review_etalon(actor: User) -> bool:
+    return actor.role in {Role.ADMIN.value, Role.ANNOTATOR.value}
