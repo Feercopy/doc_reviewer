@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models.skill import Skill
-from app.schemas.enums import DocumentType, EntityStatus, SkillSourceType, SkillType
+from app.schemas.enums import GATE_CHALLENGER_DOCUMENT_TYPES, DocumentType, EntityStatus, SkillSourceType, SkillType
 
-GATE2_SKILL_PATH = Path("/Users/iseremenko/Projects/Gate2-challenger/skills/gate2-challenger/SKILL.md")
+GATE_CHALLENGER_SKILL_PATH = Path("/Users/iseremenko/Projects/Gate2-challenger/skills/gate-challenger/SKILL.md")
 DEVILS_ADVOCATE_PATH = Path("/Users/iseremenko/Documents/Common GPTs/devils-advocate/ic-voting-prompt.md")
 DEVILS_ADVOCATE_WIKI_PATH = Path("/Users/iseremenko/Documents/Common GPTs/devils-advocate/wiki-ic")
 
@@ -64,24 +64,28 @@ def _upsert_skill(db: Session, values: dict) -> Skill:
 
 
 def seed_baseline_skills(db: Session) -> list[Skill]:
-    gate2_fingerprint = _fingerprint_path(GATE2_SKILL_PATH)
+    gate_challenger_fingerprint = _fingerprint_path(GATE_CHALLENGER_SKILL_PATH)
     devils_fingerprint = _fingerprint_path(DEVILS_ADVOCATE_PATH)
     wiki_fingerprint = _fingerprint_path(DEVILS_ADVOCATE_WIKI_PATH)
+    gate_challenger_document_types = [item.value for item in GATE_CHALLENGER_DOCUMENT_TYPES]
 
     skills = [
         {
             "name": "gate2_challenger_main_analysis",
-            "description": "Gate 2 main analysis skill snapshot source.",
+            "description": "Gate Challenger main analysis skill snapshot source.",
             "version": "baseline",
             "skill_type": SkillType.MAIN_ANALYSIS.value,
-            "supported_document_types": [DocumentType.GATE_2.value],
+            "supported_document_types": gate_challenger_document_types,
             "source_type": SkillSourceType.LOCAL_SKILL_REPO.value,
-            "source_uri": str(GATE2_SKILL_PATH),
+            "source_uri": str(GATE_CHALLENGER_SKILL_PATH),
             "source_entrypoint": "SKILL.md",
-            "source_revision": _git_revision(GATE2_SKILL_PATH),
-            "source_fingerprint": gate2_fingerprint,
+            "source_revision": _git_revision(GATE_CHALLENGER_SKILL_PATH),
+            "source_fingerprint": gate_challenger_fingerprint,
             "source_metadata": {},
-            "prompt_text": _read_prompt(GATE2_SKILL_PATH, "Gate 2 challenger main analysis baseline prompt."),
+            "prompt_text": _read_prompt(
+                GATE_CHALLENGER_SKILL_PATH,
+                "Gate Challenger main analysis baseline prompt.",
+            ),
             "result_schema_path": "contracts/schemas/main-analysis-result.schema.json",
             "status": EntityStatus.ACTIVE.value,
         },
@@ -90,11 +94,7 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "description": "Devil's Advocate pre-defense comments skill snapshot source.",
             "version": "baseline",
             "skill_type": SkillType.PREDICTED_COMMENTS.value,
-            "supported_document_types": [
-                DocumentType.GATE_1.value,
-                DocumentType.GATE_2.value,
-                DocumentType.GATE_3.value,
-            ],
+            "supported_document_types": gate_challenger_document_types,
             "source_type": SkillSourceType.LOCAL_KNOWLEDGE_BASE.value,
             "source_uri": str(DEVILS_ADVOCATE_PATH),
             "source_entrypoint": "ic-voting-prompt.md",
@@ -142,7 +142,7 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "description": "Baseline document type classifier prompt.",
             "version": "baseline",
             "skill_type": SkillType.DOCUMENT_CLASSIFIER.value,
-            "supported_document_types": [item.value for item in DocumentType],
+            "supported_document_types": [*gate_challenger_document_types, DocumentType.UNKNOWN.value],
             "source_type": SkillSourceType.INLINE_PROMPT.value,
             "source_uri": None,
             "source_entrypoint": None,

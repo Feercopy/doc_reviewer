@@ -1,5 +1,5 @@
 export type Role = "user" | "annotator" | "admin";
-export type UserStatus = "active" | "blocked";
+export type UserStatus = "active" | "blocked" | "deleted";
 
 export type User = {
   id: string;

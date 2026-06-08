@@ -20,34 +20,60 @@ class _DetectionRule:
 
 _RULES = (
     _DetectionRule(
-        document_type=DocumentType.GATE_1,
-        exact_phrases=("Gate 1",),
-        supporting_keywords=("problem", "hypothesis", "opportunity", "discovery"),
-    ),
-    _DetectionRule(
         document_type=DocumentType.GATE_2,
         exact_phrases=("Gate 2",),
-        supporting_keywords=("MVP", "traction", "scope", "metrics", "risks", "business case"),
+        supporting_keywords=(
+            "Gate 1 continuity",
+            "planned traction",
+            "MLP",
+            "MVP",
+            "scope",
+            "metrics",
+            "risks",
+            "business case",
+            "Gate 3 commitments",
+        ),
+    ),
+    _DetectionRule(
+        document_type=DocumentType.STREAM_REVIEW_1,
+        exact_phrases=("1st Stream Review", "Stream review 1", "SR 1"),
+        supporting_keywords=(
+            "discovery results",
+            "validated product ideas",
+            "planned traction",
+            "resources",
+            "roadmap",
+            "IC readiness",
+            "next SR",
+        ),
+    ),
+    _DetectionRule(
+        document_type=DocumentType.STREAM_REVIEW_2_PLUS,
+        exact_phrases=("Stream review 2+", "2nd Stream Review", "SR 2+"),
+        supporting_keywords=(
+            "previous SR",
+            "plan / fact",
+            "backlog updates",
+            "traction model changes",
+            "resource assumptions",
+            "next SR commitments",
+            "traffic-light",
+        ),
     ),
     _DetectionRule(
         document_type=DocumentType.GATE_3,
         exact_phrases=("Gate 3",),
-        supporting_keywords=("scale", "rollout", "launch", "operational readiness"),
-    ),
-    _DetectionRule(
-        document_type=DocumentType.PROGRESS_REVIEW,
-        exact_phrases=("progress review",),
-        supporting_keywords=("progress", "status", "milestones"),
-    ),
-    _DetectionRule(
-        document_type=DocumentType.STREAM_REVIEW,
-        exact_phrases=("stream review",),
-        supporting_keywords=("stream", "portfolio", "roadmap"),
-    ),
-    _DetectionRule(
-        document_type=DocumentType.STRATEGY_REVIEW,
-        exact_phrases=("strategy review",),
-        supporting_keywords=("strategy", "market", "positioning"),
+        supporting_keywords=(
+            "Gate 2",
+            "MLP",
+            "PMF",
+            "Gate 4",
+            "customer experience",
+            "Contact Rate",
+            "CSAT",
+            "NPS",
+            "baseline status",
+        ),
     ),
 )
 

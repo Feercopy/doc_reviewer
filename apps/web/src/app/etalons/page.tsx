@@ -11,7 +11,7 @@ import {
   type EtalonRecord,
   type Verdict,
 } from "@/lib/api/etalons";
-import type { DocumentType } from "@/lib/api/documents";
+import { USER_SELECTABLE_DOCUMENT_TYPES, type DocumentType } from "@/lib/api/documents";
 import { formatDate, formatLabel } from "@/lib/format";
 
 export default function EtalonsPage() {
@@ -64,10 +64,11 @@ export default function EtalonsPage() {
             <label>
               Type
               <select name="document_type" defaultValue={"gate_2" satisfies DocumentType}>
-                <option value="gate_1">Gate 1</option>
-                <option value="gate_2">Gate 2</option>
-                <option value="gate_3">Gate 3</option>
-                <option value="unknown">Unknown</option>
+                {USER_SELECTABLE_DOCUMENT_TYPES.map((item) => (
+                  <option key={item} value={item}>
+                    {formatLabel(item)}
+                  </option>
+                ))}
               </select>
             </label>
             <label>

@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch, apiFetchNoContent } from "./client";
 import type { Role, User, UserStatus } from "./types";
 
 export type UsersListResponse = {
@@ -42,4 +42,8 @@ export async function resetPassword(userId: string, password: string): Promise<U
     method: "POST",
     body: JSON.stringify({ password }),
   });
+}
+
+export async function deleteUser(userId: string): Promise<void> {
+  return apiFetchNoContent(`/admin/users/${userId}`, { method: "DELETE" });
 }

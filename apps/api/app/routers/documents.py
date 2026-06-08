@@ -18,6 +18,7 @@ from app.services.documents import (
     DocumentTooLargeError,
     UnsupportedDocumentFileTypeError,
     create_document_from_upload,
+    delete_document_for_actor,
     get_document_for_actor,
     list_documents_for_actor,
     reset_document_for_reparse,
@@ -103,6 +104,18 @@ def patch_document_type(
             document_id=document_id,
             manual_document_type=payload.manual_document_type,
         )
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found") from exc
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_document(
+    document_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> None:
+    try:
+        delete_document_for_actor(db=db, actor=current_user, document_id=document_id)
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found") from exc
 

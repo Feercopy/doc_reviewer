@@ -76,3 +76,21 @@ export async function apiFetchText(path: string, init: RequestInit = {}): Promis
 
   return response.text();
 }
+
+export async function apiFetchNoContent(path: string, init: RequestInit = {}): Promise<void> {
+  const response = await fetch(`${resolveApiBaseUrl()}${path}`, {
+    ...init,
+    credentials: "include",
+    headers: init.headers,
+  });
+
+  if (!response.ok) {
+    let error: ApiError = {};
+    try {
+      error = await response.json();
+    } catch {
+      error = { detail: response.statusText };
+    }
+    throw new Error(error.detail ?? `Request failed with ${response.status}`);
+  }
+}

@@ -3,16 +3,7 @@
 import { FormEvent, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
-import { uploadDocument, type DocumentType } from "@/lib/api/documents";
-
-const documentTypes: DocumentType[] = [
-  "gate_1",
-  "gate_2",
-  "gate_3",
-  "progress_review",
-  "stream_review",
-  "strategy_review",
-];
+import { USER_SELECTABLE_DOCUMENT_TYPES, uploadDocument, type DocumentType } from "@/lib/api/documents";
 
 export default function UploadPage() {
   const [title, setTitle] = useState("");
@@ -64,7 +55,7 @@ export default function UploadPage() {
               Manual type
               <select value={manualType} onChange={(event) => setManualType(event.target.value as DocumentType | "")}>
                 <option value="">Auto detect</option>
-                {documentTypes.map((item) => (
+                {USER_SELECTABLE_DOCUMENT_TYPES.map((item) => (
                   <option key={item} value={item}>
                     {item.replaceAll("_", " ")}
                   </option>

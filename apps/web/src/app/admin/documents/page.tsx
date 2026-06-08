@@ -6,16 +6,15 @@ import { FormEvent, useEffect, useState } from "react";
 import { AdminTabs } from "@/components/AdminTabs";
 import { AppShell } from "@/components/AppShell";
 import { listAdminDocuments, type AdminDocument } from "@/lib/api/admin";
-import type { DocumentType } from "@/lib/api/documents";
+import { USER_SELECTABLE_DOCUMENT_TYPES, deleteDocument, type DocumentType } from "@/lib/api/documents";
 import { formatDate, formatLabel } from "@/lib/format";
-
-const documentTypes: (DocumentType | "")[] = ["", "gate_1", "gate_2", "gate_3", "progress_review", "stream_review", "strategy_review", "unknown"];
 
 export default function AdminDocumentsPage() {
   const [documents, setDocuments] = useState<AdminDocument[]>([]);
   const [ownerId, setOwnerId] = useState("");
   const [documentType, setDocumentType] = useState<DocumentType | "">("");
   const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState("");
 
   async function refresh() {
     const response = await listAdminDocuments({ owner_id: ownerId, document_type: documentType });
@@ -30,6 +29,22 @@ export default function AdminDocumentsPage() {
     event.preventDefault();
     setError("");
     refresh().catch((err) => setError(err instanceof Error ? err.message : "Failed to load admin documents"));
+  }
+
+  async function handleDelete(document: AdminDocument) {
+    if (!window.confirm(`Delete document "${document.title}"?`)) {
+      return;
+    }
+    setDeletingId(document.id);
+    setError("");
+    try {
+      await deleteDocument(document.id);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete document");
+    } finally {
+      setDeletingId("");
+    }
   }
 
   return (
@@ -48,7 +63,7 @@ export default function AdminDocumentsPage() {
           <label>
             Type
             <select value={documentType} onChange={(event) => setDocumentType(event.target.value as DocumentType | "")}>
-              {documentTypes.map((item) => (
+              {["", ...USER_SELECTABLE_DOCUMENT_TYPES].map((item) => (
                 <option key={item || "all"} value={item}>
                   {item ? formatLabel(item) : "All"}
                 </option>
@@ -83,10 +98,18 @@ export default function AdminDocumentsPage() {
                   <td>{formatLabel(item.parse_status)}</td>
                   <td>{formatLabel(item.status)}</td>
                   <td>{formatDate(item.created_at)}</td>
-                  <td>
+                  <td className="button-row">
                     <Link className="secondary-link" href={`/documents/${item.id}`}>
                       Open
                     </Link>
+                    <button
+                      className="danger"
+                      disabled={deletingId === item.id}
+                      type="button"
+                      onClick={() => handleDelete(item)}
+                    >
+                      Delete
+                    </button>
                   </td>
                 </tr>
               ))}

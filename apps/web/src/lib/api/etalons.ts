@@ -1,7 +1,7 @@
 import { apiFetch } from "./client";
 import type { DocumentType } from "./documents";
 
-export type EtalonStatus = "draft" | "active" | "archived";
+export type EtalonStatus = "draft" | "active" | "archived" | "deleted";
 export type Verdict = "approve" | "approve_with_conditions" | "need_evidence" | "reject" | "unknown";
 export type CheckStatus = "pass" | "partial" | "fail" | "not_applicable";
 export type Severity = "low" | "medium" | "high" | "critical";

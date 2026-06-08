@@ -6,6 +6,7 @@ import pytest
 from app.core.config import get_settings
 from app.main import app
 from app.models.analysis import Analysis
+from app.models.audit_log import AuditLog
 from app.models.benchmark import Benchmark
 from app.models.document import Document
 from app.models.etalon import Etalon
@@ -43,7 +44,7 @@ def test_admin_documents_support_filters_and_include_owner_metadata(client, db_s
     bob = create_user(db_session, "bob", "secret")
 
     alice_document = _document_for_user(client, db_session, alice, "alice-gate.txt", DocumentType.GATE_2)
-    _document_for_user(client, db_session, bob, "bob-stream.txt", DocumentType.STREAM_REVIEW)
+    _document_for_user(client, db_session, bob, "bob-stream.txt", DocumentType.STREAM_REVIEW_1)
 
     login(client, admin.login, "secret")
     response = client.get(f"/admin/documents?owner_id={alice.id}&document_type=gate_2")
@@ -56,6 +57,21 @@ def test_admin_documents_support_filters_and_include_owner_metadata(client, db_s
 
     forbidden = _as_user_get(client, db_session, "/admin/documents")
     assert forbidden.status_code == 403
+
+
+def test_admin_documents_hide_deleted_documents(client, db_session):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    user = create_user(db_session, "analyst", "secret")
+    document = _document_for_user(client, db_session, user, "gate.txt", DocumentType.GATE_2)
+
+    login(client, admin.login, "secret")
+    delete_response = client.delete(f"/documents/{document.id}")
+    assert delete_response.status_code == 204
+
+    response = client.get("/admin/documents")
+
+    assert response.status_code == 200
+    assert response.json()["documents"] == []
 
 
 def test_admin_analyses_support_filters_and_expose_raw_output(client, db_session):
@@ -136,6 +152,34 @@ def test_admin_etalons_and_benchmarks_list_all_statuses(client, db_session):
     assert benchmarks.status_code == 200
     assert [item["id"] for item in benchmarks.json()["benchmarks"]] == [str(benchmark.id)]
     assert benchmarks.json()["benchmarks"][0]["started_by_login"] == "admin"
+
+
+def test_admin_can_delete_etalon_and_non_admin_cannot(client, db_session):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    user = create_user(db_session, "analyst", "secret")
+    etalon = _etalon_for_user(client, db_session, user, EtalonStatus.ACTIVE)
+
+    login(client, user.login, "secret")
+    forbidden = client.delete(f"/admin/etalons/{etalon.id}")
+    assert forbidden.status_code == 403
+    client.post("/auth/logout")
+
+    login(client, admin.login, "secret")
+    deleted = client.delete(f"/admin/etalons/{etalon.id}")
+
+    assert deleted.status_code == 204
+    db_session.refresh(etalon)
+    assert etalon.status == EtalonStatus.DELETED.value
+    assert db_session.query(AuditLog).filter_by(action="etalon.deleted", entity_id=etalon.id).count() == 1
+
+    normal_list = _as_user_get(client, db_session, "/etalons")
+    assert normal_list.status_code == 200
+    assert normal_list.json()["etalons"] == []
+
+    login(client, admin.login, "secret")
+    deleted_list = client.get("/admin/etalons?status=deleted")
+    assert deleted_list.status_code == 200
+    assert [item["id"] for item in deleted_list.json()["etalons"]] == [str(etalon.id)]
 
 
 def test_admin_feedback_filters_by_model_skill_user_and_verdict(client, db_session):

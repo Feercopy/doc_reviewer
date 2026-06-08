@@ -1,13 +1,18 @@
-import { apiFetch, apiFetchText } from "./client";
+import { apiFetch, apiFetchNoContent, apiFetchText } from "./client";
 
 export type DocumentType =
-  | "gate_1"
   | "gate_2"
+  | "stream_review_1"
+  | "stream_review_2_plus"
   | "gate_3"
-  | "progress_review"
-  | "stream_review"
-  | "strategy_review"
   | "unknown";
+
+export const USER_SELECTABLE_DOCUMENT_TYPES = [
+  "gate_2",
+  "stream_review_1",
+  "stream_review_2_plus",
+  "gate_3",
+] as const satisfies readonly DocumentType[];
 
 export type ParseStatus = "queued" | "running" | "completed" | "failed";
 export type Provider = "openai_compatible" | "anthropic_compatible" | "hermes";
@@ -122,6 +127,10 @@ export async function getParsedText(documentId: string): Promise<string> {
 
 export async function reparseDocument(documentId: string): Promise<DocumentRecord> {
   return apiFetch<DocumentRecord>(`/documents/${documentId}/reparse`, { method: "POST" });
+}
+
+export async function deleteDocument(documentId: string): Promise<void> {
+  return apiFetchNoContent(`/documents/${documentId}`, { method: "DELETE" });
 }
 
 export async function listAnalyses(documentId: string): Promise<AnalysesListResponse> {

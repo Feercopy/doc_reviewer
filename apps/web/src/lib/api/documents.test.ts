@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createAnalysis, getParsedText, patchDocumentType, uploadDocument } from "./documents";
+import {
+  USER_SELECTABLE_DOCUMENT_TYPES,
+  createAnalysis,
+  deleteDocument,
+  getParsedText,
+  patchDocumentType,
+  uploadDocument,
+} from "./documents";
 
 const originalFetch = global.fetch;
 
@@ -10,6 +17,15 @@ afterEach(() => {
 });
 
 describe("documents api", () => {
+  it("exposes only Gate Challenger stages for user selection", () => {
+    expect(USER_SELECTABLE_DOCUMENT_TYPES).toEqual([
+      "gate_2",
+      "stream_review_1",
+      "stream_review_2_plus",
+      "gate_3",
+    ]);
+  });
+
   it("uploads multipart documents without forcing json content type", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -55,6 +71,18 @@ describe("documents api", () => {
     });
 
     await expect(getParsedText("doc-id")).resolves.toBe("Parsed text");
+  });
+
+  it("deletes documents without parsing a response body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    global.fetch = fetchMock;
+
+    await deleteDocument("doc-id");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/documents/doc-id",
+      expect.objectContaining({ method: "DELETE", credentials: "include" }),
+    );
   });
 
   it("launches analysis from document detail", async () => {

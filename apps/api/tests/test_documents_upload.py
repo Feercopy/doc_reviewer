@@ -7,10 +7,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.main import app
+from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.routers import documents as documents_router
 from app.models.user import User
-from app.schemas.enums import DocumentParseStatus, DocumentType, Role, UserStatus
+from app.schemas.enums import DocumentParseStatus, DocumentType, EntityStatus, Role, UserStatus
 from app.security.passwords import hash_password
 
 
@@ -195,20 +196,70 @@ def test_user_cannot_get_another_users_document_detail_but_admin_can(api_client,
     assert admin_detail.json()["original_filename"] == "alice.txt"
 
 
+def test_owner_can_delete_document_and_it_disappears_from_document_workflow(api_client, db_session):
+    create_user(db_session, "author", "secret")
+    login(api_client, "author", "secret")
+    upload = upload_document(api_client, "gate.txt", b"Gate 2 MVP metrics")
+    document_id = UUID(upload.json()["id"])
+
+    response = api_client.delete(f"/documents/{document_id}")
+
+    assert response.status_code == 204
+    document = db_session.get(Document, document_id)
+    assert document.status == EntityStatus.DELETED.value
+    assert api_client.get("/documents").json()["documents"] == []
+    assert api_client.get(f"/documents/{document_id}").status_code == 404
+    assert db_session.query(AuditLog).filter_by(action="document.deleted", entity_id=document_id).count() == 1
+
+
+def test_user_cannot_delete_another_users_document_but_admin_can(api_client, db_session):
+    create_user(db_session, "admin", "secret", Role.ADMIN)
+    create_user(db_session, "alice", "secret")
+    create_user(db_session, "bob", "secret")
+
+    login(api_client, "alice", "secret")
+    upload = upload_document(api_client, "alice.txt", b"alice document")
+    document_id = UUID(upload.json()["id"])
+    api_client.post("/auth/logout")
+
+    login(api_client, "bob", "secret")
+    forbidden = api_client.delete(f"/documents/{document_id}")
+    assert forbidden.status_code == 404
+    assert db_session.get(Document, document_id).status == EntityStatus.ACTIVE.value
+    api_client.post("/auth/logout")
+
+    login(api_client, "admin", "secret")
+    deleted = api_client.delete(f"/documents/{document_id}")
+
+    assert deleted.status_code == 204
+    assert db_session.get(Document, document_id).status == EntityStatus.DELETED.value
+
+
 def test_manual_document_type_override_is_saved_separately(api_client, db_session):
     create_user(db_session, "author", "secret")
     login(api_client, "author", "secret")
     upload = upload_document(api_client, "gate.txt", b"Gate 2 MVP metrics")
     document_id = UUID(upload.json()["id"])
 
-    response = api_client.patch(f"/documents/{document_id}/document-type", json={"manual_document_type": "gate_3"})
+    response = api_client.patch(f"/documents/{document_id}/document-type", json={"manual_document_type": "stream_review_1"})
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["manual_document_type"] == "gate_3"
+    assert payload["manual_document_type"] == "stream_review_1"
     assert payload["detected_document_type"] == "unknown"
     document = db_session.get(Document, document_id)
-    assert document.manual_document_type == DocumentType.GATE_3.value
+    assert document.manual_document_type == DocumentType.STREAM_REVIEW_1.value
+
+
+def test_rejects_gate_1_manual_document_type(api_client, db_session):
+    create_user(db_session, "author", "secret")
+    login(api_client, "author", "secret")
+    upload = upload_document(api_client, "gate.txt", b"Gate 2 MVP metrics")
+    document_id = UUID(upload.json()["id"])
+
+    response = api_client.patch(f"/documents/{document_id}/document-type", json={"manual_document_type": "gate_1"})
+
+    assert response.status_code == 422
 
 
 def test_get_parsed_text_requires_owner_and_completed_parse(api_client, db_session):

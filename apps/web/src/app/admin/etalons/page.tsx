@@ -5,15 +5,16 @@ import { FormEvent, useEffect, useState } from "react";
 
 import { AdminTabs } from "@/components/AdminTabs";
 import { AppShell } from "@/components/AppShell";
-import { listAdminEtalons, type AdminEtalon, type EtalonStatus } from "@/lib/api/admin";
+import { deleteAdminEtalon, listAdminEtalons, type AdminEtalon, type EtalonStatus } from "@/lib/api/admin";
 import { formatDate, formatLabel } from "@/lib/format";
 
-const statuses: (EtalonStatus | "")[] = ["", "draft", "active", "archived"];
+const statuses: (EtalonStatus | "")[] = ["", "draft", "active", "archived", "deleted"];
 
 export default function AdminEtalonsPage() {
   const [etalons, setEtalons] = useState<AdminEtalon[]>([]);
   const [status, setStatus] = useState<EtalonStatus | "">("");
   const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState("");
 
   async function refresh() {
     const response = await listAdminEtalons({ status });
@@ -28,6 +29,22 @@ export default function AdminEtalonsPage() {
     event.preventDefault();
     setError("");
     refresh().catch((err) => setError(err instanceof Error ? err.message : "Failed to load admin etalons"));
+  }
+
+  async function handleDelete(etalon: AdminEtalon) {
+    if (!window.confirm(`Delete etalon for "${etalon.document_title}"?`)) {
+      return;
+    }
+    setDeletingId(etalon.id);
+    setError("");
+    try {
+      await deleteAdminEtalon(etalon.id);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete etalon");
+    } finally {
+      setDeletingId("");
+    }
   }
 
   return (
@@ -76,10 +93,18 @@ export default function AdminEtalonsPage() {
                   <td>{item.layer_1_count} / {item.layer_2_count}</td>
                   <td>{formatLabel(item.status)}</td>
                   <td>{formatDate(item.updated_at)}</td>
-                  <td>
+                  <td className="button-row">
                     <Link className="secondary-link" href={`/etalons/${item.id}`}>
                       Open
                     </Link>
+                    <button
+                      className="danger"
+                      disabled={deletingId === item.id || item.status === "deleted"}
+                      type="button"
+                      onClick={() => handleDelete(item)}
+                    >
+                      Delete
+                    </button>
                   </td>
                 </tr>
               ))}

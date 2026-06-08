@@ -1,5 +1,5 @@
 from app.models.user import User
-from app.schemas.enums import Role, UserStatus
+from app.schemas.enums import DocumentType, Role, UserStatus
 from app.seeds.admin import ensure_admin_user
 from app.seeds.skills import seed_baseline_skills
 from app.security.passwords import verify_password
@@ -34,3 +34,16 @@ def test_seed_baseline_skills_is_idempotent(db_session):
         "benchmark_judge",
         "document_classifier",
     }
+
+
+def test_seeded_gate_challenger_skill_matches_supported_document_types(db_session):
+    skills = seed_baseline_skills(db_session)
+    main_skill = next(skill for skill in skills if skill.name == "gate2_challenger_main_analysis")
+
+    assert main_skill.source_uri.endswith("/skills/gate-challenger/SKILL.md")
+    assert main_skill.supported_document_types == [
+        DocumentType.GATE_2.value,
+        DocumentType.STREAM_REVIEW_1.value,
+        DocumentType.STREAM_REVIEW_2_PLUS.value,
+        DocumentType.GATE_3.value,
+    ]

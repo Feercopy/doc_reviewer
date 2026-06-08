@@ -8,7 +8,9 @@ import { AppShell } from "@/components/AppShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { resolveApiBaseUrl } from "@/lib/api/client";
 import {
+  USER_SELECTABLE_DOCUMENT_TYPES,
   createAnalysis,
+  deleteDocument,
   getDocument,
   getParsedText,
   listAnalyses,
@@ -20,17 +22,6 @@ import {
   type Provider,
 } from "@/lib/api/documents";
 import { formatDate, formatLabel } from "@/lib/format";
-
-const documentTypes: (DocumentType | "")[] = [
-  "",
-  "gate_1",
-  "gate_2",
-  "gate_3",
-  "progress_review",
-  "stream_review",
-  "strategy_review",
-  "unknown",
-];
 
 export default function DocumentDetailPage() {
   const params = useParams<{ documentId: string }>();
@@ -91,6 +82,21 @@ export default function DocumentDetailPage() {
     }
   }
 
+  async function removeDocument() {
+    if (!document || !window.confirm(`Delete document "${document.title}"?`)) {
+      return;
+    }
+    setPending(true);
+    setError("");
+    try {
+      await deleteDocument(document.id);
+      window.location.href = "/documents";
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete document");
+      setPending(false);
+    }
+  }
+
   async function launchAnalysis(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
@@ -142,7 +148,7 @@ export default function DocumentDetailPage() {
                 <div>
                   <div className="muted small">Manual type</div>
                   <select value={manualType} onChange={(event) => setManualType(event.target.value as DocumentType | "")}>
-                    {documentTypes.map((item) => (
+                    {["", ...USER_SELECTABLE_DOCUMENT_TYPES].map((item) => (
                       <option key={item || "auto"} value={item}>
                         {item ? formatLabel(item) : "Auto"}
                       </option>
@@ -160,6 +166,9 @@ export default function DocumentDetailPage() {
                 </button>
                 <button className="secondary" disabled={pending} type="button" onClick={reparse}>
                   Reparse
+                </button>
+                <button className="danger" disabled={pending} type="button" onClick={removeDocument}>
+                  Delete
                 </button>
               </div>
             </section>

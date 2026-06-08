@@ -25,7 +25,11 @@ def list_admin_documents(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ) -> AdminDocumentsListResponse:
-    statement = select(Document, User).join(User, User.id == Document.owner_id)
+    statement = (
+        select(Document, User)
+        .join(User, User.id == Document.owner_id)
+        .where(Document.status != EntityStatus.DELETED.value)
+    )
     if owner_id is not None:
         statement = statement.where(Document.owner_id == owner_id)
     if document_type is not None:

@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
-import { createUser, listUsers, patchUser, resetPassword } from "@/lib/api/admin-users";
+import { createUser, deleteUser, listUsers, patchUser, resetPassword } from "@/lib/api/admin-users";
 import { me } from "@/lib/api/auth";
 import type { Role, User, UserStatus } from "@/lib/api/types";
 
@@ -15,6 +15,7 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [deletingId, setDeletingId] = useState("");
   const [loginName, setLoginName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
@@ -80,6 +81,22 @@ export default function AdminUsersPage() {
       await resetPassword(user.id, nextPassword);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to reset password");
+    }
+  }
+
+  async function handleDeleteUser(user: User) {
+    if (!window.confirm(`Delete user "${user.login}"?`)) {
+      return;
+    }
+    setDeletingId(user.id);
+    setError("");
+    try {
+      await deleteUser(user.id);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete user");
+    } finally {
+      setDeletingId("");
     }
   }
 
@@ -186,9 +203,17 @@ export default function AdminUsersPage() {
                       ))}
                     </select>
                   </td>
-                  <td>
+                  <td className="button-row">
                     <button className="secondary" type="button" onClick={() => handleResetPassword(user)}>
                       Reset password
+                    </button>
+                    <button
+                      className="danger"
+                      disabled={deletingId === user.id || user.id === currentUser?.id}
+                      type="button"
+                      onClick={() => handleDeleteUser(user)}
+                    >
+                      Delete
                     </button>
                   </td>
                 </tr>

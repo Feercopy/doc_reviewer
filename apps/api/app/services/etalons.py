@@ -140,7 +140,7 @@ def create_past_defense_etalon(
 def list_etalons_for_actor(*, db: Session, actor: User) -> list[Etalon]:
     statement = select(Etalon)
     if _can_review_etalon(actor):
-        statement = statement.where(Etalon.status != EtalonStatus.ARCHIVED.value)
+        statement = statement.where(~Etalon.status.in_([EtalonStatus.ARCHIVED.value, EtalonStatus.DELETED.value]))
     else:
         statement = statement.where(
             or_(
@@ -210,6 +210,8 @@ def publish_etalon(*, db: Session, actor: User, etalon_id: UUID) -> Etalon:
     etalon = _get_existing_etalon(db=db, etalon_id=etalon_id)
     if not can_publish_etalon(actor):
         raise EtalonForbiddenError("Only admin or annotator can publish etalons")
+    if etalon.status == EtalonStatus.DELETED.value:
+        raise EtalonNotFoundError("Etalon not found")
     if etalon.status == EtalonStatus.ARCHIVED.value:
         raise EtalonPreconditionError("Archived etalon cannot be published")
     etalon.status = EtalonStatus.ACTIVE.value
@@ -229,6 +231,8 @@ def publish_etalon(*, db: Session, actor: User, etalon_id: UUID) -> Etalon:
 
 def archive_etalon(*, db: Session, actor: User, etalon_id: UUID) -> Etalon:
     etalon = _get_existing_etalon(db=db, etalon_id=etalon_id)
+    if etalon.status == EtalonStatus.DELETED.value:
+        raise EtalonNotFoundError("Etalon not found")
     if not _can_review_etalon(actor):
         raise EtalonForbiddenError("Only admin or annotator can archive etalons")
     etalon.status = EtalonStatus.ARCHIVED.value
@@ -244,6 +248,26 @@ def archive_etalon(*, db: Session, actor: User, etalon_id: UUID) -> Etalon:
     db.commit()
     db.refresh(etalon)
     return etalon
+
+
+def delete_etalon(*, db: Session, actor: User, etalon_id: UUID) -> None:
+    if actor.role != Role.ADMIN.value:
+        raise EtalonForbiddenError("Only admin can delete etalons")
+    etalon = _get_existing_etalon(db=db, etalon_id=etalon_id)
+    if etalon.status == EtalonStatus.DELETED.value:
+        raise EtalonNotFoundError("Etalon not found")
+    previous_status = etalon.status
+    etalon.status = EtalonStatus.DELETED.value
+    etalon.version += 1
+    record_audit(
+        db=db,
+        actor_id=actor.id,
+        action="etalon.deleted",
+        entity_type="etalon",
+        entity_id=etalon.id,
+        metadata={"version": etalon.version, "status": {"from": previous_status, "to": etalon.status}},
+    )
+    db.commit()
 
 
 def list_annotation_queue(*, db: Session, actor: User) -> list[Etalon]:
@@ -369,6 +393,8 @@ def _get_existing_etalon(*, db: Session, etalon_id: UUID) -> Etalon:
 
 
 def _can_read_etalon(actor: User, etalon: Etalon) -> bool:
+    if etalon.status == EtalonStatus.DELETED.value:
+        return False
     if _can_review_etalon(actor):
         return True
     if etalon.status == EtalonStatus.ACTIVE.value:
@@ -377,6 +403,8 @@ def _can_read_etalon(actor: User, etalon: Etalon) -> bool:
 
 
 def _can_edit_etalon(actor: User, etalon: Etalon) -> bool:
+    if etalon.status == EtalonStatus.DELETED.value:
+        return False
     if _can_review_etalon(actor):
         return etalon.status != EtalonStatus.ARCHIVED.value
     return etalon.status == EtalonStatus.DRAFT.value and etalon.author_id == actor.id

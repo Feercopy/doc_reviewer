@@ -72,6 +72,12 @@ button.secondary {
   color: var(--foreground);
 }
 
+button.danger {
+  border: 1px solid #fecaca;
+  background: #fff;
+  color: var(--danger);
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.6;

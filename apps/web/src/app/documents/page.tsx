@@ -5,20 +5,41 @@ import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge } from "@/components/StatusBadge";
-import { listDocuments, type DocumentRecord } from "@/lib/api/documents";
+import { deleteDocument, listDocuments, type DocumentRecord } from "@/lib/api/documents";
 import { formatDate, formatLabel } from "@/lib/format";
 
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState("");
+
+  async function refresh() {
+    const response = await listDocuments();
+    setDocuments(response.documents);
+  }
 
   useEffect(() => {
-    listDocuments()
-      .then((response) => setDocuments(response.documents))
+    refresh()
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load documents"))
       .finally(() => setLoading(false));
   }, []);
+
+  async function handleDelete(document: DocumentRecord) {
+    if (!window.confirm(`Delete document "${document.title}"?`)) {
+      return;
+    }
+    setDeletingId(document.id);
+    setError("");
+    try {
+      await deleteDocument(document.id);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete document");
+    } finally {
+      setDeletingId("");
+    }
+  }
 
   return (
     <AppShell>
@@ -60,10 +81,18 @@ export default function DocumentsPage() {
                       {document.parse_error ? <div className="error small">{document.parse_error}</div> : null}
                     </td>
                     <td>{formatDate(document.created_at)}</td>
-                    <td>
+                    <td className="button-row">
                       <Link className="secondary-link" href={`/documents/${document.id}`}>
                         Open
                       </Link>
+                      <button
+                        className="danger"
+                        disabled={deletingId === document.id}
+                        type="button"
+                        onClick={() => handleDelete(document)}
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}

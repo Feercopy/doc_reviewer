@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { listAdminAnalyses, listAdminDocuments, listAdminFeedback } from "./admin";
+import { deleteAdminEtalon, listAdminAnalyses, listAdminDocuments, listAdminFeedback } from "./admin";
 
 const originalFetch = global.fetch;
 
@@ -43,6 +43,18 @@ describe("admin api", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/admin/feedback?model=gpt-test&verdict=need_evidence",
       expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("deletes admin etalons without parsing a response body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    global.fetch = fetchMock;
+
+    await deleteAdminEtalon("etalon-id");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/admin/etalons/etalon-id",
+      expect.objectContaining({ method: "DELETE", credentials: "include" }),
     );
   });
 });

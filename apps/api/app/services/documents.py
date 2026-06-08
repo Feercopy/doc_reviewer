@@ -129,6 +129,21 @@ def update_manual_document_type(
     return document
 
 
+def delete_document_for_actor(*, db: Session, actor: User, document_id: UUID) -> None:
+    document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
+    previous_status = document.status
+    document.status = EntityStatus.DELETED.value
+    record_audit(
+        db=db,
+        actor_id=actor.id,
+        action="document.deleted",
+        entity_type="document",
+        entity_id=document.id,
+        metadata={"status": {"from": previous_status, "to": document.status}},
+    )
+    db.commit()
+
+
 def reset_document_for_reparse(*, db: Session, actor: User, document_id: UUID) -> Document:
     document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
     document.parse_status = DocumentParseStatus.QUEUED.value

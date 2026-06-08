@@ -10,16 +10,23 @@ class Role(StrEnum):
 class UserStatus(StrEnum):
     ACTIVE = "active"
     BLOCKED = "blocked"
+    DELETED = "deleted"
 
 
 class DocumentType(StrEnum):
-    GATE_1 = "gate_1"
     GATE_2 = "gate_2"
+    STREAM_REVIEW_1 = "stream_review_1"
+    STREAM_REVIEW_2_PLUS = "stream_review_2_plus"
     GATE_3 = "gate_3"
-    PROGRESS_REVIEW = "progress_review"
-    STREAM_REVIEW = "stream_review"
-    STRATEGY_REVIEW = "strategy_review"
     UNKNOWN = "unknown"
+
+
+GATE_CHALLENGER_DOCUMENT_TYPES = (
+    DocumentType.GATE_2,
+    DocumentType.STREAM_REVIEW_1,
+    DocumentType.STREAM_REVIEW_2_PLUS,
+    DocumentType.GATE_3,
+)
 
 
 class DocumentParseStatus(StrEnum):
@@ -95,6 +102,7 @@ class EtalonStatus(StrEnum):
     DRAFT = "draft"
     ACTIVE = "active"
     ARCHIVED = "archived"
+    DELETED = "deleted"
 
 
 class FeedbackUsefulness(StrEnum):

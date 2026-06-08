@@ -1,10 +1,10 @@
-import { apiFetch } from "./client";
+import { apiFetch, apiFetchNoContent } from "./client";
 import type { DocumentType, Provider } from "./documents";
 import type { SkillRecord } from "./skills";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type EntityStatus = "active" | "archived" | "deleted";
-export type EtalonStatus = "draft" | "active" | "archived";
+export type EtalonStatus = "draft" | "active" | "archived" | "deleted";
 
 export type AdminDocument = {
   id: string;
@@ -130,6 +130,10 @@ export function listAdminSkills() {
 
 export function listAdminEtalons(filters: { status?: EtalonStatus | ""; document_type?: DocumentType | "" } = {}) {
   return apiFetch<{ etalons: AdminEtalon[] }>(withQuery("/admin/etalons", filters));
+}
+
+export function deleteAdminEtalon(etalonId: string) {
+  return apiFetchNoContent(`/admin/etalons/${etalonId}`, { method: "DELETE" });
 }
 
 export function listAdminBenchmarks(filters: { provider?: Provider | ""; status?: RunStatus | ""; model?: string } = {}) {

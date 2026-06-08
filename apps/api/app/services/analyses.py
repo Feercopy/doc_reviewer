@@ -10,7 +10,15 @@ from app.models.document import Document
 from app.models.skill import Skill
 from app.models.user import User
 from app.schemas.analyses import AnalysisRead, PredictedCommentRunRead
-from app.schemas.enums import DocumentParseStatus, DocumentType, EntityStatus, Provider, RunStatus, SkillType
+from app.schemas.enums import (
+    GATE_CHALLENGER_DOCUMENT_TYPES,
+    DocumentParseStatus,
+    DocumentType,
+    EntityStatus,
+    Provider,
+    RunStatus,
+    SkillType,
+)
 from app.services.documents import DocumentNotFoundError, get_document_for_actor
 from app.services.provider_keys import get_provider_key
 from app.services.skills import skill_source_snapshot
@@ -141,7 +149,8 @@ def _resolve_skill(*, db: Session, skill_id: UUID | None, document_type: str) ->
         Skill.status == EntityStatus.ACTIVE.value,
         Skill.skill_type == SkillType.MAIN_ANALYSIS.value,
     )
-    if document_type == DocumentType.GATE_2.value:
+    gate_challenger_types = {item.value for item in GATE_CHALLENGER_DOCUMENT_TYPES}
+    if document_type in gate_challenger_types:
         statement = statement.where(Skill.name == "gate2_challenger_main_analysis")
     skill = db.execute(statement.order_by(Skill.created_at.desc())).scalars().first()
     if skill is None:

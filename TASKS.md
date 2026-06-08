@@ -56,6 +56,8 @@ Primary plan index:
   draft editing, annotation queue, publish, and archive endpoints.
 - [x] Complete Phase 4 remaining MVP: past-defense import, benchmark API,
   benchmark worker scoring/reporting, and etalon/benchmark UI pages.
+- [x] Add deletion workflows for documents, admin-only users, and admin-only
+  etalons using reproducibility-preserving soft-delete status.
 
 ## Phase 1: Skeleton And Data Foundation
 
@@ -192,6 +194,10 @@ Tasks:
 - [x] Add one root-level `test` command or Makefile target.
 - [x] Run the full MVP acceptance suite with seeded admin credentials and the
   local API/worker stack.
+- [x] Align document type selection with canonical Gate Challenger stages:
+  Gate 2, 1st Stream Review, 2+ Stream Review, and Gate 3.
+- [x] Add soft-delete endpoints for documents, users, and admin etalons with
+  audit records and active-list filtering.
 
 Exit criteria:
 
@@ -315,3 +321,14 @@ Exit criteria:
   `make test` end-to-end: 106 backend/worker tests, 16 frontend unit tests,
   Next.js production build, Docker Compose config, and the full Playwright MVP
   flow pass.
+- 2026-06-08: Aligned user-selectable document types to the current Gate
+  Challenger skill stages: `gate_2`, `stream_review_1`,
+  `stream_review_2_plus`, and `gate_3`. Kept `unknown` as the internal
+  auto-detection fallback, removed old Gate 1/progress/strategy/generic stream
+  options from selection, updated deterministic detection and baseline skill
+  source path to `skills/gate-challenger/SKILL.md`, and verified API, worker,
+  frontend unit tests plus web production build.
+- 2026-06-08: Added soft-delete API coverage for documents, users, and admin
+  etalons. Deletes mark rows as `deleted`, preserve artifacts/history, filter
+  active user-facing lists, and record `document.deleted`, `user.deleted`, and
+  `etalon.deleted` audit events.

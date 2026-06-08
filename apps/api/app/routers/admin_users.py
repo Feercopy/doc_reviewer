@@ -9,6 +9,7 @@ from app.db.session import get_db
 from app.dependencies.auth import require_admin
 from app.models.audit_log import AuditLog
 from app.models.user import User
+from app.schemas.enums import UserStatus
 from app.schemas.users import PasswordReset, UserCreate, UserPatch, UserRead, UsersListResponse
 from app.security.passwords import hash_password
 from app.services.audit import record_audit
@@ -32,7 +33,11 @@ def list_users(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ) -> UsersListResponse:
-    users = db.execute(select(User).order_by(User.created_at.asc())).scalars().all()
+    users = (
+        db.execute(select(User).where(User.status != UserStatus.DELETED.value).order_by(User.created_at.asc()))
+        .scalars()
+        .all()
+    )
     return UsersListResponse(users=list(users))
 
 
@@ -70,7 +75,7 @@ def patch_user(
     admin: User = Depends(require_admin),
 ) -> User:
     user = db.get(User, user_id)
-    if user is None:
+    if user is None or user.status == UserStatus.DELETED.value:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     if payload.display_name is not None and payload.display_name != user.display_name:
@@ -114,7 +119,7 @@ def reset_password(
     admin: User = Depends(require_admin),
 ) -> User:
     user = db.get(User, user_id)
-    if user is None:
+    if user is None or user.status == UserStatus.DELETED.value:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     user.password_hash = hash_password(payload.password)
@@ -122,3 +127,21 @@ def reset_password(
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> None:
+    user = db.get(User, user_id)
+    if user is None or user.status == UserStatus.DELETED.value:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.id == admin.id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Admin cannot delete self")
+
+    previous_status = user.status
+    user.status = UserStatus.DELETED.value
+    _audit(db, admin, "user.deleted", user, {"status": {"from": previous_status, "to": user.status}})
+    db.commit()
