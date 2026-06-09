@@ -283,12 +283,12 @@ def _payload_from_analysis(analysis: Analysis) -> EtalonPayload:
     if not verdict:
         raise EtalonPreconditionError("Analysis has no verdict")
 
-    layer_1 = structured.get("layer_1")
-    if not isinstance(layer_1, list):
+    layer_1 = _normalize_layer_1(structured.get("layer_1"))
+    if not layer_1:
         layer_1 = _findings_to_layer_1(structured.get("findings"))
 
-    layer_2 = structured.get("layer_2")
-    if not isinstance(layer_2, list):
+    layer_2 = _normalize_layer_2(structured.get("layer_2"), layer_1)
+    if not layer_2:
         layer_2 = _checks_to_layer_2(structured.get("checks"), layer_1)
 
     key_findings = structured.get("key_findings")
@@ -311,6 +311,81 @@ def _payload_from_analysis(analysis: Analysis) -> EtalonPayload:
         )
     except ValueError as exc:
         raise EtalonPreconditionError(str(exc)) from exc
+
+
+def _normalize_layer_1(items: object) -> list[dict]:
+    if not isinstance(items, list):
+        return []
+    layer_1 = []
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+        item_id = _normalized_item_id(item.get("id"), prefix="L1", index=index)
+        evidence = _evidence_items(
+            item.get("evidence"),
+            fallback=item.get("summary") or item.get("issue") or item.get("impact") or item.get("title"),
+        )
+        summary = _first_text(
+            item.get("summary"),
+            item.get("issue"),
+            item.get("impact"),
+            _first_evidence_quote(evidence),
+            item.get("title"),
+            "No summary supplied",
+        )
+        layer_1.append(
+            {
+                "id": item_id,
+                "dimension": _first_text(item.get("dimension"), item.get("check"), "Analysis finding"),
+                "status": _status_value(item.get("status"), item.get("severity")),
+                "severity": _severity_value(item.get("severity")),
+                "title": _first_text(item.get("title"), item.get("issue"), item_id),
+                "summary": summary,
+                "evidence": evidence,
+                "recommendation": _first_text(item.get("recommendation"), item.get("expected_fix"), ""),
+                "confidence": _confidence_value(item.get("confidence")),
+            }
+        )
+    return layer_1
+
+
+def _normalize_layer_2(items: object, layer_1: list[dict]) -> list[dict]:
+    if not isinstance(items, list):
+        return []
+    parent_ids = {str(item["id"]) for item in layer_1 if isinstance(item, dict) and item.get("id")}
+    default_parent_id = next(iter(parent_ids), None)
+    layer_2 = []
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+        parent_id = str(item.get("parent_layer_1_id") or default_parent_id or "")
+        if not parent_id:
+            continue
+        evidence = _evidence_items(
+            item.get("evidence"),
+            fallback=item.get("finding") or item.get("atomic_issue") or item.get("risk") or item.get("title"),
+        )
+        layer_2.append(
+            {
+                "id": _normalized_item_id(item.get("id"), prefix="L2", index=index),
+                "parent_layer_1_id": parent_id,
+                "check": _first_text(item.get("check"), item.get("title"), item.get("atomic_issue"), f"Check {index}"),
+                "status": _status_value(item.get("status"), item.get("severity")),
+                "severity": _severity_value(item.get("severity")),
+                "finding": _first_text(
+                    item.get("finding"),
+                    item.get("atomic_issue"),
+                    item.get("risk"),
+                    item.get("title"),
+                    _first_evidence_quote(evidence),
+                    "No finding supplied",
+                ),
+                "evidence": evidence,
+                "expected_fix": _first_text(item.get("expected_fix"), item.get("recommendation"), ""),
+                "confidence": _confidence_value(item.get("confidence")),
+            }
+        )
+    return layer_2
 
 
 def _findings_to_layer_1(findings: object) -> list[dict]:
@@ -368,6 +443,67 @@ def _checks_to_layer_2(checks: object, layer_1: list[dict]) -> list[dict]:
 
 def _key_findings_from_layer_1(layer_1: list[dict]) -> list[str]:
     return [str(item["title"]) for item in layer_1 if isinstance(item, dict) and item.get("title")]
+
+
+def _normalized_item_id(value: object, *, prefix: str, index: int) -> str:
+    candidate = _first_text(value, f"{prefix}-{index:03d}")
+    return candidate if candidate.startswith(f"{prefix}-") else f"{prefix}-{candidate}"
+
+
+def _severity_value(value: object) -> str:
+    candidate = str(value) if value is not None else ""
+    return candidate if candidate in {item.value for item in Severity} else Severity.MEDIUM.value
+
+
+def _status_value(value: object, severity: object) -> str:
+    candidate = str(value) if value is not None else ""
+    if candidate in {item.value for item in CheckStatus}:
+        return candidate
+    severity_value = _severity_value(severity)
+    if severity_value in {Severity.CRITICAL.value, Severity.HIGH.value}:
+        return CheckStatus.FAIL.value
+    return CheckStatus.PARTIAL.value
+
+
+def _evidence_items(value: object, *, fallback: object) -> list[dict]:
+    if isinstance(value, list):
+        evidence = []
+        for item in value:
+            if isinstance(item, dict):
+                quote = _first_text(item.get("quote"), item.get("text"), item.get("evidence"), "")
+                location = _first_text(item.get("location"), "analysis output")
+                if quote:
+                    evidence.append({"quote": quote, "location": location})
+            else:
+                quote = _first_text(item, "")
+                if quote:
+                    evidence.append({"quote": quote, "location": "analysis output"})
+        if evidence:
+            return evidence
+
+    quote = _first_text(value, fallback, "No evidence supplied")
+    return [{"quote": quote, "location": "analysis output"}]
+
+
+def _first_evidence_quote(evidence: list[dict]) -> str:
+    if not evidence:
+        return ""
+    return str(evidence[0].get("quote") or "")
+
+
+def _confidence_value(value: object) -> float | None:
+    return value if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
+def _first_text(*values: object) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if value is not None and not isinstance(value, str):
+            text = str(value).strip()
+            if text:
+                return text
+    return ""
 
 
 def _effective_document_type(document: Document) -> str:

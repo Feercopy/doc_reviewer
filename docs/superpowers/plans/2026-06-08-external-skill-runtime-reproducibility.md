@@ -826,7 +826,7 @@ Do not start with DA RAG. Start by eliminating silent stub usage. The safest seq
 - TRX_SE run shows Layer 3, approval scope, narrative summary, DA historical cases, and DA tough questions.
 - Analysis detail UI shows source trace and retrieval trace.
 - Benchmark/regression tests fail if Gate/DA prompt_text stubs are used for external skills.
-- No raw user documents, provider keys, or private production data are stored in GBrain or external skill repos.
+- No raw user documents, provider keys, or private production data are stored in external planning tools or external skill repos.
 
 ## Verification Matrix
 
@@ -842,5 +842,5 @@ Do not start with DA RAG. Start by eliminating silent stub usage. The safest seq
 
 ## Notes
 
-- GBrain was unavailable during planning with `getaddrinfo ENOTFOUND`; this plan is based on repository context, current MVP plans, and local Devil's Advocate/Gate Challenger source inspection.
+- External development-memory lookup was unavailable during planning with `getaddrinfo ENOTFOUND`; this plan is based on repository context, current MVP plans, and local Devil's Advocate/Gate Challenger source inspection.
 - Do not commit this plan unless the user explicitly asks.

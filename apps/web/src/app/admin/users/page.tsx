@@ -2,7 +2,9 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
+import { AdminTabs } from "@/components/AdminTabs";
 import { AppShell } from "@/components/AppShell";
+import { StatusBadge } from "@/components/StatusBadge";
 import { createUser, deleteUser, listUsers, patchUser, resetPassword } from "@/lib/api/admin-users";
 import { me } from "@/lib/api/auth";
 import type { Role, User, UserStatus } from "@/lib/api/types";
@@ -14,6 +16,7 @@ export default function AdminUsersPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [deletingId, setDeletingId] = useState("");
   const [loginName, setLoginName] = useState("");
@@ -33,7 +36,9 @@ export default function AdminUsersPage() {
   }
 
   useEffect(() => {
-    refresh().catch((err) => setError(err instanceof Error ? err.message : "Failed to load users"));
+    refresh()
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load users"))
+      .finally(() => setLoading(false));
   }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -113,14 +118,20 @@ export default function AdminUsersPage() {
   return (
     <AppShell>
       <main className="main stack">
+        <AdminTabs />
         <div className="toolbar">
           <div>
             <h1>Users</h1>
-            <p className="muted">Admin account management</p>
+            <p className="muted">Admin account creation, role changes, resets, and deletion.</p>
           </div>
+          <span className="badge info">{users.length} users</span>
         </div>
 
         <form className="panel stack" onSubmit={submit}>
+          <div>
+            <h2>Create User</h2>
+            <p className="muted">Provision an account with its initial role and status.</p>
+          </div>
           <div className="form-grid">
             <label>
               Login
@@ -163,63 +174,80 @@ export default function AdminUsersPage() {
           </div>
         </form>
 
-        <section className="panel">
-          <table>
-            <thead>
-              <tr>
-                <th>Login</th>
-                <th>Name</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((user) => (
-                <tr key={user.id}>
-                  <td>{user.login}</td>
-                  <td>{user.display_name}</td>
-                  <td>
-                    <select
-                      value={user.role}
-                      onChange={(event) => updateUser(user, event.target.value as Role, user.status)}
-                    >
-                      {roles.map((item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <select
-                      value={user.status}
-                      onChange={(event) => updateUser(user, user.role, event.target.value as UserStatus)}
-                    >
-                      {statuses.map((item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="button-row">
-                    <button className="secondary" type="button" onClick={() => handleResetPassword(user)}>
-                      Reset password
-                    </button>
-                    <button
-                      className="danger"
-                      disabled={deletingId === user.id || user.id === currentUser?.id}
-                      type="button"
-                      onClick={() => handleDeleteUser(user)}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <section className="panel stack">
+          <div>
+            <h2>User Directory</h2>
+            <p className="muted">Identity, access role, and account state.</p>
+          </div>
+          {loading ? <div className="muted">Loading users...</div> : null}
+          {!loading && users.length === 0 ? <div className="muted">No users found.</div> : null}
+          {!loading && users.length > 0 ? (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Login</th>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Current status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((user) => (
+                    <tr key={user.id}>
+                      <td>
+                        <strong>{user.login}</strong>
+                        <div className="muted small">{user.id}</div>
+                      </td>
+                      <td>{user.display_name}</td>
+                      <td>
+                        <select
+                          value={user.role}
+                          onChange={(event) => updateUser(user, event.target.value as Role, user.status)}
+                        >
+                          {roles.map((item) => (
+                            <option key={item} value={item}>
+                              {item}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={user.status}
+                          onChange={(event) => updateUser(user, user.role, event.target.value as UserStatus)}
+                        >
+                          {statuses.map((item) => (
+                            <option key={item} value={item}>
+                              {item}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <StatusBadge status={user.status} />
+                      </td>
+                      <td className="button-row">
+                        <button className="secondary" type="button" onClick={() => handleResetPassword(user)}>
+                          Reset password
+                        </button>
+                        <button
+                          className="danger"
+                          disabled={deletingId === user.id || user.id === currentUser?.id}
+                          type="button"
+                          onClick={() => handleDeleteUser(user)}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </section>
       </main>
     </AppShell>

@@ -22,6 +22,7 @@ export default function SettingsPage() {
   const [model, setModel] = useState("gpt-test");
   const [error, setError] = useState("");
   const [testMessage, setTestMessage] = useState("");
+  const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
 
   async function refresh() {
@@ -30,7 +31,9 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
-    refresh().catch((err) => setError(err instanceof Error ? err.message : "Failed to load provider keys"));
+    refresh()
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load provider keys"))
+      .finally(() => setLoading(false));
   }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -84,11 +87,18 @@ export default function SettingsPage() {
   return (
     <AppShell>
       <main className="main stack">
-        <div>
-          <h1>Settings</h1>
-          <p className="muted">Provider keys are encrypted before storage and never shown after save.</p>
+        <div className="toolbar">
+          <div>
+            <h1>Settings</h1>
+            <p className="muted">Provider credentials, base URLs, and default models.</p>
+          </div>
+          <span className="badge info">{keys.length} saved</span>
         </div>
         <form className="panel stack" onSubmit={submit}>
+          <div>
+            <h2>Provider Key</h2>
+            <p className="muted">Saved keys are encrypted and displayed only by fingerprint.</p>
+          </div>
           <div className="form-grid">
             <label>
               Provider
@@ -117,42 +127,53 @@ export default function SettingsPage() {
           {testMessage ? <div className="success">{testMessage}</div> : null}
           <div>
             <button disabled={pending || !apiKey || !model} type="submit">
-              Save key
+              {pending ? "Working..." : "Save key"}
             </button>
           </div>
         </form>
-        <section className="panel">
-          {keys.length === 0 ? <div className="muted">No provider keys saved.</div> : null}
-          {keys.length > 0 ? (
-            <table>
-              <thead>
-                <tr>
-                  <th>Provider</th>
-                  <th>Model</th>
-                  <th>Key</th>
-                  <th>Base URL</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {keys.map((item) => (
-                  <tr key={item.provider}>
-                    <td>{item.provider.replaceAll("_", " ")}</td>
-                    <td>{item.default_model}</td>
-                    <td>{item.api_key_fingerprint}</td>
-                    <td>{item.base_url ?? "-"}</td>
-                    <td>
-                      <button className="secondary" disabled={pending} type="button" onClick={() => testKey(item.provider)}>
-                        Test
-                      </button>{" "}
-                      <button className="secondary" disabled={pending} type="button" onClick={() => remove(item.provider)}>
-                        Delete
-                      </button>
-                    </td>
+        <section className="panel stack">
+          <div>
+            <h2>Saved Provider Keys</h2>
+            <p className="muted">Masked fingerprints and runtime defaults currently available to this account.</p>
+          </div>
+          {loading ? <div className="muted">Loading provider keys...</div> : null}
+          {!loading && keys.length === 0 ? <div className="muted">No provider keys saved.</div> : null}
+          {!loading && keys.length > 0 ? (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Provider</th>
+                    <th>Model</th>
+                    <th>Key</th>
+                    <th>Base URL</th>
+                    <th>Status</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {keys.map((item) => (
+                    <tr key={item.provider}>
+                      <td>{item.provider.replaceAll("_", " ")}</td>
+                      <td>{item.default_model}</td>
+                      <td className="small">{item.api_key_fingerprint}</td>
+                      <td>{item.base_url ?? "-"}</td>
+                      <td>
+                        <span className={item.has_key ? "badge ok" : "badge"}>{item.has_key ? "stored" : "missing"}</span>
+                      </td>
+                      <td className="button-row">
+                        <button className="secondary" disabled={pending} type="button" onClick={() => testKey(item.provider)}>
+                          Test
+                        </button>
+                        <button className="danger" disabled={pending} type="button" onClick={() => remove(item.provider)}>
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : null}
         </section>
       </main>

@@ -84,48 +84,72 @@ export default function AnnotationPage() {
       <main className="main stack">
         {error ? <section className="panel error">{error}</section> : null}
         {etalon ? (
-          <section className="panel stack">
+          <>
             <div className="toolbar">
               <div>
                 <h1>Annotation</h1>
-                <p className="muted">{formatLabel(etalon.source)}</p>
+                <p className="muted">
+                  {formatLabel(etalon.source)} · {formatLabel(etalon.document_type)} · {etalon.id}
+                </p>
               </div>
               <StatusBadge status={etalon.status} />
             </div>
-            <div className="form-grid">
+            <section className="panel stack">
+              <div>
+                <h2>Review Controls</h2>
+                <p className="muted">Verdict and source visibility.</p>
+              </div>
+              <div className="form-grid">
+                <label>
+                  Expected verdict
+                  <select value={expectedVerdict} onChange={(event) => setExpectedVerdict(event.target.value as Verdict)}>
+                    <option value="approve">Approve</option>
+                    <option value="approve_with_conditions">Approve with conditions</option>
+                    <option value="need_evidence">Need evidence</option>
+                    <option value="reject">Reject</option>
+                    <option value="unknown">Unknown</option>
+                  </select>
+                </label>
+                <label className="checkbox-label">
+                  <input checked={rawVisible} type="checkbox" onChange={(event) => setRawVisible(event.target.checked)} />
+                  Raw file visible to all
+                </label>
+              </div>
+            </section>
+            <section className="panel stack">
+              <div>
+                <h2>Findings And Defense Notes</h2>
+                <p className="muted">Reviewer findings and defense context.</p>
+              </div>
               <label>
-                Expected verdict
-                <select value={expectedVerdict} onChange={(event) => setExpectedVerdict(event.target.value as Verdict)}>
-                  <option value="approve">Approve</option>
-                  <option value="approve_with_conditions">Approve with conditions</option>
-                  <option value="need_evidence">Need evidence</option>
-                  <option value="reject">Reject</option>
-                  <option value="unknown">Unknown</option>
-                </select>
+                Key findings
+                <textarea value={keyFindings} onChange={(event) => setKeyFindings(event.target.value)} />
               </label>
-              <label className="checkbox-label">
-                <input checked={rawVisible} type="checkbox" onChange={(event) => setRawVisible(event.target.checked)} />
-                Raw visible
+              <label>
+                Defense comments
+                <textarea value={defenseComments} onChange={(event) => setDefenseComments(event.target.value)} />
               </label>
-            </div>
-            <label>
-              Key findings
-              <textarea value={keyFindings} onChange={(event) => setKeyFindings(event.target.value)} />
-            </label>
-            <label>
-              Defense comments
-              <textarea value={defenseComments} onChange={(event) => setDefenseComments(event.target.value)} />
-            </label>
-            <Layer1Editor value={layer1} onChange={setLayer1} />
-            <Layer2Editor value={layer2} onChange={setLayer2} />
-            <EtalonStatusActions
-              status={etalon.status}
-              pending={pending}
-              onSave={save}
-              onPublish={() => lifecycle("publish")}
-              onArchive={() => lifecycle("archive")}
-            />
-          </section>
+            </section>
+            <section className="panel stack">
+              <Layer1Editor value={layer1} onChange={setLayer1} />
+            </section>
+            <section className="panel stack">
+              <Layer2Editor value={layer2} onChange={setLayer2} />
+            </section>
+            <section className="panel stack">
+              <div>
+                <h2>Lifecycle</h2>
+                <p className="muted">Draft, publish, and archive actions.</p>
+              </div>
+              <EtalonStatusActions
+                status={etalon.status}
+                pending={pending}
+                onSave={save}
+                onPublish={() => lifecycle("publish")}
+                onArchive={() => lifecycle("archive")}
+              />
+            </section>
+          </>
         ) : (
           <section className="panel muted">Loading...</section>
         )}

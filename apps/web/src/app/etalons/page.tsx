@@ -17,6 +17,7 @@ import { formatDate, formatLabel } from "@/lib/format";
 export default function EtalonsPage() {
   const [etalons, setEtalons] = useState<EtalonRecord[]>([]);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
 
   async function refresh() {
@@ -25,7 +26,9 @@ export default function EtalonsPage() {
   }
 
   useEffect(() => {
-    refresh().catch((err) => setError(err instanceof Error ? err.message : "Failed to load etalons"));
+    refresh()
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load etalons"))
+      .finally(() => setLoading(false));
   }, []);
 
   async function submitPastDefense(event: FormEvent<HTMLFormElement>) {
@@ -50,12 +53,16 @@ export default function EtalonsPage() {
         <div className="toolbar">
           <div>
             <h1>Etalons</h1>
-            <p className="muted">Drafts, active references, and past defenses</p>
+            <p className="muted">Drafts, active references, and imported defense outcomes.</p>
           </div>
+          <span className="badge info">{etalons.length} total</span>
         </div>
         {error ? <section className="panel error">{error}</section> : null}
         <form className="panel stack" onSubmit={submitPastDefense}>
-          <h2>Import Past Defense</h2>
+          <div>
+            <h2>Import Past Defense</h2>
+            <p className="muted">Upload a historical defense package and capture its expected verdict and comments.</p>
+          </div>
           <div className="form-grid">
             <label>
               Title
@@ -106,58 +113,75 @@ export default function EtalonsPage() {
             <input name="raw_file_visible_to_all" type="checkbox" value="true" />
             Raw file visible to all
           </label>
-          <button disabled={pending} type="submit">
-            Import
-          </button>
+          <div className="button-row">
+            <button disabled={pending} type="submit">
+              {pending ? "Importing..." : "Import"}
+            </button>
+          </div>
         </form>
-        <section className="panel">
-          {etalons.length ? (
-            <table>
-              <thead>
-                <tr>
-                  <th>Etalon</th>
-                  <th>Type</th>
-                  <th>Verdict</th>
-                  <th>Layers</th>
-                  <th>Status</th>
-                  <th>Updated</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {etalons.map((etalon) => (
-                  <tr key={etalon.id}>
-                    <td>
-                      <strong>{formatLabel(etalon.source)}</strong>
-                      <div className="muted">{etalon.id}</div>
-                    </td>
-                    <td>{formatLabel(etalon.document_type)}</td>
-                    <td>{formatLabel(etalon.expected_verdict)}</td>
-                    <td>
-                      L1 {etalon.layer_1.length}
-                      <div className="muted">L2 {etalon.layer_2.length}</div>
-                    </td>
-                    <td>
-                      <StatusBadge status={etalon.status} />
-                    </td>
-                    <td>{formatDate(etalon.updated_at)}</td>
-                    <td className="button-row">
-                      <Link className="secondary-link" href={`/etalons/${etalon.id}`}>
-                        Open
-                      </Link>
-                      <Link className="secondary-link" href={`/annotation/${etalon.id}`}>
-                        Edit
-                      </Link>
-                    </td>
+        <section className="panel stack">
+          <div>
+            <h2>Etalon Registry</h2>
+            <p className="muted">Open a reference for review or continue annotation without changing its source trace.</p>
+          </div>
+          {loading ? <div className="muted">Loading etalons...</div> : null}
+          {!loading && etalons.length === 0 ? <div className="muted">No etalons yet.</div> : null}
+          {!loading && etalons.length > 0 ? (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Etalon</th>
+                    <th>Type</th>
+                    <th>Verdict</th>
+                    <th>Layers</th>
+                    <th>Defense</th>
+                    <th>Status</th>
+                    <th>Updated</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="muted">No etalons yet.</div>
-          )}
+                </thead>
+                <tbody>
+                  {etalons.map((etalon) => (
+                    <tr key={etalon.id}>
+                      <td>
+                        <strong>{formatLabel(etalon.source)}</strong>
+                        <div className="muted small">{etalon.id}</div>
+                      </td>
+                      <td>{formatLabel(etalon.document_type)}</td>
+                      <td>
+                        <VerdictBadge verdict={etalon.expected_verdict} />
+                      </td>
+                      <td>
+                        <span className="badge">L1 {etalon.layer_1.length}</span>{" "}
+                        <span className="badge">L2 {etalon.layer_2.length}</span>
+                      </td>
+                      <td>{etalon.real_defense_status ? formatLabel(etalon.real_defense_status) : "-"}</td>
+                      <td>
+                        <StatusBadge status={etalon.status} />
+                      </td>
+                      <td>{formatDate(etalon.updated_at)}</td>
+                      <td className="button-row">
+                        <Link className="secondary-link" href={`/etalons/${etalon.id}`}>
+                          Open
+                        </Link>
+                        <Link className="secondary-link" href={`/annotation/${etalon.id}`}>
+                          Edit
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </section>
       </main>
     </AppShell>
   );
+}
+
+function VerdictBadge({ verdict }: { verdict: Verdict }) {
+  const tone = verdict === "approve" ? "ok" : verdict === "reject" ? "danger" : "info";
+  return <span className={`badge ${tone}`}>{formatLabel(verdict)}</span>;
 }

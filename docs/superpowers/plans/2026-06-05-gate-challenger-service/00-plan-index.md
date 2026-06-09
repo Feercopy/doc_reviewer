@@ -146,4 +146,4 @@ Exit criteria:
 - Provider adapters normalize GPT, Claude, and Hermes into one `AnalysisProviderResult` contract.
 - JSON schemas live in `contracts/schemas/` and are used by API validation, worker validation, UI rendering assumptions, and benchmark judge prompts.
 - Baseline skill sources are external local repositories: `/Users/iseremenko/Projects/Gate2-challenger` for Gate 2 stage-gate review and `/Users/iseremenko/Documents/Common GPTs/devils-advocate` for Avito InvCo adversarial critique. The app must snapshot prompt text, source path, source revision, and source fingerprint into each run instead of depending on mutable files at read time.
-- GBrain is used only as development memory for this project, not as runtime memory inside the product.
+- Development context is kept in repository docs, task notes, plans, and code history; external development-memory services are not runtime dependencies for the product.

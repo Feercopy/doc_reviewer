@@ -46,19 +46,37 @@ export default function EtalonDetailPage() {
                 <div>
                   <h1>Etalon</h1>
                   <p className="muted">
-                    {formatLabel(etalon.source)} · version {etalon.version}
+                    {formatLabel(etalon.source)} · version {etalon.version} · {etalon.id}
                   </p>
                 </div>
                 <StatusBadge status={etalon.status} />
               </div>
               <div className="meta-grid">
                 <div>
+                  <div className="muted small">Source</div>
+                  <strong>{formatLabel(etalon.source)}</strong>
+                </div>
+                <div>
                   <div className="muted small">Type</div>
                   <strong>{formatLabel(etalon.document_type)}</strong>
                 </div>
                 <div>
                   <div className="muted small">Expected verdict</div>
-                  <strong>{formatLabel(etalon.expected_verdict)}</strong>
+                  <VerdictBadge verdict={etalon.expected_verdict} />
+                </div>
+                <div>
+                  <div className="muted small">Layer counts</div>
+                  <strong>
+                    L1 {etalon.layer_1.length} / L2 {etalon.layer_2.length}
+                  </strong>
+                </div>
+                <div>
+                  <div className="muted small">Defense status</div>
+                  <strong>{etalon.real_defense_status ? formatLabel(etalon.real_defense_status) : "-"}</strong>
+                </div>
+                <div>
+                  <div className="muted small">Raw visibility</div>
+                  <strong>{etalon.raw_file_visible_to_all ? "Visible to all" : "Restricted"}</strong>
                 </div>
                 <div>
                   <div className="muted small">Updated</div>
@@ -72,11 +90,21 @@ export default function EtalonDetailPage() {
                 <button className="secondary" disabled={pending || etalon.status !== "draft"} type="button" onClick={() => runAction("publish")}>
                   Publish
                 </button>
-                <button className="secondary" disabled={pending || etalon.status === "archived"} type="button" onClick={() => runAction("archive")}>
+                <button className="danger" disabled={pending || etalon.status === "archived"} type="button" onClick={() => runAction("archive")}>
                   Archive
                 </button>
               </div>
             </section>
+            {etalon.key_findings.length ? (
+              <section className="panel stack">
+                <h2>Key Findings</h2>
+                <ul>
+                  {etalon.key_findings.map((finding) => (
+                    <li key={finding}>{finding}</li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
             {etalon.defense_comments ? (
               <section className="panel stack">
                 <h2>Defense Comments</h2>
@@ -103,21 +131,40 @@ function LayerTable({ title, rows }: { title: string; rows: Record<string, unkno
     <section className="panel stack">
       <h2>{title}</h2>
       {rows.length ? (
-        <table>
-          <tbody>
-            {rows.map((row, index) => (
-              <tr key={String(row.id ?? index)}>
-                <td>{String(row.id ?? index + 1)}</td>
-                <td>{String(row.title ?? row.check ?? row.finding ?? row.summary ?? "-")}</td>
-                <td>{formatLabel(String(row.status ?? ""))}</td>
-                <td>{formatLabel(String(row.severity ?? ""))}</td>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Finding</th>
+                <th>Status</th>
+                <th>Severity</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={String(row.id ?? index)}>
+                  <td>{String(row.id ?? index + 1)}</td>
+                  <td>{String(row.title ?? row.check ?? row.finding ?? row.summary ?? "-")}</td>
+                  <td>
+                    <StatusBadge status={String(row.status ?? "unknown")} />
+                  </td>
+                  <td>
+                    <span className="badge">{formatLabel(String(row.severity ?? ""))}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div className="muted">No rows.</div>
       )}
     </section>
   );
+}
+
+function VerdictBadge({ verdict }: { verdict: EtalonRecord["expected_verdict"] }) {
+  const tone = verdict === "approve" ? "ok" : verdict === "reject" ? "danger" : "info";
+  return <span className={`badge ${tone}`}>{formatLabel(verdict)}</span>;
 }

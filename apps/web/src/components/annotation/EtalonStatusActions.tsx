@@ -21,7 +21,7 @@ export function EtalonStatusActions({
       <button className="secondary" disabled={pending || status !== "draft"} type="button" onClick={onPublish}>
         Publish
       </button>
-      <button className="secondary" disabled={pending || status === "archived"} type="button" onClick={onArchive}>
+      <button className="danger" disabled={pending || status === "archived"} type="button" onClick={onArchive}>
         Archive
       </button>
     </div>

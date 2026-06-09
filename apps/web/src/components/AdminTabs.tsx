@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 const adminLinks = [
   ["/admin/users", "Users"],
@@ -13,10 +14,12 @@ const adminLinks = [
 ];
 
 export function AdminTabs() {
+  const pathname = usePathname();
+
   return (
     <nav className="admin-tabs" aria-label="Admin sections">
       {adminLinks.map(([href, label]) => (
-        <Link className="secondary-link" href={href} key={href}>
+        <Link className={pathname === href ? "button-link" : "secondary-link"} href={href} key={href}>
           {label}
         </Link>
       ))}

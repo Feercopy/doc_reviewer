@@ -18,51 +18,20 @@ The canonical implementation plan lives in:
 Before implementing a module, read the matching plan file in that directory and
 keep the implementation scoped to that file's acceptance criteria.
 
-## GBrain Development Memory
+## Development Context
 
-Use GBrain as project development memory only. Do not add GBrain dependencies,
-runtime calls, storage assumptions, or memory features to the application unless
-explicitly requested.
+Use repository files as the source of development context. Before architecture,
+planning, schema, prompt, or implementation decisions, read the relevant local
+context: `AGENTS.md`, `TASKS.md`, matching files under `docs/superpowers/plans/`,
+recent git history when useful, and nearby code/tests.
 
-Before architecture, planning, schema, prompt, or implementation decisions,
-search GBrain for existing context:
-
-```bash
-gbrain query "gate-challenger-service <topic>"
-gbrain search "gate-challenger-service <topic>"
-```
-
-In Codex workspace sandbox, GBrain CLI commands that read or write the local
-PGLite store under `~/.gbrain/brain.pglite` may need escalated filesystem
-access. A misleading `Timed out waiting for PGLite lock` can mean the sandbox
-cannot write to `~/.gbrain`, not that GBrain is down. Prefer an available GBrain
-MCP tool when present; otherwise rerun the GBrain CLI with the appropriate
-approval instead of deleting lock files.
-
-Before starting or restarting `gbrain serve`, first check whether a GBrain
-process is already running, for example with `pgrep -af gbrain` or by trying the
-available GBrain MCP tools. If a process already exists, do not start a second
-instance; use the existing MCP/service connection or the CLI against that
-running service.
+Do not require external development-memory services for this project unless the
+user explicitly asks. Do not add memory dependencies, runtime calls, storage
+assumptions, or memory features to the application unless explicitly requested.
 
 After meaningful decisions, implementation milestones, debugging findings,
-benchmark conclusions, or prompt/skill changes, save a concise note under the
-project namespace:
-
-```bash
-gbrain capture --slug gate-challenger-service/YYYY-MM-DD-short-topic --type decision --stdin
-```
-
-GBrain note rules:
-
-- Use slug prefix `gate-challenger-service/`.
-- Store concise summaries, decisions, rationale, and links to repo files.
-- Do not store raw user documents, private production data, secrets, provider
-  API keys, passwords, or large model outputs.
-- If GBrain is unavailable or locked, continue with local repo context and note
-  the failed memory check in the handoff or task update. Before treating a lock
-  as stale, verify whether a live `gbrain serve` or sandbox permission issue is
-  the real cause.
+benchmark conclusions, or prompt/skill changes, update `TASKS.md` or the
+relevant plan/handoff file with a concise note.
 
 ## Architecture Commitments
 
@@ -104,25 +73,24 @@ Canonical external skill sources:
 - Provider keys must be encrypted before storage and must never be returned to
   the frontend.
 - Logs, audit metadata, tests, and fixtures must not contain plaintext secrets.
-- GBrain must not receive raw user documents or secrets.
+- Do not send raw user documents, provider outputs, or secrets to external
+  note-taking or development-memory tools.
 - Use `.env.example` for non-secret configuration templates only.
 
 ## Workflow For Agents
 
 1. Read `AGENTS.md`, `TASKS.md`, and the relevant implementation plan before
    editing.
-2. Search GBrain before decisions that affect architecture, schemas, prompts,
-   data model, or implementation approach.
-3. Check git status before edits and do not overwrite unrelated user changes.
-4. Prefer `rg` and `rg --files` for discovery.
-5. Keep edits small and aligned with the existing plan boundaries.
-6. Update `TASKS.md` when task state, scope, or verification status changes.
-7. Add or update tests for behavior that can regress.
-8. Run the narrowest useful verification first, then broader checks when the
+2. Check git status before edits and do not overwrite unrelated user changes.
+3. Prefer `rg` and `rg --files` for discovery.
+4. Keep edits small and aligned with the existing plan boundaries.
+5. Update `TASKS.md` when task state, scope, or verification status changes.
+6. Add or update tests for behavior that can regress.
+7. Run the narrowest useful verification first, then broader checks when the
    touched surface warrants it.
-9. Save a concise GBrain note after meaningful decisions or milestones when
-   GBrain is available.
-10. Do not create commits unless the user explicitly asks.
+8. Record meaningful decisions or milestones in `TASKS.md` or the relevant
+   project handoff document.
+9. Do not create commits unless the user explicitly asks.
 
 ## Coding Standards
 

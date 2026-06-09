@@ -89,6 +89,58 @@ def test_user_can_create_etalon_draft_from_own_completed_analysis(client, db_ses
     assert etalon.status == EtalonStatus.DRAFT.value
 
 
+def test_create_etalon_draft_maps_gate_challenger_layers(client, db_session):
+    user = create_user(db_session, "author", "secret")
+    analysis = _create_completed_analysis(client, db_session, user)
+    analysis.structured_output = {
+        "verdict": "need_evidence",
+        "summary": "Needs stronger metric evidence.",
+        "assessment_markdown": "Оценка документа\nРекомендация: strengthen metric evidence before approval.",
+        "findings": [],
+        "checks": [],
+        "layer_1_markdown": "Layer 1\nL1-001 - Metric proof is incomplete.",
+        "layer_1": [
+            {
+                "id": "L1-001",
+                "severity": "high",
+                "title": "Metric proof is incomplete",
+                "issue": "The document claims traction without a control-group readout.",
+                "evidence": "The document names traction but does not provide a cohort readout.",
+                "impact": "Committee cannot separate product pull from market effects.",
+                "recommendation": "Add an experiment or holdout readout before approval.",
+            }
+        ],
+        "layer_2_markdown": "Layer 2\nL2-001 - Incrementality evidence is missing.",
+        "layer_2": [
+            {
+                "id": "L2-001",
+                "parent_layer_1_id": "L1-001",
+                "severity": "high",
+                "title": "Incrementality evidence is missing",
+                "atomic_issue": "The claimed metric lift is not tied to a holdout.",
+                "evidence": "No cohort, control group, or before-after guardrail is provided.",
+                "risk": "The investment case may overstate incremental impact.",
+                "recommendation": "Provide an experiment readout with denominator and baseline.",
+            }
+        ],
+        "key_findings": ["Metric proof is incomplete"],
+    }
+    db_session.commit()
+    login(client, "author", "secret")
+
+    response = client.post(f"/analyses/{analysis.id}/etalon-draft")
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["layer_1"][0]["dimension"] == "Analysis finding"
+    assert payload["layer_1"][0]["status"] == "fail"
+    assert payload["layer_1"][0]["summary"] == "The document claims traction without a control-group readout."
+    assert payload["layer_1"][0]["evidence"][0]["quote"] == "The document names traction but does not provide a cohort readout."
+    assert payload["layer_2"][0]["check"] == "Incrementality evidence is missing"
+    assert payload["layer_2"][0]["finding"] == "The claimed metric lift is not tied to a holdout."
+    assert payload["layer_2"][0]["expected_fix"] == "Provide an experiment readout with denominator and baseline."
+
+
 def test_user_cannot_create_etalon_draft_from_another_users_analysis(client, db_session):
     owner = create_user(db_session, "owner", "secret")
     create_user(db_session, "other", "secret")

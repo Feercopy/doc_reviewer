@@ -3,6 +3,7 @@ const { expect, test } = require("@playwright/test");
 const mainAnalysisResult = {
   verdict: "need_evidence",
   summary: "Needs stronger metric evidence.",
+  assessment_markdown: "Оценка документа\nРекомендация: strengthen metric evidence before approval.",
   findings: [
     {
       id: "F1",
@@ -19,10 +20,83 @@ const mainAnalysisResult = {
     },
   ],
   key_findings: ["Metric proof is incomplete"],
+  layer_1_markdown: "Layer 1\nL1-001 - Metric proof is incomplete.",
+  layer_1: [
+    {
+      id: "L1-001",
+      severity: "high",
+      title: "Metric proof is incomplete",
+      issue: "The document claims traction without a cohort or control-group readout.",
+      evidence: "The document names traction but does not provide a cohort or control-group readout.",
+      impact: "Committee cannot separate product pull from market or sales effects.",
+      recommendation: "Add an experiment or holdout readout before approval.",
+    },
+  ],
+  layer_2_markdown: "Layer 2\nL2-001 - Incrementality evidence is missing.",
+  layer_2: [
+    {
+      id: "L2-001",
+      parent_layer_1_id: "L1-001",
+      severity: "high",
+      title: "Incrementality evidence is missing",
+      atomic_issue: "The claimed metric lift is not tied to an experiment or comparable holdout.",
+      evidence: "No cohort, control group, or before-after guardrail is provided.",
+      risk: "The investment case may overstate incremental impact.",
+      recommendation: "Provide an experiment readout with denominator, baseline, and confidence.",
+    },
+  ],
 };
 
 const devilsAdvocateResult = {
   run_mode: "full_ic_voting",
+  native_markdown: [
+    "Devil's Advocate - IC voting",
+    "",
+    "Pre-flight summary",
+    "- Gate 2 document with missing incrementality proof.",
+    "",
+    "The Brutal Truth",
+    "The defense still needs a control-group readout.",
+    "",
+    "The Tough Co-CEO Questions",
+    "1. What is incremental impact?",
+    "",
+    "Actionable JTBDs",
+    "1. Add experiment evidence.",
+    "2. Show gross profit impact.",
+    "3. Separate assumptions from proven traction.",
+    "",
+    "IC Decision",
+    "Verdict: Rework",
+  ].join("\n"),
+  preflight_summary: ["Gate 2 document with missing incrementality proof."],
+  brutal_truth: "The defense still needs a control-group readout.",
+  detected_contradictions: [
+    {
+      section: "Metrics",
+      title: "Incrementality is not proven",
+      body: "The document claims traction but does not show an experiment or holdout.",
+      comment_type: "missing_data",
+      severity: "critical",
+      citations: ["wiki-ic/risk-patterns.md"],
+    },
+  ],
+  role_comments: [
+    { voter: "MP", vote: "reject", rationale: "No incrementality proof.", comments: [] },
+    { voter: "CPO", vote: "reject", rationale: "Funnel target needs evidence.", comments: [] },
+    { voter: "TechDir", vote: "reject", rationale: "No experiment delta.", comments: [] },
+    { voter: "VertDir", vote: "approve", rationale: "Direction is useful.", comments: [] },
+  ],
+  tough_questions: [
+    { question: "What is incremental impact?", persona: "Managing Partner" },
+    { question: "Which cohort proves the lift?", persona: "CPO" },
+    { question: "Where is the experiment delta?", persona: "Technical Director" },
+  ],
+  actionable_jtbds: [
+    "Add a hard incrementality KPI gate.",
+    "Show gross profit and cumulative uplift.",
+    "Separate proven traction from assumptions.",
+  ],
   anchored_comments: [
     {
       id: "C1",
@@ -38,12 +112,28 @@ const devilsAdvocateResult = {
     next_steps: ["add experiment readout"],
   },
   ic_decision: {
-    verdict: "need_evidence",
+    verdict: "rework",
+    vote_tally: { MP: "reject", CPO: "reject", TechDir: "reject", VertDir: "approve" },
     rationale: "Missing proof.",
+    conditions: ["Add experiment or holdout evidence."],
+    heuristics_fired: ["missing-proof"],
+    patterns_fired: ["experimental-traction-gap"],
+    precedents_anchored: ["ic-2025-incrementality"],
+    next_ic: "After metric evidence is added",
   },
   predicted_questions: ["What is incremental impact?"],
   consulted_wiki_pages: ["risk-patterns.md"],
   source_citations: ["wiki-ic/risk-patterns.md"],
+  retrieval: {
+    retrieval_mode: "deterministic_topk",
+    retrieval_version: "lexical-v1",
+    corpus_fingerprint: "corpus-fingerprint",
+    query_fingerprint: "query-fingerprint",
+    selected_cases: ["wiki-ic/cases/incrementality.md"],
+    selected_patterns: ["wiki-ic/patterns/missing-proof.md"],
+    selected_heuristics: ["wiki-ic/heuristics/evidence-gates.md"],
+    selected_questions: ["What is the control group?"],
+  },
 };
 
 test.setTimeout(120000);
@@ -72,8 +162,8 @@ test("admin creates user and user completes the MVP document analysis flow", asy
   await fillAndSubmitSignIn(page, userLogin, userPassword);
   await expect(page).toHaveURL(/\/documents/);
 
-  await page.goto(`${baseUrl}/documents/upload`);
-  await expect(page.getByRole("heading", { name: /Upload/i })).toBeVisible();
+  await page.goto(`${baseUrl}/documents`);
+  await expect(page.getByRole("region", { name: "Upload document" })).toBeVisible();
 
   await saveDummyProviderKey(page, apiBaseUrl);
 
@@ -107,6 +197,7 @@ test("admin creates user and user completes the MVP document analysis flow", asy
       model: "gpt-test",
       document_type_override: "gate_2",
       run_parameters: {
+        snapshot_mode: "development_current",
         mock_provider_result: {
           structured_text: JSON.stringify(mainAnalysisResult),
           raw_output: "raw e2e main analysis",
@@ -128,10 +219,10 @@ test("admin creates user and user completes the MVP document analysis flow", asy
   await waitForCompletedAnalysis(page, apiBaseUrl, analysis.id);
   await page.goto(`${baseUrl}/analyses/${analysis.id}`);
   await expect(page.getByRole("heading", { name: "Analysis" })).toBeVisible();
-  await expect(page.getByText("Needs stronger metric evidence.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Needs stronger metric evidence.", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Metric proof is incomplete").first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Devil's Advocate" })).toBeVisible();
-  await expect(page.getByText("What is incremental impact?", { exact: true })).toBeVisible();
+  await expect(page.getByText("What is incremental impact?", { exact: true }).first()).toBeVisible();
 
   await page.getByLabel("Comment").fill("E2E feedback: result is useful for review.");
   await page.getByLabel("Use for benchmark review").check();

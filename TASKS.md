@@ -16,18 +16,17 @@ Primary plan index:
 - Link detailed work to the matching plan file instead of duplicating every
   subtask here.
 - Update this file when scope, status, or verification changes.
-- Before decisions, search GBrain with the `gate-challenger-service` prefix.
-- After meaningful milestones, save a concise GBrain note if GBrain is
-  available.
+- Use repository docs, plans, task notes, git history, and nearby code/tests as
+  the development context. Do not require external development-memory services
+  unless the user explicitly asks.
 
 ## Current Focus
 
-- [x] Create root `AGENTS.md` with project, workflow, security, and GBrain
-  instructions.
+- [x] Create root `AGENTS.md` with project, workflow, security, and
+  repository-local context instructions.
 - [x] Create root `TASKS.md` aligned with the MVP phase plan.
-- [x] Document the GBrain/PGLite sandbox rule: use GBrain MCP when available or
-  run GBrain CLI with escalated filesystem access from Codex; do not delete lock
-  files before verifying the lock holder.
+- [x] Remove the obsolete external development-memory workflow from agent and
+  task instructions; use repository docs and task notes for handoff context.
 - [x] Finish full Phase 1 Docker Compose runtime verification using verified
   public mirror image defaults.
 - [x] Verify frontend package install, tests, production build, and critical
@@ -69,6 +68,18 @@ Primary plan index:
 - [x] Improve document detail Analysis form so it defaults to the saved provider
   model from settings while still allowing a per-run model override; verified
   with frontend tests and production build.
+- [x] Redesign the MVP web interface into a dark enterprise review console
+  across documents, upload, analysis, benchmarks, etalons, annotation,
+  settings, and admin pages while preserving existing API actions; verified
+  with frontend/API tests, production build, code-review pass, login browser
+  smoke, and the full Playwright MVP flow.
+- [x] Fix responsive layout regressions in the dark redesign: app content no
+  longer overflows beside the sidebar, phone navigation fits without horizontal
+  scrolling, and the documents table switches to card rows on tablet/phone
+  widths.
+- [x] Fix document queue table compression at medium desktop widths: the side
+  activity panels now stack below the table before the type/readiness columns
+  become too narrow, and short type badges such as `GATE 2` stay on one line.
 
 ## Phase 1: Skeleton And Data Foundation
 
@@ -229,12 +240,12 @@ Exit criteria:
 
 ## Decision Log
 
-- 2026-06-07: Added root agent and task workflow documents. GBrain is treated as
-  development memory only and must not become an application dependency.
-- 2026-06-07: Confirmed GBrain itself works when run with escalated filesystem
-  access. The earlier `Timed out waiting for PGLite lock` from Codex sandbox was
-  a misleading symptom of restricted access to `~/.gbrain/brain.pglite`, with
-  live `gbrain serve` as a normal lock holder.
+- 2026-06-07: Added root agent and task workflow documents. External
+  development memory was treated as non-runtime context and must not become an
+  application dependency.
+- 2026-06-09: Removed the external development-memory workflow from agent and
+  task instructions after repeated availability issues. Future agents should use
+  repository docs, task notes, git history, and nearby code/tests for context.
 - 2026-06-07: Implemented Phase 1 scaffold, initial schema migration, RBAC
   ownership helpers, cookie session auth, admin user management, bootstrap admin
   seed, baseline skill seed helper, and minimal Next.js authenticated routes.
@@ -355,3 +366,22 @@ Exit criteria:
   Hermes calls while respecting `NO_PROXY` for local service hosts. Verified
   worker/API tests, Compose config, Python image build, and worker-container
   SOCKS availability.
+- 2026-06-09: Implemented the dark enterprise frontend redesign from generated
+  prototypes. AppShell now uses a sidebar workspace layout and the main MVP
+  screens use dark graphite panels, dense tables, evidence workbench layouts,
+  benchmark QA dashboards, and animated upload/loading affordances. Review
+  fixes preserved full parsed text traceability, clarified document readiness
+  vs verdict labeling, and made annotation JSON editors tolerate invalid draft
+  input without discarding edits. Full e2e exposed an analysis-contract vs
+  etalon-draft payload mismatch, so draft creation now maps current Gate
+  Challenger Layer 1/2 output into annotation payload fields while preserving
+  the older etalon-shaped input. Verified API etalon tests, frontend unit
+  tests, production build, Compose config, independent review/tester agents,
+  login browser smoke, and the full Playwright MVP flow. External
+  development-memory lookup remained unavailable due `getaddrinfo ENOTFOUND`.
+- 2026-06-09: Fixed dark redesign responsiveness after browser review. Replaced
+  document-page `100vw` width calculations with container-relative widths,
+  compacted the mobile topbar/navigation, and converted the documents table to
+  card rows on tablet/phone widths. Verified no page-level horizontal overflow
+  at 1280, 1024, 768, 390, 360, and 320 px; frontend tests, production build,
+  and the full Playwright MVP flow pass.
