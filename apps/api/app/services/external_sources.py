@@ -32,8 +32,19 @@ def check_git_freshness(source: SkillSource, *, snapshot_mode: str) -> SourceHea
     if source.source_kind != "local_git_repo":
         return SourceHealth(source_path=source_path, resolved_revision=None, is_dirty=False, dirty_details={})
 
-    revision = _git(source_path, "rev-parse", "HEAD").strip()
-    dirty_files = _git(source_path, "status", "--short").splitlines()
+    try:
+        revision = _git(source_path, "rev-parse", "HEAD").strip()
+        dirty_files = _git(source_path, "status", "--short").splitlines()
+    except SourceUnavailableError:
+        if snapshot_mode == "production_latest":
+            raise
+        return SourceHealth(
+            source_path=source_path,
+            resolved_revision=None,
+            is_dirty=False,
+            dirty_details={"git_unavailable": True},
+        )
+
     is_dirty = bool(dirty_files)
     dirty_details = {"files": dirty_files} if dirty_files else {}
     if snapshot_mode == "production_latest" and is_dirty:

@@ -31,11 +31,15 @@ from results.schema_validation import parse_and_validate_json_output
 from skills.prompt_renderer import render_prompt
 
 
+DEFAULT_PREDICTED_COMMENTS_MAX_OUTPUT_TOKENS = 20000
+
+
 def run_analysis(analysis_id: str, *, db: Session | None = None, enqueue_predicted_comments=None) -> None:
     owns_session = db is None
     session = db or SessionLocal()
     analysis_uuid = UUID(str(analysis_id))
     provider_raw_output = None
+    provider_structured_text = None
     try:
         worker_logger.info(
             "worker_job_started",
@@ -74,6 +78,7 @@ def run_analysis(analysis_id: str, *, db: Session | None = None, enqueue_predict
         )
         result = get_provider_adapter(provider, analysis.run_parameters).run(request)
         provider_raw_output = result.raw_output
+        provider_structured_text = result.structured_text
         structured = parse_and_validate_json_output(
             structured_text=result.structured_text,
             schema_path=skill.result_schema_path,
@@ -122,7 +127,7 @@ def run_analysis(analysis_id: str, *, db: Session | None = None, enqueue_predict
         failed.status = RunStatus.FAILED.value
         failed.error_message = str(exc)
         if provider_raw_output is not None and failed.raw_output is None:
-            failed.raw_output = provider_raw_output
+            failed.raw_output = provider_raw_output or provider_structured_text
         failed.completed_at = utc_now()
         record_audit(
             db=session,
@@ -218,11 +223,15 @@ def _create_and_enqueue_predicted_comments(*, session: Session, analysis: Analys
             "main_analysis_id": str(analysis.id),
             "main_analysis_skill_source_snapshot": analysis.run_parameters.get("skill_source_snapshot"),
             "document_type": document.manual_document_type or document.detected_document_type,
+            "snapshot_mode": analysis.run_parameters.get("snapshot_mode", "production_latest"),
+            "max_output_tokens": _predicted_comments_max_output_tokens(analysis.run_parameters),
             "skill_source_snapshot": skill_source_snapshot(skill),
         }
         mock_result = analysis.run_parameters.get("predicted_comments_mock_provider_result")
         if mock_result is not None:
             run_parameters["mock_provider_result"] = mock_result
+        if skill.name == "devils_advocate_predefense":
+            run_parameters["response_format"] = {"type": "json_object"}
         predicted_run = PredictedCommentRun(
             analysis_id=analysis.id,
             skill_id=skill.id,
@@ -352,3 +361,13 @@ def _resolve_predicted_comments_skill(*, session: Session, document: Document) -
     return session.execute(
         base_statement.where(Skill.name == "generic_predicted_comments_fallback").order_by(Skill.created_at.desc())
     ).scalars().first()
+
+
+def _predicted_comments_max_output_tokens(run_parameters: dict) -> int:
+    explicit = run_parameters.get("predicted_comments_max_output_tokens")
+    if explicit is not None:
+        return int(explicit)
+    inherited = run_parameters.get("max_output_tokens")
+    if inherited is not None:
+        return int(inherited)
+    return DEFAULT_PREDICTED_COMMENTS_MAX_OUTPUT_TOKENS

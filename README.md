@@ -34,6 +34,10 @@ For temporary local provider egress through a SOCKS5 proxy, set
 `OUTBOUND_PROXY_URL=socks5h://user:password@host:port` in the untracked `.env`.
 The API and worker containers keep `postgres`, `redis`, and other local Compose
 hosts in `NO_PROXY` so internal service traffic stays direct.
+Docker image builds use separate optional `BUILD_HTTP_PROXY`,
+`BUILD_HTTPS_PROXY`, and `BUILD_ALL_PROXY` values. Do not reuse a SOCKS
+`OUTBOUND_PROXY_URL` as a build proxy because `pip` cannot bootstrap SOCKS
+support before dependencies are installed.
 
 Run migrations from the API container or a local API environment:
 

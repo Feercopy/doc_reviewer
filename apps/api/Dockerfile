@@ -12,8 +12,7 @@ COPY apps/api/alembic.ini ./alembic.ini
 COPY apps/api/alembic ./alembic
 COPY contracts ./contracts
 
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e .
 
 EXPOSE 8000
 

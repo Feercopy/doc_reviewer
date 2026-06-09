@@ -48,6 +48,8 @@ def run_predicted_comments(predicted_comment_run_id: str, *, db: Session | None 
     owns_session = db is None
     session = db or SessionLocal()
     run_uuid = UUID(str(predicted_comment_run_id))
+    provider_raw_output = None
+    provider_structured_text = None
     try:
         predicted_run = session.get(PredictedCommentRun, run_uuid)
         if predicted_run is None:
@@ -91,6 +93,8 @@ def run_predicted_comments(predicted_comment_run_id: str, *, db: Session | None 
             run_parameters=predicted_run.run_parameters,
         )
         result = get_provider_adapter(provider, predicted_run.run_parameters).run(request)
+        provider_raw_output = result.raw_output
+        provider_structured_text = result.structured_text
         structured = parse_and_validate_json_output(
             structured_text=result.structured_text,
             schema_path=skill.result_schema_path,
@@ -112,6 +116,8 @@ def run_predicted_comments(predicted_comment_run_id: str, *, db: Session | None 
             raise
         failed.status = RunStatus.FAILED.value
         failed.error_message = str(exc)
+        if provider_raw_output is not None and failed.raw_output is None:
+            failed.raw_output = provider_raw_output or provider_structured_text
         failed.completed_at = utc_now()
         session.commit()
     finally:

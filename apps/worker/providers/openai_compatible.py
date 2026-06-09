@@ -1,5 +1,7 @@
 import time
 from collections.abc import Callable
+from copy import deepcopy
+from typing import Any
 
 from providers.base import AnalysisProviderResult, ProviderAdapter, ProviderRunRequest
 from providers.proxy import outbound_proxy_kwargs
@@ -18,7 +20,7 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             "type": "json_schema",
             "json_schema": {
                 "name": "analysis_result",
-                "schema": request.response_schema,
+                "schema": _provider_compatible_schema(request.response_schema),
                 "strict": bool(request.run_parameters.get("json_schema_strict", False)),
             },
         }
@@ -65,3 +67,22 @@ def _dump_response(response: object) -> str:
     if hasattr(response, "model_dump_json"):
         return response.model_dump_json()
     return str(response)
+
+
+def _provider_compatible_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    compatible = deepcopy(schema)
+    _remove_unsupported_array_constraints(compatible)
+    return compatible
+
+
+def _remove_unsupported_array_constraints(node: Any) -> None:
+    if isinstance(node, dict):
+        if node.get("type") == "array" and isinstance(node.get("minItems"), int) and node["minItems"] > 1:
+            node.pop("minItems", None)
+        if node.get("type") == "array":
+            node.pop("maxItems", None)
+        for value in node.values():
+            _remove_unsupported_array_constraints(value)
+    elif isinstance(node, list):
+        for item in node:
+            _remove_unsupported_array_constraints(item)

@@ -10,8 +10,7 @@ COPY apps/api ./apps/api
 COPY apps/worker ./apps/worker
 COPY contracts ./contracts
 
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -e ./apps/api \
+RUN pip install --no-cache-dir -e ./apps/api \
     && pip install --no-cache-dir -e ./apps/worker
 
 WORKDIR /app/apps/worker

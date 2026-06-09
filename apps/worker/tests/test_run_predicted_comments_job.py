@@ -240,6 +240,58 @@ def test_run_predicted_comments_persists_structured_raw_and_metadata(tmp_path):
         _close_session(db)
 
 
+def test_run_predicted_comments_persists_structured_text_when_json_parse_fails(tmp_path):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, user)
+        main_skill = _create_main_skill(db)
+        predicted_skill = _create_predicted_skill(db, tmp_path)
+        _create_provider_key(db, user)
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=main_skill.id,
+            skill_version=main_skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.COMPLETED.value,
+            verdict="need_evidence",
+            summary="Needs stronger evidence.",
+            structured_output={"layer_1": [], "layer_2": []},
+            raw_output="raw main",
+            run_parameters={},
+        )
+        db.add(analysis)
+        db.flush()
+        predicted_run = PredictedCommentRun(
+            analysis_id=analysis.id,
+            skill_id=predicted_skill.id,
+            skill_version=predicted_skill.version,
+            provider=analysis.provider,
+            model=analysis.model,
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": "The Brutal Truth\nnot json",
+                    "raw_output": "",
+                    "latency_ms": 25,
+                }
+            },
+        )
+        db.add(predicted_run)
+        db.commit()
+
+        run_predicted_comments(str(predicted_run.id), db=db)
+
+        db.refresh(predicted_run)
+        assert predicted_run.status == RunStatus.FAILED.value
+        assert "Expecting value" in predicted_run.error_message
+        assert predicted_run.raw_output == "The Brutal Truth\nnot json"
+    finally:
+        _close_session(db)
+
+
 def test_run_predicted_comments_requires_retrieval_snapshot_for_external_da(tmp_path):
     db = _create_session()
     try:
@@ -365,7 +417,8 @@ def test_run_predicted_comments_renders_prompt_from_source_and_retrieval_snapsho
         assert predicted_run.run_parameters["prompt_fingerprint"]
         rendered_prompt = Path(predicted_run.run_parameters["rendered_prompt_artifact_path"]).read_text(encoding="utf-8")
         assert "Snapshot IC voting orchestrator" in rendered_prompt
-        assert "Snapshot incrementality case" in rendered_prompt
+        assert "Snapshot incrementality excerpt" in rendered_prompt
+        assert "Snapshot incrementality full case text should not be included" not in rendered_prompt
         assert "Devil's Advocate stub should not be used" not in rendered_prompt
     finally:
         get_settings.cache_clear()
@@ -673,7 +726,7 @@ def _create_da_source_snapshot_artifact(tmp_path, source_snapshot_id):
     (files_dir / "wiki-ic" / "schema.md").write_text("Snapshot wiki schema", encoding="utf-8")
     (files_dir / "wiki-ic" / "meta" / "output-format.md").write_text("Snapshot output format", encoding="utf-8")
     (files_dir / "wiki-ic" / "cases" / "incrementality.md").write_text(
-        "Snapshot incrementality case",
+        "Snapshot incrementality full case text should not be included",
         encoding="utf-8",
     )
     (source_snapshot_dir / "manifest.json").write_text(
@@ -706,7 +759,13 @@ def _create_da_retrieval_snapshot_artifact(tmp_path, retrieval_snapshot_id):
                 "query_fingerprint": "query-fingerprint",
                 "selected_paths": ["wiki-ic/cases/incrementality.md"],
                 "selected_items": {
-                    "top_cases": [{"path": "wiki-ic/cases/incrementality.md", "score": 4}],
+                    "top_cases": [
+                        {
+                            "path": "wiki-ic/cases/incrementality.md",
+                            "score": 4,
+                            "excerpt": "Snapshot incrementality excerpt",
+                        }
+                    ],
                 },
             }
         ),

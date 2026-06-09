@@ -77,6 +77,45 @@ def test_openai_compatible_adapter_uses_non_strict_schema_for_optional_contract_
     assert "explanation" in json_schema["schema"]["properties"]
 
 
+def test_openai_compatible_adapter_removes_provider_unsupported_array_min_items():
+    captured = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"summary":"ok"}'))],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=2),
+                model_dump_json=lambda: '{"raw":true}',
+            )
+
+    class FakeClient:
+        chat = SimpleNamespace(completions=FakeCompletions())
+
+    schema_with_strict_arrays = {
+        "type": "object",
+        "properties": {
+            "required_many": {"type": "array", "minItems": 3, "maxItems": 5, "items": {"type": "string"}},
+            "required_one": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        },
+    }
+    request = _request(
+        Provider.OPENAI_COMPATIBLE,
+        api_key="sk-test",
+        base_url="https://openrouter.ai/api/v1",
+        response_schema=schema_with_strict_arrays,
+    )
+
+    OpenAICompatibleAdapter(client_factory=lambda **_: FakeClient()).run(request)
+
+    provider_schema = captured["response_format"]["json_schema"]["schema"]
+    assert "minItems" not in provider_schema["properties"]["required_many"]
+    assert "maxItems" not in provider_schema["properties"]["required_many"]
+    assert provider_schema["properties"]["required_one"]["minItems"] == 1
+    assert schema_with_strict_arrays["properties"]["required_many"]["minItems"] == 3
+    assert schema_with_strict_arrays["properties"]["required_many"]["maxItems"] == 5
+
+
 def test_openai_compatible_adapter_builds_proxy_http_client(monkeypatch):
     monkeypatch.setenv("OUTBOUND_PROXY_URL", "socks5h://proxy.test:44435")
     get_settings.cache_clear()

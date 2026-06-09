@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { testProviderKey } from "./provider-settings";
+import { getProviderDefaultModel, testProviderKey } from "./provider-settings";
 
 const originalFetch = global.fetch;
 
@@ -10,6 +10,30 @@ afterEach(() => {
 });
 
 describe("provider settings api", () => {
+  it("resolves saved default model for the selected provider", () => {
+    expect(
+      getProviderDefaultModel(
+        [
+          {
+            provider: "anthropic_compatible",
+            base_url: null,
+            default_model: "claude-test",
+            api_key_fingerprint: "anthropic_compatible:...test",
+            has_key: true,
+          },
+          {
+            provider: "openai_compatible",
+            base_url: "https://api.example.test/v1",
+            default_model: "gpt-saved",
+            api_key_fingerprint: "openai_compatible:...test",
+            has_key: true,
+          },
+        ],
+        "openai_compatible",
+      ),
+    ).toBe("gpt-saved");
+  });
+
   it("posts provider key test request", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

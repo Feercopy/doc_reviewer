@@ -194,8 +194,8 @@ def test_devils_advocate_renderer_uses_source_snapshot_and_retrieval_dossier(tmp
     (files_dir / "ic-voting-prompt.md").write_text("Snapshot IC voting orchestrator", encoding="utf-8")
     (files_dir / "wiki-ic" / "schema.md").write_text("Snapshot wiki schema", encoding="utf-8")
     (files_dir / "wiki-ic" / "meta" / "output-format.md").write_text("Snapshot output format", encoding="utf-8")
-    case_file.write_text("Snapshot incrementality case", encoding="utf-8")
-    pattern_file.write_text("Snapshot missing proof pattern", encoding="utf-8")
+    case_file.write_text("Snapshot incrementality full case text should not be included", encoding="utf-8")
+    pattern_file.write_text("Snapshot missing proof full pattern text should not be included", encoding="utf-8")
     (source_snapshot_dir / "manifest.json").write_text(
         json.dumps(
             {
@@ -227,8 +227,20 @@ def test_devils_advocate_renderer_uses_source_snapshot_and_retrieval_dossier(tmp
                     "wiki-ic/patterns/missing-proof.md",
                 ],
                 "selected_items": {
-                    "top_cases": [{"path": "wiki-ic/cases/incrementality.md", "score": 4}],
-                    "top_patterns": [{"path": "wiki-ic/patterns/missing-proof.md", "score": 2}],
+                    "top_cases": [
+                        {
+                            "path": "wiki-ic/cases/incrementality.md",
+                            "score": 4,
+                            "excerpt": "Snapshot incrementality excerpt",
+                        }
+                    ],
+                    "top_patterns": [
+                        {
+                            "path": "wiki-ic/patterns/missing-proof.md",
+                            "score": 2,
+                            "excerpt": "Snapshot missing proof excerpt",
+                        }
+                    ],
                 },
             }
         ),
@@ -268,8 +280,10 @@ def test_devils_advocate_renderer_uses_source_snapshot_and_retrieval_dossier(tmp
     assert "Snapshot IC voting orchestrator" in prompt
     assert "Snapshot wiki schema" in prompt
     assert "Snapshot output format" in prompt
-    assert "Snapshot incrementality case" in prompt
-    assert "Snapshot missing proof pattern" in prompt
+    assert "Snapshot incrementality excerpt" in prompt
+    assert "Snapshot missing proof excerpt" in prompt
+    assert "Snapshot incrementality full case text should not be included" not in prompt
+    assert "Snapshot missing proof full pattern text should not be included" not in prompt
     assert "corpus-fingerprint" in prompt
     assert "Needs incrementality evidence" in prompt
     assert "Fallback DA prompt should not be used" not in prompt

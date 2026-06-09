@@ -102,7 +102,6 @@ def _read_selected_wiki_sections(
         paths = [
             "wiki-ic/schema.md",
             "wiki-ic/meta/output-format.md",
-            *(retrieval_snapshot.dossier.get("selected_paths", []) if retrieval_snapshot else []),
         ]
         sections = []
         seen: set[str] = set()

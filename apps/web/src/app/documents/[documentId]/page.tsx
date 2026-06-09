@@ -8,6 +8,11 @@ import { AppShell } from "@/components/AppShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { resolveApiBaseUrl } from "@/lib/api/client";
 import {
+  getProviderDefaultModel,
+  listProviderKeys,
+  type ProviderKeyRecord,
+} from "@/lib/api/provider-settings";
+import {
   USER_SELECTABLE_DOCUMENT_TYPES,
   createAnalysis,
   deleteDocument,
@@ -30,8 +35,10 @@ export default function DocumentDetailPage() {
   const [parsedText, setParsedText] = useState("");
   const [analyses, setAnalyses] = useState<AnalysisRecord[]>([]);
   const [manualType, setManualType] = useState<DocumentType | "">("");
+  const [providerKeys, setProviderKeys] = useState<ProviderKeyRecord[]>([]);
   const [provider, setProvider] = useState<Provider>("openai_compatible");
-  const [model, setModel] = useState("gpt-test");
+  const [model, setModel] = useState("");
+  const [modelEdited, setModelEdited] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
 
@@ -54,6 +61,43 @@ export default function DocumentDetailPage() {
   useEffect(() => {
     refresh().catch((err) => setError(err instanceof Error ? err.message : "Failed to load document"));
   }, [documentId]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    listProviderKeys()
+      .then((response) => {
+        if (!ignore) {
+          setProviderKeys(response.provider_keys);
+        }
+      })
+      .catch(() => setProviderKeys([]));
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (modelEdited) {
+      return;
+    }
+    const defaultModel = getProviderDefaultModel(providerKeys, provider);
+    if (defaultModel) {
+      setModel(defaultModel);
+    }
+  }, [modelEdited, provider, providerKeys]);
+
+  function changeProvider(nextProvider: Provider) {
+    setProvider(nextProvider);
+    setModelEdited(false);
+    setModel(getProviderDefaultModel(providerKeys, nextProvider));
+  }
+
+  function changeModel(nextModel: string) {
+    setModel(nextModel);
+    setModelEdited(true);
+  }
 
   async function saveType() {
     setPending(true);
@@ -183,7 +227,7 @@ export default function DocumentDetailPage() {
               <div className="form-grid">
                 <label>
                   Provider
-                  <select value={provider} onChange={(event) => setProvider(event.target.value as Provider)}>
+                  <select value={provider} onChange={(event) => changeProvider(event.target.value as Provider)}>
                     <option value="openai_compatible">OpenAI compatible</option>
                     <option value="anthropic_compatible">Anthropic compatible</option>
                     <option value="hermes">Hermes</option>
@@ -191,7 +235,7 @@ export default function DocumentDetailPage() {
                 </label>
                 <label>
                   Model
-                  <input value={model} onChange={(event) => setModel(event.target.value)} />
+                  <input value={model} onChange={(event) => changeModel(event.target.value)} />
                 </label>
               </div>
               <div>

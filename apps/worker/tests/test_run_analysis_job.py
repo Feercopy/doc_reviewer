@@ -1,6 +1,7 @@
 import json
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 from sqlalchemy import create_engine
@@ -9,10 +10,11 @@ from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
 from app.core.config import get_settings
-from app.models.analysis import Analysis
+from app.models.analysis import Analysis, PredictedCommentRun
 from app.models.document import Document
 from app.models.provider_key import ProviderKey
 from app.models.skill import Skill
+from app.models.skill_source import SkillSource
 from app.models.user import User
 from app.schemas.enums import (
     DocumentParseStatus,
@@ -106,6 +108,51 @@ def test_run_analysis_marks_missing_provider_key_failed(tmp_path):
         db.refresh(analysis)
         assert analysis.status == RunStatus.FAILED.value
         assert analysis.error_message == "provider_key_missing"
+    finally:
+        _close_session(db)
+
+
+def test_run_analysis_persists_structured_text_when_json_parse_fails(tmp_path):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        db.add(
+            ProviderKey(
+                owner_id=user.id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url=None,
+                default_model="gpt-test",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": "Оценка документа\nnot json",
+                    "raw_output": "",
+                    "latency_ms": 30,
+                }
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        run_analysis(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        assert analysis.status == RunStatus.FAILED.value
+        assert "Expecting value" in analysis.error_message
+        assert analysis.raw_output == "Оценка документа\nnot json"
     finally:
         _close_session(db)
 
@@ -253,6 +300,122 @@ def test_run_analysis_persists_rendered_prompt_from_source_snapshot(tmp_path, mo
         assert "Snapshot Gate instructions" in rendered_prompt
         assert "Snapshot reference rubric" in rendered_prompt
         assert "Stub prompt should not be used" not in rendered_prompt
+    finally:
+        get_settings.cache_clear()
+        _close_session(db)
+
+
+def test_run_analysis_propagates_snapshot_mode_to_predicted_comments(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+        get_settings.cache_clear()
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        main_skill = _create_skill(db)
+        source = SkillSource(
+            slug="devils-advocate",
+            display_name="Devil's Advocate",
+            source_kind=SkillSourceType.LOCAL_KNOWLEDGE_BASE.value,
+            local_path=str(tmp_path / "devils-advocate"),
+            repo_url=None,
+            default_ref=None,
+            entrypoint="ic-voting-prompt.md",
+            required_paths=[],
+            update_policy="manual",
+            status=EntityStatus.ACTIVE.value,
+        )
+        db.add(source)
+        db.flush()
+        predicted_skill = Skill(
+            name="devils_advocate_predefense",
+            description="Devil's Advocate",
+            version="baseline",
+            skill_type=SkillType.PREDICTED_COMMENTS.value,
+            supported_document_types=[DocumentType.GATE_2.value],
+            source_type=SkillSourceType.LOCAL_KNOWLEDGE_BASE.value,
+            skill_source_id=source.id,
+            source_uri=source.local_path,
+            source_entrypoint=source.entrypoint,
+            source_revision=None,
+            source_fingerprint="devils-fingerprint",
+            source_metadata={},
+            prompt_text="Critique the document.",
+            result_schema_path="contracts/schemas/predicted-comments-result.schema.json",
+            runtime_mode="snapshot_required",
+            status=EntityStatus.ACTIVE.value,
+        )
+        db.add(predicted_skill)
+        db.add(
+            ProviderKey(
+                owner_id=user.id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url=None,
+                default_model="gpt-test",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        db.commit()
+
+        captured_snapshot_modes = []
+
+        def fake_create_skill_source_snapshot(**kwargs):
+            captured_snapshot_modes.append(kwargs["snapshot_mode"])
+            return SimpleNamespace(
+                id=uuid4(),
+                source_slug="devils-advocate",
+                resolved_revision=None,
+                source_fingerprint="devils-snapshot-fingerprint",
+                artifact_path=str(tmp_path / "skill-snapshot"),
+                snapshot_mode=kwargs["snapshot_mode"],
+                is_dirty=False,
+            )
+
+        def fake_create_devils_retrieval_snapshot(**kwargs):
+            return SimpleNamespace(
+                id=uuid4(),
+                artifact_path=str(tmp_path / "retrieval-snapshot"),
+                retrieval_mode="fixture",
+                retrieval_version="test",
+                corpus_fingerprint="corpus-fingerprint",
+                query_fingerprint="query-fingerprint",
+                selected_items={},
+            )
+
+        monkeypatch.setattr("jobs.run_analysis.create_skill_source_snapshot", fake_create_skill_source_snapshot)
+        monkeypatch.setattr("jobs.run_analysis.create_devils_retrieval_snapshot", fake_create_devils_retrieval_snapshot)
+
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=main_skill.id,
+            skill_version=main_skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "snapshot_mode": "development_current",
+                "mock_provider_result": {
+                    "structured_text": _main_analysis_json("Needs stronger metric evidence."),
+                    "raw_output": "raw provider text",
+                    "latency_ms": 30,
+                },
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        enqueued_run_ids = []
+        run_analysis(str(analysis.id), db=db, enqueue_predicted_comments=enqueued_run_ids.append)
+
+        predicted_run = db.query(PredictedCommentRun).filter(PredictedCommentRun.analysis_id == analysis.id).one()
+        assert enqueued_run_ids == [predicted_run.id]
+        assert captured_snapshot_modes == ["development_current"]
+        assert predicted_run.run_parameters["snapshot_mode"] == "development_current"
+        assert predicted_run.run_parameters["max_output_tokens"] == 20000
+        assert predicted_run.run_parameters["response_format"] == {"type": "json_object"}
+        assert predicted_run.run_parameters["skill_source_snapshot"]["snapshot_mode"] == "development_current"
     finally:
         get_settings.cache_clear()
         _close_session(db)

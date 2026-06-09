@@ -66,6 +66,9 @@ Primary plan index:
   renders assessment summary followed by strict Layer 1 and Layer 2, and
   Devil's Advocate renders native `ic-voting-prompt.md` IC voting output before
   structured JSON details.
+- [x] Improve document detail Analysis form so it defaults to the saved provider
+  model from settings while still allowing a per-run model override; verified
+  with frontend tests and production build.
 
 ## Phase 1: Skeleton And Data Foundation
 

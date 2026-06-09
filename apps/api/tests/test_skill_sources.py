@@ -8,6 +8,7 @@ from app.services.external_sources import (
     check_git_freshness,
     fingerprint_manifest,
 )
+from app.services import external_sources
 from app.storage.local import LocalDocumentStorage
 
 
@@ -164,6 +165,34 @@ def test_git_freshness_allows_dirty_intentional_local_run(tmp_path):
     assert health.resolved_revision
     assert health.is_dirty is True
     assert "SKILL.md" in health.dirty_details["files"][0]
+
+
+def test_git_freshness_allows_development_snapshot_when_git_is_unavailable(tmp_path, monkeypatch):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "SKILL.md").write_text("Main prompt", encoding="utf-8")
+    source = SkillSource(
+        slug="source",
+        display_name="Source",
+        source_kind="local_git_repo",
+        local_path=str(root),
+        default_ref="main",
+        entrypoint="SKILL.md",
+        required_paths=["SKILL.md"],
+        update_policy="require_latest",
+        status="active",
+    )
+
+    def unavailable_git(*args):
+        raise SourceUnavailableError("git command failed: rev-parse HEAD")
+
+    monkeypatch.setattr(external_sources, "_git", unavailable_git)
+
+    health = check_git_freshness(source, snapshot_mode="development_current")
+
+    assert health.resolved_revision is None
+    assert health.is_dirty is False
+    assert health.dirty_details == {"git_unavailable": True}
 
 
 def test_create_skill_source_snapshot_writes_artifact_files(db_session, tmp_path):

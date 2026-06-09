@@ -21,6 +21,10 @@ export type ProviderKeyTestResponse = {
   base_url: string | null;
 };
 
+export function getProviderDefaultModel(providerKeys: ProviderKeyRecord[], provider: Provider): string {
+  return providerKeys.find((item) => item.provider === provider)?.default_model ?? "";
+}
+
 export async function listProviderKeys(): Promise<ProviderKeysListResponse> {
   return apiFetch<ProviderKeysListResponse>("/settings/provider-keys");
 }
