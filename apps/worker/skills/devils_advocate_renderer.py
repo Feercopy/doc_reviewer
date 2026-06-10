@@ -33,14 +33,25 @@ def render_devils_advocate_prompt(
         "key_findings": main_output.get("key_findings", []),
         "recommendations": main_output.get("recommendations", []),
     }
+    has_main_context = any(
+        [
+            main_context["verdict"],
+            main_context["summary"],
+            main_context["findings"],
+            main_context["checks"],
+            main_context["layer_1"],
+            main_context["layer_2"],
+            main_context["key_findings"],
+            main_context["recommendations"],
+        ]
+    )
     document_type = getattr(document, "manual_document_type", None) or getattr(document, "detected_document_type", "unknown")
 
     return "\n\n".join(
         [
             f"Skill: {skill.name} ({skill.version})",
             "Run mode: full_ic_voting",
-            "Use the Devil's Advocate / IC voting orchestration to predict defense committee comments. "
-            "Anchor comments to document evidence and the completed main analysis. Do not invent source citations.",
+            _run_mode_instruction(has_main_context),
             output_language_instruction(output_language) if output_language is not None else "",
             "Devil's Advocate source snapshot:",
             "\n".join(_source_lines(skill=skill, source_snapshot=source_snapshot)),
@@ -50,8 +61,8 @@ def render_devils_advocate_prompt(
             _retrieval_dossier_text(retrieval_snapshot),
             "Selected knowledge base context:",
             "\n\n".join(wiki_sections) if wiki_sections else "No selected wiki pages were available.",
-            "Completed main analysis context:",
-            json.dumps(main_context, ensure_ascii=False, sort_keys=True),
+            _main_context_heading(has_main_context),
+            json.dumps(main_context if has_main_context else _empty_main_context(), ensure_ascii=False, sort_keys=True),
             "Mandatory native IC voting output format:",
             "\n".join(
                 [
@@ -79,6 +90,32 @@ def render_devils_advocate_prompt(
             document.parsed_text or "",
         ]
     )
+
+
+def _run_mode_instruction(has_main_context: bool) -> str:
+    if has_main_context:
+        return (
+            "Use the Devil's Advocate / IC voting orchestration to predict defense committee comments. "
+            "Anchor comments to document evidence and the completed main analysis. Do not invent source citations."
+        )
+    return (
+        "Use the Devil's Advocate / IC voting orchestration as the first expert critique before Gate Challenger. "
+        "Anchor comments to document evidence and produce expert issues that can later strengthen or supplement "
+        "Gate Challenger. Do not invent source citations."
+    )
+
+
+def _main_context_heading(has_main_context: bool) -> str:
+    if has_main_context:
+        return "Completed main analysis context:"
+    return "Gate Challenger context:"
+
+
+def _empty_main_context() -> dict:
+    return {
+        "status": "not_available",
+        "reason": "Devil's Advocate runs before Gate Challenger in this workflow.",
+    }
 
 
 def _read_source_text(skill: Any, *, source_snapshot: SkillSourceSnapshotMaterial | None) -> str:

@@ -334,29 +334,30 @@ const markdownPreviewStyles = `
   margin-bottom: 0;
 }
 
-.gc-md-heading {
+.gc-markdown-preview .gc-md-heading {
   margin: 22px 0 10px;
   color: #f8fafc;
   font-weight: 850;
   letter-spacing: 0;
   line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
-.gc-md-heading-1 {
-  font-size: 26px;
+.gc-markdown-preview .gc-md-heading-1 {
+  font-size: 24px;
 }
 
-.gc-md-heading-2 {
-  font-size: 22px;
+.gc-markdown-preview .gc-md-heading-2 {
+  font-size: 20px;
 }
 
-.gc-md-heading-3 {
-  font-size: 19px;
+.gc-markdown-preview .gc-md-heading-3 {
+  font-size: 18px;
 }
 
-.gc-md-heading-4,
-.gc-md-heading-5,
-.gc-md-heading-6 {
+.gc-markdown-preview .gc-md-heading-4,
+.gc-markdown-preview .gc-md-heading-5,
+.gc-markdown-preview .gc-md-heading-6 {
   font-size: 16px;
 }
 

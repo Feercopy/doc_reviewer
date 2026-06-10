@@ -305,6 +305,78 @@ def test_run_analysis_persists_rendered_prompt_from_source_snapshot(tmp_path, mo
         _close_session(db)
 
 
+def test_run_analysis_runs_devils_advocate_before_gate_and_passes_layer_4_context(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+        get_settings.cache_clear()
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        main_skill = _create_skill(db)
+        predicted_skill = _create_predicted_skill(db, tmp_path)
+        db.add(
+            ProviderKey(
+                owner_id=user.id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url=None,
+                default_model="gpt-test",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=main_skill.id,
+            skill_version=main_skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": _main_analysis_json("Gate uses expert layer 4."),
+                    "raw_output": "raw main",
+                    "latency_ms": 30,
+                },
+                "predicted_comments_mock_provider_result": {
+                    "structured_text": _devils_advocate_json(),
+                    "raw_output": "raw predicted",
+                    "latency_ms": 20,
+                },
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        enqueued_run_ids = []
+        run_analysis(str(analysis.id), db=db, enqueue_predicted_comments=enqueued_run_ids.append)
+
+        predicted_run = db.query(PredictedCommentRun).filter(PredictedCommentRun.analysis_id == analysis.id).one()
+        db.refresh(analysis)
+        assert analysis.status == RunStatus.COMPLETED.value
+        assert predicted_run.skill_id == predicted_skill.id
+        assert predicted_run.status == RunStatus.COMPLETED.value
+        assert enqueued_run_ids == []
+
+        layer_4_context = analysis.run_parameters["gate_challenger_layer_4_context"]
+        assert layer_4_context["source"] == "devils_advocate_predefense"
+        assert layer_4_context["predicted_comment_run_id"] == str(predicted_run.id)
+        assert layer_4_context["brutal_truth"] == "Fatal flaw."
+        assert layer_4_context["detected_contradictions"][0]["title"] == "Gross profit not shown"
+
+        rendered_prompt = Path(analysis.run_parameters["rendered_prompt_artifact_path"]).read_text(encoding="utf-8")
+        assert "Layer 4" in rendered_prompt
+        assert "Devil's Advocate expert analysis" in rendered_prompt
+        assert "The Brutal Truth" in rendered_prompt
+        assert "Fatal flaw." in rendered_prompt
+        assert "Detected Contradictions & Missing Proofs" in rendered_prompt
+        assert "Gross profit not shown" in rendered_prompt
+        assert "strengthen or supplement Gate Challenger" in rendered_prompt
+    finally:
+        get_settings.cache_clear()
+        _close_session(db)
+
+
 def test_run_analysis_propagates_snapshot_mode_to_predicted_comments(tmp_path, monkeypatch):
     db = _create_session()
     try:
@@ -411,12 +483,13 @@ def test_run_analysis_propagates_snapshot_mode_to_predicted_comments(tmp_path, m
         run_analysis(str(analysis.id), db=db, enqueue_predicted_comments=enqueued_run_ids.append)
 
         predicted_run = db.query(PredictedCommentRun).filter(PredictedCommentRun.analysis_id == analysis.id).one()
-        assert enqueued_run_ids == [predicted_run.id]
+        assert enqueued_run_ids == []
         assert captured_snapshot_modes == ["development_current"]
         assert predicted_run.run_parameters["snapshot_mode"] == "development_current"
         assert predicted_run.run_parameters["output_language"] == "en"
         assert predicted_run.run_parameters["max_output_tokens"] == 20000
         assert predicted_run.run_parameters["response_format"] == {"type": "json_object"}
+        assert predicted_run.run_parameters["run_order"] == "before_gate_challenger"
         assert predicted_run.run_parameters["skill_source_snapshot"]["snapshot_mode"] == "development_current"
     finally:
         get_settings.cache_clear()
@@ -449,11 +522,8 @@ def _main_analysis_json(summary: str = "Needs evidence.") -> str:
                 {
                     "id": "L1-001",
                     "severity": "critical",
-                    "title": "Decision-critical blocker",
                     "issue": "Mandatory readiness is not proven.",
                     "evidence": "The document does not close the required proof.",
-                    "impact": "Committee cannot approve scale-up as-is.",
-                    "recommendation": "Gate approval on proof.",
                 }
             ],
             "layer_2_markdown": "Layer 2\nL2-001 — Atomic weak-link finding.",
@@ -551,3 +621,96 @@ def _create_skill(
     db.commit()
     db.refresh(skill)
     return skill
+
+
+def _create_predicted_skill(db: Session, tmp_path) -> Skill:
+    prompt_path = tmp_path / "ic-voting-prompt.md"
+    prompt_path.write_text("IC voting orchestrator", encoding="utf-8")
+    skill = Skill(
+        name="devils_advocate_predefense",
+        description="Devil's Advocate",
+        version="baseline",
+        skill_type=SkillType.PREDICTED_COMMENTS.value,
+        supported_document_types=[DocumentType.GATE_2.value],
+        source_type=SkillSourceType.LOCAL_KNOWLEDGE_BASE.value,
+        source_uri=str(prompt_path),
+        source_entrypoint="ic-voting-prompt.md",
+        source_revision="revision",
+        source_fingerprint=None,
+        source_metadata={"selected_wiki_pages": []},
+        prompt_text="Devil's Advocate prompt",
+        result_schema_path="contracts/schemas/devils-advocate-result.schema.json",
+        status=EntityStatus.ACTIVE.value,
+    )
+    db.add(skill)
+    db.commit()
+    db.refresh(skill)
+    return skill
+
+
+def _devils_advocate_json() -> str:
+    return json.dumps(
+        {
+            "run_mode": "full_ic_voting",
+            "native_markdown": (
+                "Devil's Advocate\n\n"
+                "The Brutal Truth\n\nFatal flaw.\n\n"
+                "Detected Contradictions & Missing Proofs\n\n- Gross profit not shown."
+            ),
+            "preflight_summary": ["Stage: Gate-2"],
+            "brutal_truth": "Fatal flaw.",
+            "detected_contradictions": [
+                {
+                    "section": "FAQ 4",
+                    "title": "Gross profit not shown",
+                    "body": "Revenue is shown but gross profit is absent.",
+                    "comment_type": "missing_data",
+                    "severity": "critical",
+                    "citations": ["[[financial-revenue-and-gross-profit]]"],
+                }
+            ],
+            "role_comments": [
+                {"voter": "MP", "vote": "reject", "rationale": "No incrementality proof.", "comments": []},
+                {"voter": "CPO", "vote": "reject", "rationale": "Funnel target missed.", "comments": []},
+                {"voter": "TechDir", "vote": "reject", "rationale": "No A/B delta.", "comments": []},
+                {"voter": "VertDir", "vote": "approve", "rationale": "Direction is useful.", "comments": []},
+            ],
+            "tough_questions": [
+                {"question": "What is gross profit?", "persona": "[[persona-cfo]]"},
+                {"question": "What is incremental impact?", "persona": "[[persona-managing-partner]]"},
+                {"question": "Where is the A/B delta?", "persona": "[[persona-technical-director]]"},
+            ],
+            "actionable_jtbds": [
+                "Show gross profit and cumulative uplift.",
+                "Separate Stage 1 from Stage 2 HC ask.",
+                "Set a hard closure-test KPI gate.",
+            ],
+            "anchored_comments": [],
+            "trailer": {
+                "executive_summary": "Needs evidence.",
+                "key_risks": ["weak proof"],
+                "missing_evidence": ["gross profit"],
+                "next_steps": ["add gross profit proof"],
+            },
+            "ic_decision": {
+                "verdict": "rework",
+                "vote_tally": {"MP": "reject", "CPO": "reject", "TechDir": "reject", "VertDir": "approve"},
+                "rationale": "Missing proof.",
+                "conditions": [],
+                "heuristics_fired": [],
+                "patterns_fired": [],
+                "precedents_anchored": [],
+                "next_ic": "After evidence update",
+            },
+            "predicted_questions": [],
+            "consulted_wiki_pages": [],
+            "source_citations": [],
+            "retrieval": {
+                "retrieval_mode": "deterministic_topk",
+                "corpus_fingerprint": "corpus-fingerprint",
+                "selected_cases": [],
+                "selected_patterns": [],
+                "selected_questions": [],
+            },
+        }
+    )

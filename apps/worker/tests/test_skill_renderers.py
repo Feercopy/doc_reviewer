@@ -40,6 +40,9 @@ def test_gate2_challenger_renderer_frames_external_skill_with_schema_and_documen
     assert "assessment_markdown" in prompt
     assert "Оценка документа" in prompt
     assert "layer_1_markdown" in prompt
+    assert "do not add Title, Impact, or Recommendation subblocks" in prompt
+    assert "layer_1: structured copy of every Layer 1 item with id, severity, issue, evidence." in prompt
+    assert "title, issue, evidence, impact, recommendation" not in prompt
     assert "layer_2_markdown" in prompt
     assert "The initiative claims strong MVP traction" in prompt
 
@@ -71,6 +74,49 @@ def test_gate2_challenger_renderer_can_require_english_output():
     assert "Output language requirement" in prompt
     assert "Write all reader-facing fields in English only" in prompt
     assert "Document assessment" in prompt
+
+
+def test_gate2_challenger_renderer_includes_devils_advocate_layer_4_context():
+    document = SimpleNamespace(
+        title="Gate 2 defense",
+        parsed_text="The initiative claims strong MVP traction but omits cohort evidence.",
+        manual_document_type=None,
+        detected_document_type="gate_2",
+    )
+    skill = SimpleNamespace(
+        name="gate2_challenger_main_analysis",
+        version="baseline",
+        prompt_text="Run a five-pass Gate 2 review with Layer 1 and Layer 2 findings.",
+        source_uri="/Users/example/Gate2/skills/gate2-challenger/SKILL.md",
+        source_entrypoint="SKILL.md",
+        source_revision="abc123",
+        source_fingerprint="fingerprint",
+    )
+
+    prompt = render_gate2_challenger_prompt(
+        document=document,
+        skill=skill,
+        response_schema={"title": "MainAnalysisResult", "type": "object"},
+        layer_4_context={
+            "brutal_truth": "Fatal flaw: the investment case has no incrementality proof.",
+            "detected_contradictions": [
+                {
+                    "title": "Gross profit not shown",
+                    "body": "Revenue is shown but gross profit is absent.",
+                    "severity": "critical",
+                }
+            ],
+            "source": "devils_advocate_predefense",
+        },
+    )
+
+    assert "Layer 4" in prompt
+    assert "Devil's Advocate expert analysis" in prompt
+    assert "The Brutal Truth" in prompt
+    assert "Fatal flaw: the investment case has no incrementality proof." in prompt
+    assert "Detected Contradictions & Missing Proofs" in prompt
+    assert "Gross profit not shown" in prompt
+    assert "strengthen or supplement Gate Challenger" in prompt
 
 
 def test_gate2_challenger_renderer_uses_snapshot_files_instead_of_stub_prompt(tmp_path):

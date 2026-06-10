@@ -92,11 +92,8 @@ def _main_analysis_json_with_benchmark_ids() -> str:
                 {
                     "id": "A1",
                     "severity": "critical",
-                    "title": "Weak traction",
                     "issue": "The document does not prove traction readiness.",
                     "evidence": "The mock document omits incrementality proof.",
-                    "impact": "Committee cannot approve the ask as-is.",
-                    "recommendation": "Add proof before approval.",
                 }
             ],
             "layer_2_markdown": "Layer 2\nA2 — No incrementality evidence.",

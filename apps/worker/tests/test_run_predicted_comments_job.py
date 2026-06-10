@@ -31,7 +31,7 @@ from jobs.run_analysis import run_analysis
 from jobs.run_predicted_comments import run_predicted_comments
 
 
-def test_run_analysis_queues_predicted_comments_after_success(tmp_path):
+def test_run_analysis_runs_predicted_comments_before_gate_after_success(tmp_path):
     db = _create_session()
     try:
         user = _create_user(db)
@@ -69,19 +69,21 @@ def test_run_analysis_queues_predicted_comments_after_success(tmp_path):
         db.refresh(analysis)
         predicted_run = db.execute(select(PredictedCommentRun)).scalar_one()
         assert analysis.status == RunStatus.COMPLETED.value
-        assert predicted_run.status == RunStatus.QUEUED.value
+        assert predicted_run.status == RunStatus.COMPLETED.value
         assert predicted_run.skill_id == predicted_skill.id
         assert predicted_run.provider == analysis.provider
         assert predicted_run.model == analysis.model
         assert predicted_run.run_parameters["main_analysis_id"] == str(analysis.id)
         assert predicted_run.run_parameters["skill_source_snapshot"]["name"] == "devils_advocate_predefense"
         assert predicted_run.run_parameters["mock_provider_result"]["raw_output"] == "raw predicted"
-        assert enqueued == [str(predicted_run.id)]
+        assert predicted_run.run_parameters["run_order"] == "before_gate_challenger"
+        assert analysis.run_parameters["gate_challenger_layer_4_context"]["predicted_comment_run_id"] == str(predicted_run.id)
+        assert enqueued == []
     finally:
         _close_session(db)
 
 
-def test_run_analysis_snapshots_devils_advocate_source_and_retrieval_before_enqueue(tmp_path, monkeypatch):
+def test_run_analysis_snapshots_devils_advocate_source_and_retrieval_before_gate(tmp_path, monkeypatch):
     db = _create_session()
     try:
         monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
@@ -124,22 +126,24 @@ def test_run_analysis_snapshots_devils_advocate_source_and_retrieval_before_enqu
         retrieval_snapshot_id = predicted_run.run_parameters["retrieval_snapshot_id"]
         source_snapshot = db.get(SkillSourceSnapshot, UUID(source_snapshot_id))
         retrieval_snapshot = db.get(RetrievalSnapshot, UUID(retrieval_snapshot_id))
-        assert predicted_run.status == RunStatus.QUEUED.value
+        assert predicted_run.status == RunStatus.COMPLETED.value
         assert predicted_run.skill_id == predicted_skill.id
         assert source_snapshot.source_slug == "devils-advocate"
         assert retrieval_snapshot.retrieval_mode == "deterministic_topk"
         assert predicted_run.run_parameters["skill_source_snapshot"]["id"] == source_snapshot_id
         assert predicted_run.run_parameters["retrieval_snapshot"]["id"] == retrieval_snapshot_id
+        assert predicted_run.run_parameters["run_order"] == "before_gate_challenger"
         dossier_path = tmp_path / "storage" / "retrieval-snapshots" / retrieval_snapshot_id / "dossier.json"
         dossier = json.loads(dossier_path.read_text(encoding="utf-8"))
         assert "wiki-ic/cases/incrementality.md" in dossier["selected_paths"]
-        assert enqueued == [str(predicted_run.id)]
+        assert analysis.run_parameters["gate_challenger_layer_4_context"]["brutal_truth"] == "Fatal flaw."
+        assert enqueued == []
     finally:
         get_settings.cache_clear()
         _close_session(db)
 
 
-def test_run_analysis_marks_predicted_comment_run_failed_when_enqueue_fails(tmp_path):
+def test_run_analysis_keeps_main_completed_when_devils_advocate_prepass_fails(tmp_path):
     db = _create_session()
     try:
         user = _create_user(db)
@@ -161,6 +165,11 @@ def test_run_analysis_marks_predicted_comment_run_failed_when_enqueue_fails(tmp_
                     "raw_output": "raw main",
                     "latency_ms": 10,
                 },
+                "predicted_comments_mock_provider_result": {
+                    "structured_text": "The Brutal Truth\nnot json",
+                    "raw_output": "",
+                    "latency_ms": 20,
+                },
             },
         )
         db.add(analysis)
@@ -177,7 +186,8 @@ def test_run_analysis_marks_predicted_comment_run_failed_when_enqueue_fails(tmp_
         assert analysis.status == RunStatus.COMPLETED.value
         assert len(predicted_runs) == 1
         assert predicted_runs[0].status == RunStatus.FAILED.value
-        assert predicted_runs[0].error_message == "predicted_comments_enqueue_failed:redis unavailable"
+        assert "Expecting value" in predicted_runs[0].error_message
+        assert "gate_challenger_layer_4_context" not in analysis.run_parameters
     finally:
         _close_session(db)
 
@@ -516,11 +526,8 @@ def _main_analysis_json(summary: str = "Needs evidence.") -> str:
                 {
                     "id": "L1-001",
                     "severity": "critical",
-                    "title": "Decision-critical blocker",
                     "issue": "Mandatory readiness is not proven.",
                     "evidence": "The document does not close the required proof.",
-                    "impact": "Committee cannot approve scale-up as-is.",
-                    "recommendation": "Gate approval on proof.",
                 }
             ],
             "layer_2_markdown": "Layer 2\nL2-001 — Atomic weak-link finding.",
@@ -630,7 +637,7 @@ def _create_predicted_skill(db: Session, tmp_path) -> Skill:
         source_uri=str(prompt_path),
         source_entrypoint="ic-voting-prompt.md",
         source_revision="revision",
-        source_fingerprint="fingerprint",
+        source_fingerprint=None,
         source_metadata={"selected_wiki_pages": []},
         prompt_text="Devil's Advocate prompt",
         result_schema_path="contracts/schemas/devils-advocate-result.schema.json",

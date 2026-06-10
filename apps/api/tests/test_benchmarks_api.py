@@ -110,11 +110,8 @@ def _main_analysis_json() -> str:
                 {
                     "id": "L1-001",
                     "severity": "critical",
-                    "title": "Weak traction",
                     "issue": "The document does not prove traction readiness.",
                     "evidence": "The mock document omits incrementality proof.",
-                    "impact": "Committee cannot approve the ask as-is.",
-                    "recommendation": "Add proof before approval.",
                 }
             ],
             "layer_2_markdown": "Layer 2\nL2-001 — No incrementality evidence.",

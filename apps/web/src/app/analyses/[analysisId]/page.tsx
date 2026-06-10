@@ -18,6 +18,7 @@ import {
 import { createEtalonDraft } from "@/lib/api/etalons";
 import { submitFeedback } from "@/lib/api/feedback";
 import { formatDate, formatLabel } from "@/lib/format";
+import { analysisShortSummary, stripAssessmentHeading } from "./analysisDisplay";
 
 type AnalysisTab = "mainOutput" | "devilsAdvocate" | "fullOutput";
 
@@ -289,6 +290,7 @@ function RunDetailsDialog({ analysis, onClose }: { analysis: AnalysisRecord; onC
 function MainSkillMarkdownPanel({ analysis }: { analysis: AnalysisRecord }) {
   const sections = mainSkillMarkdownSections(analysis);
   const hasDetailedChecks = Boolean(sections.layer1 || sections.layer2);
+  const shortSummary = analysisShortSummary(analysis);
 
   return (
     <section className="analysis-card stack">
@@ -302,6 +304,12 @@ function MainSkillMarkdownPanel({ analysis }: { analysis: AnalysisRecord }) {
         <StatusBadge status={analysis.status} />
       </div>
       {analysis.error_message ? <div className="analysis-alert">{analysis.error_message}</div> : null}
+      {shortSummary ? (
+        <section className="analysis-short-summary" aria-label="short summary">
+          <h3>short summary</h3>
+          <p>{shortSummary}</p>
+        </section>
+      ) : null}
       {sections.main ? (
         <MarkdownPreview markdown={sections.main} className="gc-markdown-preview--narrative" />
       ) : hasDetailedChecks ? (
@@ -357,13 +365,14 @@ function mainSkillMarkdownSections(analysis: AnalysisRecord): { main: string | n
   const output = analysis.structured_output;
   const layer1 = asString(output?.layer_1_markdown);
   const layer2 = asString(output?.layer_2_markdown);
-  const main =
+  const rawMain =
     asString(output?.assessment_markdown) ||
     asString(output?.native_markdown) ||
     asString(output?.markdown) ||
     asString(output?.output_markdown) ||
     asString(output?.summary_markdown) ||
     (!layer1 && !layer2 ? extractProviderMessageContent(analysis.raw_output) : null);
+  const main = stripAssessmentHeading(rawMain);
 
   return { main, layer1, layer2 };
 }
@@ -618,28 +627,6 @@ function extractChecks(output: Record<string, unknown> | null | undefined) {
     status: asString(record.status) || "unknown",
     explanation: asString(record.explanation),
   }));
-}
-
-function summaryFromOutput(output: Record<string, unknown> | null | undefined): string | null {
-  const narrative = asRecord(output?.narrative_summary);
-  return (
-    asString(output?.summary) ||
-    asString(narrative?.summary) ||
-    asString(narrative?.executive_summary) ||
-    asString(narrative?.assessment) ||
-    null
-  );
-}
-
-function pickSummaryOutput(output: Record<string, unknown>) {
-  return {
-    verdict: output.verdict,
-    summary: output.summary,
-    narrative_summary: output.narrative_summary,
-    findings: output.findings,
-    checks: output.checks,
-    key_findings: output.key_findings,
-  };
 }
 
 function bestRecordTitle(record: Record<string, unknown>): string {
@@ -1278,6 +1265,28 @@ const analysisStyles = `
   border-top: 1px solid rgba(148, 163, 184, 0.14);
   margin-top: 4px;
   padding-top: 16px;
+}
+
+.analysis-short-summary {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(94, 234, 212, 0.22);
+  border-radius: 8px;
+  background: rgba(15, 118, 110, 0.12);
+  padding: 14px;
+}
+
+.analysis-short-summary h3 {
+  color: #a7f3d0;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.analysis-short-summary p {
+  max-width: 92ch;
+  color: #dbeafe;
+  font-size: 14px;
+  line-height: 1.65;
 }
 
 .analysis-detail-checks h3 {

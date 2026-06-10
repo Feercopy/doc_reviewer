@@ -24,7 +24,7 @@ from app.services.skill_snapshots import create_skill_source_snapshot
 from app.services.skill_sources import SkillSourceValidationError, refresh_skill_source_material
 from app.services.skills import skill_source_snapshot
 from app.storage.local import LocalDocumentStorage
-from jobs.run_predicted_comments import enqueue_run_predicted_comments
+from jobs.run_predicted_comments import run_predicted_comments
 from providers.base import ProviderRunRequest
 from providers.registry import get_provider_adapter
 from results.schema_validation import parse_and_validate_json_output
@@ -64,6 +64,8 @@ def run_analysis(analysis_id: str, *, db: Session | None = None, enqueue_predict
         if provider != Provider.HERMES and provider_key is None:
             raise RuntimeError("provider_key_missing")
         api_key = decrypt_secret(provider_key.encrypted_api_key) if provider_key else None
+
+        _run_devils_advocate_prepass(session=session, analysis=analysis, document=document)
 
         schema = json.loads(_resolve_schema_path(skill.result_schema_path).read_text(encoding="utf-8"))
         prompt = _render_and_persist_prompt(session=session, analysis=analysis, document=document, skill=skill, schema=schema)
@@ -109,12 +111,6 @@ def run_analysis(analysis_id: str, *, db: Session | None = None, enqueue_predict
             },
         )
         session.commit()
-        _create_and_enqueue_predicted_comments(
-            session=session,
-            analysis=analysis,
-            document=document,
-            enqueue=enqueue_predicted_comments or enqueue_run_predicted_comments,
-        )
         worker_logger.info(
             "worker_job_completed",
             extra={"job_type": "run_analysis", "entity_id": str(analysis_uuid), "status": "completed"},
@@ -194,6 +190,136 @@ def _render_and_persist_prompt(
     return prompt
 
 
+def _run_devils_advocate_prepass(*, session: Session, analysis: Analysis, document: Document) -> None:
+    predicted_run = _create_devils_advocate_prepass_run(session=session, analysis=analysis, document=document)
+    if predicted_run is None:
+        return
+
+    run_predicted_comments(str(predicted_run.id), db=session)
+    refreshed_run = session.get(PredictedCommentRun, predicted_run.id)
+    if refreshed_run is None or refreshed_run.status != RunStatus.COMPLETED.value:
+        return
+
+    layer_4_context = _build_gate_challenger_layer_4_context(refreshed_run)
+    if layer_4_context is None:
+        return
+
+    run_parameters = dict(analysis.run_parameters or {})
+    run_parameters["gate_challenger_layer_4_context"] = layer_4_context
+    analysis.run_parameters = run_parameters
+    flag_modified(analysis, "run_parameters")
+    session.commit()
+
+
+def _create_devils_advocate_prepass_run(*, session: Session, analysis: Analysis, document: Document) -> PredictedCommentRun | None:
+    skill = _resolve_predicted_comments_skill(session=session, document=document)
+    if skill is None or skill.name != "devils_advocate_predefense":
+        return None
+
+    run_parameters = _predicted_comment_run_parameters(analysis=analysis, document=document, skill=skill)
+    predicted_run = PredictedCommentRun(
+        analysis_id=analysis.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=analysis.provider,
+        model=analysis.model,
+        status=RunStatus.QUEUED.value,
+        run_parameters=run_parameters,
+    )
+    session.add(predicted_run)
+    session.flush()
+    _attach_predicted_comment_snapshots(
+        session=session,
+        predicted_run=predicted_run,
+        skill=skill,
+        document=document,
+        analysis=analysis,
+        run_parameters=run_parameters,
+    )
+    predicted_run.run_parameters = dict(run_parameters)
+    flag_modified(predicted_run, "run_parameters")
+    session.commit()
+    return predicted_run
+
+
+def _predicted_comment_run_parameters(*, analysis: Analysis, document: Document, skill: Skill) -> dict:
+    run_parameters = {
+        "main_analysis_id": str(analysis.id),
+        "main_analysis_skill_source_snapshot": analysis.run_parameters.get("skill_source_snapshot"),
+        "document_type": document.manual_document_type or document.detected_document_type,
+        "output_language": analysis.run_parameters.get("output_language", "ru"),
+        "snapshot_mode": analysis.run_parameters.get("snapshot_mode", "production_latest"),
+        "max_output_tokens": _predicted_comments_max_output_tokens(analysis.run_parameters),
+        "skill_source_snapshot": skill_source_snapshot(skill),
+        "run_order": "before_gate_challenger",
+    }
+    mock_result = analysis.run_parameters.get("predicted_comments_mock_provider_result")
+    if mock_result is not None:
+        run_parameters["mock_provider_result"] = mock_result
+    if skill.name == "devils_advocate_predefense":
+        run_parameters["response_format"] = {"type": "json_object"}
+    return run_parameters
+
+
+def _build_gate_challenger_layer_4_context(predicted_run: PredictedCommentRun) -> dict | None:
+    structured = predicted_run.structured_output or {}
+    brutal_truth = structured.get("brutal_truth")
+    detected_contradictions = structured.get("detected_contradictions") or []
+    if not brutal_truth and not detected_contradictions:
+        return None
+    return {
+        "source": "devils_advocate_predefense",
+        "predicted_comment_run_id": str(predicted_run.id),
+        "brutal_truth": brutal_truth or "",
+        "detected_contradictions": detected_contradictions,
+        "markdown": _format_layer_4_markdown(
+            brutal_truth=brutal_truth or "",
+            detected_contradictions=detected_contradictions,
+        ),
+    }
+
+
+def _format_layer_4_markdown(*, brutal_truth: str, detected_contradictions: list) -> str:
+    lines = [
+        "Layer 4 - Devil's Advocate expert analysis",
+        "These are results of expert analysis produced before Gate Challenger. Use them to strengthen or "
+        "supplement Gate Challenger: add additional document-grounded findings when Devil's Advocate found "
+        "something extra, or reinforce the position of problems Gate Challenger also finds. Do not treat "
+        "unsupported expert claims as document evidence.",
+        "",
+        "1. The Brutal Truth",
+        brutal_truth or "No brutal truth block was captured.",
+        "",
+        "2. Detected Contradictions & Missing Proofs",
+    ]
+    if detected_contradictions:
+        lines.extend(_format_detected_contradictions(detected_contradictions))
+    else:
+        lines.append("No detected contradictions or missing proofs were captured.")
+    return "\n".join(lines)
+
+
+def _format_detected_contradictions(detected_contradictions: list) -> list[str]:
+    lines = []
+    for index, item in enumerate(detected_contradictions, start=1):
+        if isinstance(item, dict):
+            title = item.get("title") or item.get("section") or f"Item {index}"
+            body = item.get("body") or item.get("issue") or item.get("comment") or ""
+            severity = item.get("severity")
+            citations = item.get("citations") or []
+            line = f"{index}. {title}"
+            if severity:
+                line += f" [{severity}]"
+            if body:
+                line += f": {body}"
+            if citations:
+                line += f" Citations: {', '.join(str(citation) for citation in citations)}"
+            lines.append(line)
+        else:
+            lines.append(f"{index}. {item}")
+    return lines
+
+
 def _validate_skill_source_available(*, skill: Skill, snapshot: dict | None) -> None:
     if not snapshot:
         return
@@ -211,83 +337,6 @@ def _validate_skill_source_available(*, skill: Skill, snapshot: dict | None) -> 
         raise RuntimeError("skill_source_unavailable") from exc
     if material.source_fingerprint != expected_fingerprint:
         raise RuntimeError("skill_source_unavailable")
-
-
-def _create_and_enqueue_predicted_comments(*, session: Session, analysis: Analysis, document: Document, enqueue) -> None:
-    predicted_run_id = None
-    try:
-        skill = _resolve_predicted_comments_skill(session=session, document=document)
-        if skill is None:
-            return
-        run_parameters = {
-            "main_analysis_id": str(analysis.id),
-            "main_analysis_skill_source_snapshot": analysis.run_parameters.get("skill_source_snapshot"),
-            "document_type": document.manual_document_type or document.detected_document_type,
-            "output_language": analysis.run_parameters.get("output_language", "ru"),
-            "snapshot_mode": analysis.run_parameters.get("snapshot_mode", "production_latest"),
-            "max_output_tokens": _predicted_comments_max_output_tokens(analysis.run_parameters),
-            "skill_source_snapshot": skill_source_snapshot(skill),
-        }
-        mock_result = analysis.run_parameters.get("predicted_comments_mock_provider_result")
-        if mock_result is not None:
-            run_parameters["mock_provider_result"] = mock_result
-        if skill.name == "devils_advocate_predefense":
-            run_parameters["response_format"] = {"type": "json_object"}
-        predicted_run = PredictedCommentRun(
-            analysis_id=analysis.id,
-            skill_id=skill.id,
-            skill_version=skill.version,
-            provider=analysis.provider,
-            model=analysis.model,
-            status=RunStatus.QUEUED.value,
-            run_parameters=run_parameters,
-        )
-        session.add(predicted_run)
-        session.flush()
-        _attach_predicted_comment_snapshots(
-            session=session,
-            predicted_run=predicted_run,
-            skill=skill,
-            document=document,
-            analysis=analysis,
-            run_parameters=run_parameters,
-        )
-        predicted_run.run_parameters = dict(run_parameters)
-        flag_modified(predicted_run, "run_parameters")
-        session.commit()
-        predicted_run_id = predicted_run.id
-        try:
-            enqueue(predicted_run.id)
-        except Exception as exc:
-            existing_run = session.get(PredictedCommentRun, predicted_run_id)
-            if existing_run is not None:
-                existing_run.status = RunStatus.FAILED.value
-                existing_run.error_message = f"predicted_comments_enqueue_failed:{exc}"
-                existing_run.completed_at = utc_now()
-                session.commit()
-    except Exception as exc:
-        session.rollback()
-        if predicted_run_id is not None:
-            existing_run = session.get(PredictedCommentRun, predicted_run_id)
-            if existing_run is not None:
-                existing_run.status = RunStatus.FAILED.value
-                existing_run.error_message = f"predicted_comments_enqueue_failed:{exc}"
-                existing_run.completed_at = utc_now()
-                session.commit()
-                return
-        failed_run = PredictedCommentRun(
-            analysis_id=analysis.id,
-            skill_id=analysis.skill_id,
-            skill_version=analysis.skill_version,
-            provider=analysis.provider,
-            model=analysis.model,
-            status=RunStatus.FAILED.value,
-            error_message=f"predicted_comments_enqueue_failed:{exc}",
-            completed_at=utc_now(),
-            run_parameters={"main_analysis_id": str(analysis.id)},
-        )
-        session.add(failed_run)
-        session.commit()
 
 
 def _attach_predicted_comment_snapshots(

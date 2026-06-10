@@ -131,6 +131,18 @@ Primary plan index:
 - [x] Add a document analysis RU/EN output-language toggle that stores the
   choice in `run_parameters` and injects the matching language requirement into
   Gate Challenger and Devil's Advocate prompts.
+- [x] Reorder analysis execution so Devil's Advocate runs before Gate
+  Challenger, persists as the traceable predicted-comment run, and passes its
+  Brutal Truth plus Detected Contradictions & Missing Proofs into the Gate
+  prompt as Layer 4 expert context.
+- [x] Restore the Gate Challenger analysis `short summary` block at the top of
+  the result view and remove the duplicated `Оценка документа` heading from
+  the lower narrative markdown block.
+- [x] Reduce oversized markdown headings in analysis outputs by keeping
+  markdown heading styles isolated from page-level analysis title styles.
+- [x] Tighten Gate Challenger Layer 1 output contract so Layer 1 items expose
+  only `issue`, `evidence`, and `severity` instead of the older expanded
+  `title` / `impact` / `recommendation` shape.
 
 ## Phase 1: Skeleton And Data Foundation
 
@@ -430,3 +442,42 @@ Exit criteria:
   card rows on tablet/phone widths. Verified no page-level horizontal overflow
   at 1280, 1024, 768, 390, 360, and 320 px; frontend tests, production build,
   and the full Playwright MVP flow pass.
+- 2026-06-10: Reordered analysis runtime so Devil's Advocate now runs as a
+  pre-Gate expert critique inside `run_analysis`. The completed DA run remains
+  persisted in `predicted_comment_runs`, and its `brutal_truth` plus
+  `detected_contradictions` are stored in
+  `analyses.run_parameters.gate_challenger_layer_4_context` and injected into
+  the Gate Challenger prompt as Layer 4 expert context to strengthen or
+  supplement document-grounded Gate findings.
+- 2026-06-10: Fixed local Docker Start Analysis failures with
+  `git command failed: rev-parse HEAD`. The API now defaults missing
+  `snapshot_mode` to `development_current` when `APP_ENV=development`, so
+  mounted external skill directories without usable git metadata can still be
+  snapshotted for local testing while non-development defaults remain
+  `production_latest`.
+- 2026-06-10: Restored the analysis result short-summary presentation by
+  rendering `analyses.summary` / `structured_output.summary` as a dedicated
+  `short summary` block above Gate Challenger markdown, while stripping only
+  the leading `Оценка документа` / `Document assessment` heading from the
+  lower narrative block. Verified with the new focused display-helper test, all
+  frontend unit tests, the production frontend build, rebuilt local web
+  container, and a browser check of analysis
+  `ef79c6fa-826e-417f-b601-0d21d2f9df3f`.
+- 2026-06-10: Reduced oversized markdown `#` headings inside analysis outputs
+  by scoping the markdown preview heading rules above page-level analysis
+  heading styles, so model-supplied report titles no longer inherit the main
+  page title size. Verified with frontend unit tests, production frontend
+  build, and rebuilt local web container.
+- 2026-06-10: Root-caused extra `title`, `impact`, and `recommendation` blocks
+  in Gate Challenger Layer 1 to the local main-analysis JSON Schema and prompt,
+  not the UI renderer. Updated the Layer 1 schema/prompt to require only
+  `id`, `severity`, `issue`, and `evidence`, added a contract test rejecting
+  the old expanded Layer 1 shape, and refreshed affected mock provider outputs.
+  Verified with targeted API/worker tests and full `apps/api/tests` +
+  `apps/worker/tests`; rebuilt the local worker container.
+- 2026-06-10: Audited local Gate Challenger and Devil's Advocate renderers
+  against their external skill sources. Key drift points: Gate output is forced
+  into a service JSON contract and DA prepass is injected into Gate as Layer 4;
+  Devil's Advocate is normalized to JSON/native markdown instead of producing
+  annotated `.docx` comments, and the current `full_ic_voting` naming differs
+  from older plan text that used `ic_voting_full`.

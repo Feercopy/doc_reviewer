@@ -103,11 +103,8 @@ def test_create_etalon_draft_maps_gate_challenger_layers(client, db_session):
             {
                 "id": "L1-001",
                 "severity": "high",
-                "title": "Metric proof is incomplete",
                 "issue": "The document claims traction without a control-group readout.",
                 "evidence": "The document names traction but does not provide a cohort readout.",
-                "impact": "Committee cannot separate product pull from market effects.",
-                "recommendation": "Add an experiment or holdout readout before approval.",
             }
         ],
         "layer_2_markdown": "Layer 2\nL2-001 - Incrementality evidence is missing.",

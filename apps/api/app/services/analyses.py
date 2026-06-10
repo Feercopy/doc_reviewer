@@ -118,8 +118,9 @@ def _attach_source_snapshot(
     source = db.get(SkillSource, skill.skill_source_id)
     if source is None:
         raise AnalysisPreconditionError("Skill source is not configured")
-    snapshot_mode = run_parameters.get("snapshot_mode", "production_latest")
-    storage = LocalDocumentStorage(get_settings().storage_root)
+    settings = get_settings()
+    snapshot_mode = run_parameters.get("snapshot_mode", _default_snapshot_mode(settings.app_env))
+    storage = LocalDocumentStorage(settings.storage_root)
     try:
         snapshot = create_skill_source_snapshot(
             db=db,
@@ -147,6 +148,12 @@ def _attach_source_snapshot(
         "snapshot_mode": snapshot.snapshot_mode,
         "is_dirty": snapshot.is_dirty,
     }
+
+
+def _default_snapshot_mode(app_env: str) -> str:
+    if app_env == "development":
+        return "development_current"
+    return "production_latest"
 
 
 def get_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) -> Analysis:
