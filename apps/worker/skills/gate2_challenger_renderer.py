@@ -1,6 +1,7 @@
 import json
 from typing import Any
 
+from skills.output_language import normalize_output_language, output_language_instruction
 from skills.snapshot_loader import SkillSourceSnapshotMaterial
 
 
@@ -10,10 +11,12 @@ def render_gate2_challenger_prompt(
     skill: Any,
     response_schema: dict,
     source_snapshot: SkillSourceSnapshotMaterial | None = None,
+    output_language: str | None = None,
 ) -> str:
     document_type = getattr(document, "manual_document_type", None) or getattr(document, "detected_document_type", "unknown")
     skill_prompt = _skill_prompt_text(skill=skill, source_snapshot=source_snapshot)
     reference_context = _reference_context(source_snapshot)
+    normalized_output_language = normalize_output_language(output_language)
     source_lines = [
         "Gate2-challenger source snapshot:",
         f"- source_uri: {_source_value(skill, source_snapshot, 'source_slug')}",
@@ -28,6 +31,7 @@ def render_gate2_challenger_prompt(
             "Use the canonical Gate2-challenger review method. Preserve the five-pass review intent, "
             "including coordinator normalization, Layer 1 decision-critical review, Layer 2 atomic weak-link "
             "review, adversarial committee-risk review, and final synthesis.",
+            output_language_instruction(output_language) if output_language is not None else "",
             "External skill instructions:",
             skill_prompt,
             "External skill references:",
@@ -36,9 +40,7 @@ def render_gate2_challenger_prompt(
             "\n".join(
                 [
                     "Return JSON only, but the visible reader-facing answer must be encoded in these required fields:",
-                    "1. assessment_markdown: full Russian summary block starting exactly with 'Оценка документа'. "
-                    "Use the TRX-SE style: recommendation, context, why the decision is this, evidence bullets, "
-                    "IC recommendation, what can/cannot be approved, improvements, and final итог.",
+                    _assessment_markdown_requirement(normalized_output_language),
                     "2. layer_1_markdown: reader-facing Layer 1 block after the summary, in strict Gate Challenger format.",
                     "3. layer_1: structured copy of every Layer 1 item with id, severity, title, issue, evidence, impact, recommendation.",
                     "4. layer_2_markdown: reader-facing Layer 2 block after Layer 1, in strict Gate Challenger format.",
@@ -54,6 +56,21 @@ def render_gate2_challenger_prompt(
             "Parsed document text:",
             document.parsed_text or "",
         ]
+    )
+
+
+def _assessment_markdown_requirement(output_language: str) -> str:
+    if output_language == "en":
+        return (
+            "1. assessment_markdown: full English summary block starting exactly with 'Document assessment'. "
+            "Use the TRX-SE style: recommendation, context, why the decision is this, evidence bullets, "
+            "IC recommendation, what can/cannot be approved, improvements, and final conclusion."
+        )
+
+    return (
+        "1. assessment_markdown: full Russian summary block starting exactly with 'Оценка документа'. "
+        "Use the TRX-SE style: recommendation, context, why the decision is this, evidence bullets, "
+        "IC recommendation, what can/cannot be approved, improvements, and final итог."
     )
 
 

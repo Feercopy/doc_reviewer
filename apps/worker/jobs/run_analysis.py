@@ -223,6 +223,7 @@ def _create_and_enqueue_predicted_comments(*, session: Session, analysis: Analys
             "main_analysis_id": str(analysis.id),
             "main_analysis_skill_source_snapshot": analysis.run_parameters.get("skill_source_snapshot"),
             "document_type": document.manual_document_type or document.detected_document_type,
+            "output_language": analysis.run_parameters.get("output_language", "ru"),
             "snapshot_mode": analysis.run_parameters.get("snapshot_mode", "production_latest"),
             "max_output_tokens": _predicted_comments_max_output_tokens(analysis.run_parameters),
             "skill_source_snapshot": skill_source_snapshot(skill),

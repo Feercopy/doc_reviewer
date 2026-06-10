@@ -17,6 +17,7 @@ export const USER_SELECTABLE_DOCUMENT_TYPES = [
 export type ParseStatus = "queued" | "running" | "completed" | "failed";
 export type Provider = "openai_compatible" | "anthropic_compatible" | "hermes";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type OutputLanguage = "ru" | "en";
 
 export type DocumentRecord = {
   id: string;
@@ -122,7 +123,9 @@ export type AnalysisCreatePayload = {
   model: string;
   skill_id?: string;
   document_type_override?: DocumentType;
-  run_parameters?: Record<string, unknown>;
+  run_parameters?: Record<string, unknown> & {
+    output_language?: OutputLanguage;
+  };
 };
 
 export async function listDocuments(): Promise<DocumentsListResponse> {

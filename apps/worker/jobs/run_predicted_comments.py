@@ -156,6 +156,7 @@ def _render_and_persist_prompt(
             response_schema=schema,
             source_snapshot=source_snapshot,
             retrieval_snapshot=retrieval_snapshot,
+            output_language=run_parameters.get("output_language"),
         )
     else:
         prompt = render_prompt(document=document, skill=skill, response_schema=schema, run_parameters=run_parameters)

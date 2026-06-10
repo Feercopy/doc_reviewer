@@ -89,13 +89,21 @@ describe("documents api", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "analysis-id" }) });
     global.fetch = fetchMock;
 
-    await createAnalysis("doc-id", { provider: "openai_compatible", model: "gpt-test" });
+    await createAnalysis("doc-id", {
+      provider: "openai_compatible",
+      model: "gpt-test",
+      run_parameters: { output_language: "en" },
+    });
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/documents/doc-id/analyses",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ provider: "openai_compatible", model: "gpt-test" }),
+        body: JSON.stringify({
+          provider: "openai_compatible",
+          model: "gpt-test",
+          run_parameters: { output_language: "en" },
+        }),
       }),
     );
   });

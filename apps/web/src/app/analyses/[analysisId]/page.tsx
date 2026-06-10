@@ -8,7 +8,9 @@ import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
   getAnalysis,
+  getDocument,
   type AnalysisRecord,
+  type DocumentRecord,
   type PredictedCommentRunRecord,
   type RetrievalTrace,
   type SourceTrace,
@@ -37,6 +39,7 @@ const analysisTabs: Array<{ id: AnalysisTab; label: string }> = [
 export default function AnalysisDetailPage() {
   const params = useParams<{ analysisId: string }>();
   const [analysis, setAnalysis] = useState<AnalysisRecord | null>(null);
+  const [analysisDocument, setAnalysisDocument] = useState<DocumentRecord | null>(null);
   const [error, setError] = useState("");
   const [feedbackStatus, setFeedbackStatus] = useState("");
   const [feedbackComment, setFeedbackComment] = useState("");
@@ -51,6 +54,31 @@ export default function AnalysisDetailPage() {
       .then(setAnalysis)
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load analysis"));
   }, [params.analysisId]);
+
+  useEffect(() => {
+    if (!analysis?.document_id) {
+      setAnalysisDocument(null);
+      return;
+    }
+
+    let ignore = false;
+    setAnalysisDocument(null);
+    getDocument(analysis.document_id)
+      .then((document) => {
+        if (!ignore) {
+          setAnalysisDocument(document);
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          setAnalysisDocument(null);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [analysis?.document_id]);
 
   async function sendFeedback() {
     if (!analysis) {
@@ -115,7 +143,10 @@ export default function AnalysisDetailPage() {
             <section className="analysis-hero">
               <div className="analysis-hero__main">
                 <div className="analysis-hero__title-row">
-                  <h1>Analysis</h1>
+                  <div className="analysis-hero__title-copy">
+                    <h1>{analysisDocument?.title ? `Analysis: ${analysisDocument.title}` : "Analysis"}</h1>
+                    <p className="analysis-hero__date">{formatDate(analysis.created_at)}</p>
+                  </div>
                   <button className="analysis-secondary-action analysis-run-details-action" type="button" onClick={() => setRunDetailsOpen(true)}>
                     Run details
                   </button>
@@ -125,7 +156,6 @@ export default function AnalysisDetailPage() {
                     {formatLabel(analysis.verdict)}
                   </span>
                   <StatusBadge status={analysis.status} />
-                  <TraceChip label="Created" value={formatDate(analysis.created_at)} />
                 </div>
               </div>
             </section>
@@ -905,6 +935,22 @@ const analysisStyles = `
   justify-content: space-between;
   gap: 14px;
   min-width: 0;
+}
+
+.analysis-hero__title-copy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.analysis-hero__title-copy h1 {
+  overflow-wrap: anywhere;
+}
+
+.analysis-hero__date {
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .analysis-lead {

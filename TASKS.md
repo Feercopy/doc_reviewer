@@ -126,6 +126,11 @@ Primary plan index:
 - [x] Fix Markdown loose ordered lists in Gate Challenger outputs: numbered
   sections with paragraphs and nested bullets now stay in one ordered list
   instead of restarting every item at `1`.
+- [x] Add the analyzed document title to the Analysis page header and render
+  the run date as plain muted text below the title instead of a `Created` chip.
+- [x] Add a document analysis RU/EN output-language toggle that stores the
+  choice in `run_parameters` and injects the matching language requirement into
+  Gate Challenger and Devil's Advocate prompts.
 
 ## Phase 1: Skeleton And Data Foundation
 

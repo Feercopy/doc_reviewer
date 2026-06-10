@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from skills.output_language import output_language_instruction
 from skills.snapshot_loader import RetrievalSnapshotMaterial, SkillSourceSnapshotMaterial
 
 
@@ -13,6 +14,7 @@ def render_devils_advocate_prompt(
     response_schema: dict,
     source_snapshot: SkillSourceSnapshotMaterial | None = None,
     retrieval_snapshot: RetrievalSnapshotMaterial | None = None,
+    output_language: str | None = None,
 ) -> str:
     source_text = _read_source_text(skill, source_snapshot=source_snapshot)
     wiki_sections = _read_selected_wiki_sections(
@@ -39,6 +41,7 @@ def render_devils_advocate_prompt(
             "Run mode: full_ic_voting",
             "Use the Devil's Advocate / IC voting orchestration to predict defense committee comments. "
             "Anchor comments to document evidence and the completed main analysis. Do not invent source citations.",
+            output_language_instruction(output_language) if output_language is not None else "",
             "Devil's Advocate source snapshot:",
             "\n".join(_source_lines(skill=skill, source_snapshot=source_snapshot)),
             "External orchestration prompt:",
@@ -53,6 +56,7 @@ def render_devils_advocate_prompt(
             "\n".join(
                 [
                     "Return JSON only, but encode the exact visible Devil's Advocate answer in native_markdown.",
+                    "native_markdown must be written in the requested output language.",
                     "native_markdown must follow ic-voting-prompt.md / wiki-ic/meta/output-format.md order:",
                     "1. Title line: 🔴 Devil's Advocate — <IC/stage/domain/document>",
                     "2. Pre-flight summary",

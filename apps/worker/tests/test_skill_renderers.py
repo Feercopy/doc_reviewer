@@ -44,6 +44,35 @@ def test_gate2_challenger_renderer_frames_external_skill_with_schema_and_documen
     assert "The initiative claims strong MVP traction" in prompt
 
 
+def test_gate2_challenger_renderer_can_require_english_output():
+    document = SimpleNamespace(
+        title="Gate 2 defense",
+        parsed_text="The initiative claims strong MVP traction but omits cohort evidence.",
+        manual_document_type=None,
+        detected_document_type="gate_2",
+    )
+    skill = SimpleNamespace(
+        name="gate2_challenger_main_analysis",
+        version="baseline",
+        prompt_text="Run a five-pass Gate 2 review with Layer 1 and Layer 2 findings.",
+        source_uri="/Users/example/Gate2/skills/gate2-challenger/SKILL.md",
+        source_entrypoint="SKILL.md",
+        source_revision="abc123",
+        source_fingerprint="fingerprint",
+    )
+
+    prompt = render_gate2_challenger_prompt(
+        document=document,
+        skill=skill,
+        response_schema={"title": "MainAnalysisResult", "type": "object"},
+        output_language="en",
+    )
+
+    assert "Output language requirement" in prompt
+    assert "Write all reader-facing fields in English only" in prompt
+    assert "Document assessment" in prompt
+
+
 def test_gate2_challenger_renderer_uses_snapshot_files_instead_of_stub_prompt(tmp_path):
     snapshot_dir = tmp_path / "skill-snapshots" / str(uuid4())
     files_dir = snapshot_dir / "files"
@@ -181,6 +210,43 @@ def test_devils_advocate_renderer_includes_main_result_and_selected_knowledge_ba
     assert "The Brutal Truth" in prompt
     assert "Detected Contradictions & Missing Proofs" in prompt
     assert "role_comments" in prompt
+
+
+def test_devils_advocate_renderer_can_require_english_output(tmp_path):
+    (tmp_path / "ic-voting-prompt.md").write_text("IC voting orchestrator", encoding="utf-8")
+    document = SimpleNamespace(
+        title="Gate 2 defense",
+        parsed_text="The document asks for investment approval without incrementality proof.",
+        manual_document_type=None,
+        detected_document_type="gate_2",
+    )
+    skill = SimpleNamespace(
+        name="devils_advocate_predefense",
+        version="baseline",
+        prompt_text="Fallback DA prompt",
+        source_uri=str(tmp_path / "ic-voting-prompt.md"),
+        source_entrypoint="ic-voting-prompt.md",
+        source_revision="def456",
+        source_fingerprint="da-fingerprint",
+        source_metadata={},
+    )
+    analysis = SimpleNamespace(
+        verdict="need_evidence",
+        summary="Needs incrementality evidence.",
+        structured_output={"findings": [], "checks": []},
+    )
+
+    prompt = render_devils_advocate_prompt(
+        document=document,
+        analysis=analysis,
+        skill=skill,
+        response_schema={"title": "DevilsAdvocateResult", "type": "object"},
+        output_language="en",
+    )
+
+    assert "Output language requirement" in prompt
+    assert "Write all reader-facing fields in English only" in prompt
+    assert "native_markdown must be written in the requested output language" in prompt
 
 
 def test_devils_advocate_renderer_uses_source_snapshot_and_retrieval_dossier(tmp_path):

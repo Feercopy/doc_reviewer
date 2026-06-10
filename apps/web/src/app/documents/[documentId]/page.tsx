@@ -21,6 +21,7 @@ import {
   reparseDocument,
   type AnalysisRecord,
   type DocumentRecord,
+  type OutputLanguage,
   type Provider,
   type RunStatus,
 } from "@/lib/api/documents";
@@ -37,6 +38,8 @@ const providerLabels: Record<Provider, string> = {
   anthropic_compatible: "Anthropic compatible",
   hermes: "Hermes",
 };
+
+const outputLanguageOptions: readonly OutputLanguage[] = ["ru", "en"];
 
 function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisRecord[]): WorkflowStep[] {
   const hasCompletedAnalysis = analyses.some((analysis) => analysis.status === "completed");
@@ -140,6 +143,7 @@ export default function DocumentDetailPage() {
   const [provider, setProvider] = useState<Provider>("openai_compatible");
   const [model, setModel] = useState("");
   const [modelEdited, setModelEdited] = useState(false);
+  const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>("en");
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [draftProvider, setDraftProvider] = useState<Provider>("openai_compatible");
   const [draftModel, setDraftModel] = useState("");
@@ -296,6 +300,9 @@ export default function DocumentDetailPage() {
         provider,
         model: model.trim(),
         document_type_override: document?.detected_document_type,
+        run_parameters: {
+          output_language: outputLanguage,
+        },
       });
       window.location.href = `/analyses/${analysis.id}`;
     } catch (err) {
@@ -380,6 +387,20 @@ export default function DocumentDetailPage() {
                     <button className="gc-ghost" disabled={pending} type="button" onClick={openModelDialog}>
                       Model
                     </button>
+                    <div className="gc-language-toggle" aria-label="Output language">
+                      {outputLanguageOptions.map((language) => (
+                        <button
+                          aria-pressed={outputLanguage === language}
+                          className={`gc-language-option${outputLanguage === language ? " is-active" : ""}`}
+                          disabled={pending}
+                          key={language}
+                          type="button"
+                          onClick={() => setOutputLanguage(language)}
+                        >
+                          {language.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
                     <button
                       className="gc-primary"
                       disabled={pending || document.parse_status !== "completed" || !model.trim() || !selectedProviderKey?.has_key}
@@ -913,7 +934,8 @@ const detailStyles = `
 
 .gc-history-actions {
   display: grid;
-  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+  grid-template-columns: minmax(76px, 0.65fr) minmax(90px, auto) minmax(138px, 1.35fr);
+  align-items: stretch;
   gap: 10px;
   margin-bottom: 12px;
   border: 1px solid rgba(34, 211, 238, 0.18);
@@ -927,6 +949,40 @@ const detailStyles = `
   width: 100%;
   min-width: 0;
   padding-inline: 12px;
+}
+
+.gc-language-toggle {
+  display: grid;
+  min-width: 90px;
+  min-height: 40px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.88);
+  padding: 2px;
+}
+
+.gc-language-option {
+  min-width: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.gc-language-option.is-active {
+  background: #22d3ee;
+  color: #07111f;
+}
+
+.gc-language-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .gc-table-scroll {
@@ -1221,6 +1277,14 @@ const detailStyles = `
 @media (max-width: 460px) {
   .gc-step small {
     display: none;
+  }
+
+  .gc-history-actions {
+    grid-template-columns: minmax(0, 1fr) minmax(90px, auto);
+  }
+
+  .gc-history-actions .gc-primary {
+    grid-column: 1 / -1;
   }
 
   .gc-document-actions {

@@ -396,6 +396,7 @@ def test_run_analysis_propagates_snapshot_mode_to_predicted_comments(tmp_path, m
             status=RunStatus.QUEUED.value,
             run_parameters={
                 "snapshot_mode": "development_current",
+                "output_language": "en",
                 "mock_provider_result": {
                     "structured_text": _main_analysis_json("Needs stronger metric evidence."),
                     "raw_output": "raw provider text",
@@ -413,6 +414,7 @@ def test_run_analysis_propagates_snapshot_mode_to_predicted_comments(tmp_path, m
         assert enqueued_run_ids == [predicted_run.id]
         assert captured_snapshot_modes == ["development_current"]
         assert predicted_run.run_parameters["snapshot_mode"] == "development_current"
+        assert predicted_run.run_parameters["output_language"] == "en"
         assert predicted_run.run_parameters["max_output_tokens"] == 20000
         assert predicted_run.run_parameters["response_format"] == {"type": "json_object"}
         assert predicted_run.run_parameters["skill_source_snapshot"]["snapshot_mode"] == "development_current"
