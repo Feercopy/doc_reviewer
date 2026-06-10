@@ -1,5 +1,7 @@
 import { type ReactNode } from "react";
 
+import { isOrderedListMarker, parseLooseOrderedList, type LooseOrderedListBlock } from "./markdownListParser";
+
 type MarkdownPreviewProps = {
   markdown: string;
   className?: string;
@@ -71,19 +73,19 @@ export function MarkdownPreview({ markdown, className = "" }: MarkdownPreviewPro
       continue;
     }
 
-    if (/^\d+[.)]\s+/.test(trimmed)) {
-      const items: string[] = [];
-      while (index < lines.length && /^\d+[.)]\s+/.test(lines[index].trim())) {
-        items.push(lines[index].trim().replace(/^\d+[.)]\s+/, ""));
-        index += 1;
-      }
+    if (isOrderedListMarker(trimmed)) {
+      const list = parseLooseOrderedList(lines, index);
       blocks.push(
-        <ol className="gc-md-list" key={`ol-${index}`}>
-          {items.map((item, itemIndex) => (
-            <li key={`${item}-${itemIndex}`}>{renderInlineMarkdown(item)}</li>
+        <ol className="gc-md-list" key={`ol-${index}`} start={list.start === 1 ? undefined : list.start}>
+          {list.items.map((item, itemIndex) => (
+            <li key={`${item.text}-${itemIndex}`}>
+              <div className="gc-md-list-item-title">{renderInlineMarkdown(item.text)}</div>
+              {item.blocks.map((block, blockIndex) => renderLooseListItemBlock(block, `${item.text}-${blockIndex}`))}
+            </li>
           ))}
         </ol>,
       );
+      index = list.nextIndex;
       continue;
     }
 
@@ -129,13 +131,17 @@ export function MarkdownPreview({ markdown, className = "" }: MarkdownPreviewPro
 }
 
 function MarkdownTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
+  const columnKinds = headers.map(markdownTableColumnKind);
+
   return (
     <div className="gc-md-table-scroll">
       <table className="gc-md-table">
         <thead>
           <tr>
             {headers.map((header, index) => (
-              <th key={`${header}-${index}`}>{renderInlineMarkdown(header)}</th>
+              <th className={`gc-md-col--${columnKinds[index]}`} key={`${header}-${index}`}>
+                {renderInlineMarkdown(header)}
+              </th>
             ))}
           </tr>
         </thead>
@@ -143,7 +149,9 @@ function MarkdownTable({ headers, rows }: { headers: string[]; rows: string[][] 
           {rows.map((row, rowIndex) => (
             <tr key={`row-${rowIndex}`}>
               {headers.map((_, cellIndex) => (
-                <td key={`cell-${rowIndex}-${cellIndex}`}>{renderInlineMarkdown(row[cellIndex] ?? "")}</td>
+                <td className={`gc-md-col--${columnKinds[cellIndex]}`} key={`cell-${rowIndex}-${cellIndex}`}>
+                  {renderInlineMarkdown(row[cellIndex] ?? "")}
+                </td>
               ))}
             </tr>
           ))}
@@ -153,13 +161,52 @@ function MarkdownTable({ headers, rows }: { headers: string[]; rows: string[][] 
   );
 }
 
+function renderLooseListItemBlock(block: LooseOrderedListBlock, key: string): ReactNode {
+  if (block.type === "unorderedList") {
+    return (
+      <ul className="gc-md-list gc-md-list--nested" key={key}>
+        {block.items.map((item, itemIndex) => (
+          <li key={`${item}-${itemIndex}`}>{renderInlineMarkdown(item)}</li>
+        ))}
+      </ul>
+    );
+  }
+
+  return (
+    <p className="gc-md-list-paragraph" key={key}>
+      {renderInlineMarkdown(block.text)}
+    </p>
+  );
+}
+
+function markdownTableColumnKind(header: string): "index" | "token" | "anchor" | "text" {
+  const normalized = header.trim().toLowerCase().replace(/[^a-z0-9#]+/g, "_");
+
+  if (normalized === "#" || normalized === "no" || normalized === "n" || normalized === "id") {
+    return "index";
+  }
+  if (
+    normalized.includes("type") ||
+    normalized.includes("status") ||
+    normalized.includes("severity") ||
+    normalized.includes("verdict") ||
+    normalized.includes("risk")
+  ) {
+    return "token";
+  }
+  if (normalized.includes("anchor") || normalized.includes("source") || normalized.includes("citation")) {
+    return "anchor";
+  }
+  return "text";
+}
+
 function isMarkdownBlockStart(lines: string[], index: number): boolean {
   const trimmed = lines[index].trim();
   return (
     /^#{1,6}\s+/.test(trimmed) ||
     trimmed.startsWith("```") ||
     /^[-*+]\s+/.test(trimmed) ||
-    /^\d+[.)]\s+/.test(trimmed) ||
+    isOrderedListMarker(trimmed) ||
     trimmed.startsWith(">") ||
     /^---+$|^\*\*\*+$/.test(trimmed) ||
     (isMarkdownTableRow(trimmed) && index + 1 < lines.length && isMarkdownTableSeparator(lines[index + 1]))
@@ -328,6 +375,18 @@ const markdownPreviewStyles = `
   overflow-wrap: anywhere;
 }
 
+.gc-md-list-item-title {
+  margin: 0 0 8px;
+}
+
+.gc-md-list-paragraph {
+  margin: 0 0 10px;
+}
+
+.gc-md-list--nested {
+  margin: 6px 0 12px;
+}
+
 .gc-md-quote {
   margin: 0 0 16px;
   border-left: 3px solid #22d3ee;
@@ -354,16 +413,18 @@ const markdownPreviewStyles = `
 }
 
 .gc-md-table-scroll {
+  max-width: 100%;
   width: 100%;
   margin: 0 0 18px;
   overflow-x: auto;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 8px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .gc-md-table {
-  width: 100%;
-  min-width: 560px;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 14px;
 }
@@ -374,7 +435,8 @@ const markdownPreviewStyles = `
   padding: 10px 12px;
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .gc-md-table th {
@@ -383,10 +445,34 @@ const markdownPreviewStyles = `
   font-size: 12px;
   font-weight: 850;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .gc-md-table tr:last-child td {
   border-bottom: 0;
+}
+
+.gc-md-table .gc-md-col--index {
+  width: 48px;
+  min-width: 48px;
+  max-width: 64px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.gc-md-table .gc-md-col--token {
+  min-width: 112px;
+  max-width: 156px;
+}
+
+.gc-md-table .gc-md-col--anchor {
+  min-width: 200px;
+  max-width: 300px;
+}
+
+.gc-md-table .gc-md-col--text {
+  min-width: 360px;
+  max-width: 640px;
 }
 
 .gc-markdown-preview code {

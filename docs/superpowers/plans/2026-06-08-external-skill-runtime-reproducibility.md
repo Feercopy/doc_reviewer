@@ -842,5 +842,5 @@ Do not start with DA RAG. Start by eliminating silent stub usage. The safest seq
 
 ## Notes
 
-- External development-memory lookup was unavailable during planning with `getaddrinfo ENOTFOUND`; this plan is based on repository context, current MVP plans, and local Devil's Advocate/Gate Challenger source inspection.
+- This plan is based on repository context, current MVP plans, and local Devil's Advocate/Gate Challenger source inspection.
 - Do not commit this plan unless the user explicitly asks.

@@ -114,16 +114,18 @@ export default function AnalysisDetailPage() {
           <>
             <section className="analysis-hero">
               <div className="analysis-hero__main">
-                <h1>Analysis</h1>
+                <div className="analysis-hero__title-row">
+                  <h1>Analysis</h1>
+                  <button className="analysis-secondary-action analysis-run-details-action" type="button" onClick={() => setRunDetailsOpen(true)}>
+                    Run details
+                  </button>
+                </div>
                 <div className="analysis-chip-row">
                   <span className={`analysis-verdict analysis-verdict--${toneForValue(analysis.verdict)}`}>
                     {formatLabel(analysis.verdict)}
                   </span>
                   <StatusBadge status={analysis.status} />
                   <TraceChip label="Created" value={formatDate(analysis.created_at)} />
-                  <button className="analysis-secondary-action" type="button" onClick={() => setRunDetailsOpen(true)}>
-                    Run details
-                  </button>
                 </div>
               </div>
             </section>
@@ -278,8 +280,8 @@ function MainSkillMarkdownPanel({ analysis }: { analysis: AnalysisRecord }) {
         <p className="analysis-muted">No markdown output is available for this run yet.</p>
       )}
       {hasDetailedChecks ? (
-        <section className="analysis-detail-checks" aria-label="Детализированные проверки">
-          <h3>Детализированные проверки</h3>
+        <section className="analysis-detail-checks" aria-label="Detailed checks">
+          <h3>Detailed checks</h3>
           {sections.layer1 ? <CollapsibleMarkdown title="Layer 1" markdown={sections.layer1} /> : null}
           {sections.layer2 ? <CollapsibleMarkdown title="Layer 2" markdown={sections.layer2} /> : null}
         </section>
@@ -810,6 +812,19 @@ const analysisStyles = `
   white-space: nowrap;
 }
 
+.analysis-run-details-action {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.52);
+  color: #94a3b8;
+  box-shadow: none;
+}
+
+.analysis-run-details-action:hover:not(:disabled) {
+  border-color: rgba(148, 163, 184, 0.36);
+  background: rgba(30, 41, 59, 0.72);
+  color: #cbd5e1;
+}
+
 .analysis-workbench button:focus-visible,
 .analysis-workbench input:focus-visible,
 .analysis-workbench select:focus-visible,
@@ -882,6 +897,14 @@ const analysisStyles = `
   display: grid;
   align-content: start;
   gap: 14px;
+}
+
+.analysis-hero__title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
 }
 
 .analysis-lead {
@@ -1327,6 +1350,18 @@ const analysisStyles = `
   .analysis-hero,
   .analysis-card {
     padding: 14px;
+  }
+
+  .analysis-hero__title-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .analysis-run-details-action {
+    align-self: flex-start;
+    min-height: 34px;
+    padding-inline: 12px;
+    font-size: 12px;
   }
 
   .analysis-split,

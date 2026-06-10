@@ -312,50 +312,50 @@ export default function DocumentDetailPage() {
         {document ? (
           <>
             <section className="gc-hero">
-              <div>
+              <div className="gc-hero__content">
                 <p className="gc-eyebrow">Document workflow</p>
-                <h1>{document.title}</h1>
-                <p className="gc-muted">
-                  {document.original_filename} · {formatDate(document.created_at)}
-                </p>
-              </div>
-            </section>
-
-            <section className="gc-stepper" aria-label="Document workflow status">
-              {workflowSteps.map((step, index) => (
-                <div className={`gc-step is-${step.state}`} key={step.label}>
-                  <span>{index + 1}</span>
-                  <div>
-                    <strong>{step.label}</strong>
-                    <small>{step.note}</small>
+                <div className="gc-hero__title-row">
+                  <div className="gc-hero__title-copy">
+                    <h1>{document.title}</h1>
+                    <p className="gc-muted">
+                      {document.original_filename} · {formatDate(document.created_at)}
+                    </p>
+                  </div>
+                  <div className="gc-stepper" aria-label="Document workflow status">
+                    {workflowSteps.map((step, index) => (
+                      <div className={`gc-step is-${step.state}`} key={step.label}>
+                        <span>{index + 1}</span>
+                        <div>
+                          <strong>{step.label}</strong>
+                          <small>{step.note}</small>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ))}
+              </div>
             </section>
 
             {error ? <section className="gc-alert">{error}</section> : null}
 
             <div className="gc-detail-grid">
               <div className="gc-left-column">
-                <section className="gc-panel gc-control-panel" aria-label="Document actions">
-                  <div className="gc-action-row gc-control-row">
-                    <a className="gc-ghost" href={`${resolveApiBaseUrl()}/documents/${document.id}/raw`}>
-                      Download raw
-                    </a>
-                    <button className="gc-ghost" disabled={pending} type="button" onClick={reparse}>
-                      Reparse
-                    </button>
-                    <button className="gc-danger" disabled={pending} type="button" onClick={removeDocument}>
-                      Delete
-                    </button>
-                  </div>
-                </section>
-
                 <section className="gc-panel gc-text-panel">
                   <div className="gc-panel-heading">
                     <div>
                       <h2>Parsed text</h2>
                       <p>{parsedText ? `${parsedText.length.toLocaleString()} characters extracted` : "Text appears after parsing completes."}</p>
+                    </div>
+                    <div className="gc-action-row gc-document-actions" aria-label="Document actions">
+                      <a className="gc-ghost" href={`${resolveApiBaseUrl()}/documents/${document.id}/raw`}>
+                        Download raw
+                      </a>
+                      <button className="gc-ghost" disabled={pending} type="button" onClick={reparse}>
+                        Reparse
+                      </button>
+                      <button className="gc-danger" disabled={pending} type="button" onClick={removeDocument}>
+                        Delete
+                      </button>
                     </div>
                   </div>
 
@@ -550,17 +550,33 @@ const detailStyles = `
 }
 
 .gc-hero,
-.gc-stepper,
-.gc-action-row,
-.gc-detail-grid {
+.gc-action-row {
   display: flex;
 }
 
 .gc-hero {
-  align-items: flex-end;
-  justify-content: space-between;
+  align-items: flex-start;
+  justify-content: flex-start;
   gap: 24px;
   margin-bottom: 18px;
+}
+
+.gc-hero__content {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+}
+
+.gc-hero__title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  min-width: 0;
+}
+
+.gc-hero__title-copy {
+  min-width: 0;
 }
 
 .gc-hero h1 {
@@ -597,18 +613,6 @@ const detailStyles = `
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
-}
-
-.gc-control-panel {
-  padding: 12px;
-}
-
-.gc-control-row {
-  margin-top: 0;
-}
-
-.gc-control-row .gc-primary {
-  min-width: 166px;
 }
 
 .gc-primary,
@@ -654,33 +658,39 @@ const detailStyles = `
 }
 
 .gc-stepper {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
+  display: flex;
+  width: auto;
+  flex: 0 1 760px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 0;
 }
 
 .gc-step {
   display: flex;
-  min-height: 86px;
+  min-height: 42px;
+  flex: 0 1 178px;
+  max-width: 188px;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 8px;
   background: #0d1424;
-  padding: 14px;
+  padding: 7px 9px;
 }
 
 .gc-step span {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 999px;
   color: #cbd5e1;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 900;
 }
 
@@ -691,12 +701,19 @@ const detailStyles = `
 }
 
 .gc-step strong {
+  overflow: hidden;
   color: #f8fafc;
+  font-size: 12px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gc-step small {
   overflow: hidden;
   color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -753,9 +770,18 @@ const detailStyles = `
   padding: 16px;
 }
 
+.gc-text-panel {
+  min-width: 0;
+}
+
+.gc-text-panel .gc-markdown-preview--full {
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
 .gc-panel-heading {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 16px;
@@ -840,8 +866,10 @@ const detailStyles = `
   margin-top: 14px;
 }
 
-.gc-action-row.gc-control-row {
+.gc-document-actions {
+  flex: 0 0 auto;
   margin-top: 0;
+  justify-content: flex-end;
 }
 
 .gc-field-stack label {
@@ -1119,9 +1147,24 @@ const detailStyles = `
 }
 
 @media (max-width: 1100px) {
-  .gc-detail-grid,
-  .gc-stepper {
+  .gc-detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .gc-hero__title-row {
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+
+  .gc-stepper {
+    width: min(100%, 940px);
+    flex: none;
+    justify-content: flex-start;
+  }
+
+  .gc-step {
+    flex: 1 1 190px;
+    max-width: none;
   }
 
   .gc-right-column {
@@ -1147,6 +1190,41 @@ const detailStyles = `
 
   .gc-hero h1 {
     font-size: 30px;
+  }
+
+  .gc-stepper {
+    width: 100%;
+  }
+
+  .gc-step {
+    flex-basis: calc(50% - 4px);
+  }
+
+  .gc-panel-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .gc-document-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .gc-document-actions .gc-ghost,
+  .gc-document-actions .gc-danger {
+    min-width: 0;
+    padding-inline: 10px;
+  }
+}
+
+@media (max-width: 460px) {
+  .gc-step small {
+    display: none;
+  }
+
+  .gc-document-actions {
+    grid-template-columns: 1fr;
   }
 }
 `;

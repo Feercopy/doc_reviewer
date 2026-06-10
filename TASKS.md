@@ -17,16 +17,13 @@ Primary plan index:
   subtask here.
 - Update this file when scope, status, or verification changes.
 - Use repository docs, plans, task notes, git history, and nearby code/tests as
-  the development context. Do not require external development-memory services
-  unless the user explicitly asks.
+  the development context.
 
 ## Current Focus
 
 - [x] Create root `AGENTS.md` with project, workflow, security, and
   repository-local context instructions.
 - [x] Create root `TASKS.md` aligned with the MVP phase plan.
-- [x] Remove the obsolete external development-memory workflow from agent and
-  task instructions; use repository docs and task notes for handoff context.
 - [x] Finish full Phase 1 Docker Compose runtime verification using verified
   public mirror image defaults.
 - [x] Verify frontend package install, tests, production build, and critical
@@ -119,6 +116,16 @@ Primary plan index:
   `Детализированные проверки` section.
 - [x] Remove duplicate verdict display from the analysis result sidebar so the
   verdict appears only once in the page header.
+- [x] Compact the document detail workflow status into the right side of the
+  title row and move raw download, reparse, and delete actions into the parsed
+  document panel; verified desktop and 390px mobile layout with no horizontal
+  overflow.
+- [x] Fix Markdown table rendering for Devil's Advocate outputs: typed table
+  columns now keep readable widths and scroll horizontally inside the markdown
+  block instead of squeezing `TYPE` and `SEVERITY` into vertical text.
+- [x] Fix Markdown loose ordered lists in Gate Challenger outputs: numbered
+  sections with paragraphs and nested bullets now stay in one ordered list
+  instead of restarting every item at `1`.
 
 ## Phase 1: Skeleton And Data Foundation
 
@@ -279,12 +286,7 @@ Exit criteria:
 
 ## Decision Log
 
-- 2026-06-07: Added root agent and task workflow documents. External
-  development memory was treated as non-runtime context and must not become an
-  application dependency.
-- 2026-06-09: Removed the external development-memory workflow from agent and
-  task instructions after repeated availability issues. Future agents should use
-  repository docs, task notes, git history, and nearby code/tests for context.
+- 2026-06-07: Added root agent and task workflow documents.
 - 2026-06-07: Implemented Phase 1 scaffold, initial schema migration, RBAC
   ownership helpers, cookie session auth, admin user management, bootstrap admin
   seed, baseline skill seed helper, and minimal Next.js authenticated routes.
@@ -416,8 +418,7 @@ Exit criteria:
   Challenger Layer 1/2 output into annotation payload fields while preserving
   the older etalon-shaped input. Verified API etalon tests, frontend unit
   tests, production build, Compose config, independent review/tester agents,
-  login browser smoke, and the full Playwright MVP flow. External
-  development-memory lookup remained unavailable due `getaddrinfo ENOTFOUND`.
+  login browser smoke, and the full Playwright MVP flow.
 - 2026-06-09: Fixed dark redesign responsiveness after browser review. Replaced
   document-page `100vw` width calculations with container-relative widths,
   compacted the mobile topbar/navigation, and converted the documents table to

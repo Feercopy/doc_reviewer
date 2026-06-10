@@ -25,10 +25,6 @@ planning, schema, prompt, or implementation decisions, read the relevant local
 context: `AGENTS.md`, `TASKS.md`, matching files under `docs/superpowers/plans/`,
 recent git history when useful, and nearby code/tests.
 
-Do not require external development-memory services for this project unless the
-user explicitly asks. Do not add memory dependencies, runtime calls, storage
-assumptions, or memory features to the application unless explicitly requested.
-
 After meaningful decisions, implementation milestones, debugging findings,
 benchmark conclusions, or prompt/skill changes, update `TASKS.md` or the
 relevant plan/handoff file with a concise note.
@@ -74,7 +70,7 @@ Canonical external skill sources:
   the frontend.
 - Logs, audit metadata, tests, and fixtures must not contain plaintext secrets.
 - Do not send raw user documents, provider outputs, or secrets to external
-  note-taking or development-memory tools.
+  tools.
 - Use `.env.example` for non-secret configuration templates only.
 
 ## Workflow For Agents
