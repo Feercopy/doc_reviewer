@@ -186,12 +186,11 @@ export default function DocumentsPage() {
   return (
     <AppShell>
       <main className="gc-dark-page documents-review">
-        <style>{documentsStyles}</style>
+        <style>{`${documentsStyles}\n${paperReviewOverrides}`}</style>
         <section className="gc-hero">
           <div>
-            <p className="gc-eyebrow">Review queue</p>
             <h1>Documents</h1>
-            <p className="gc-muted">Uploaded defenses, parser state, and analysis readiness.</p>
+            <p className="gc-muted">Upload investment review and product defense documents.</p>
           </div>
         </section>
 
@@ -1164,6 +1163,288 @@ const documentsStyles = `
 
   .gc-action-row > * {
     flex: 1 1 96px;
+  }
+}
+`;
+
+const paperReviewOverrides = `
+.shell:has(.gc-dark-page) {
+  background: #f7f9fb;
+}
+
+.gc-dark-page {
+  width: min(1536px, 100%);
+  min-height: calc(100vh - 64px);
+  padding: 32px 36px 48px;
+  color: #111827;
+}
+
+.gc-hero {
+  margin-bottom: 22px;
+}
+
+.gc-hero h1 {
+  color: #111827;
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 38px;
+}
+
+.gc-eyebrow {
+  color: #5b6472;
+}
+
+.gc-muted,
+.gc-panel-heading p,
+.gc-subtle,
+.gc-date,
+.gc-title-cell span,
+.gc-title-cell small {
+  color: #5b6472;
+}
+
+.gc-upload-card,
+.gc-panel,
+.gc-controls,
+.gc-selected-file {
+  border: 1px solid #e5eaf0;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.gc-upload-card,
+.gc-panel {
+  border-radius: 8px;
+}
+
+.gc-upload-form {
+  grid-template-columns: minmax(340px, 0.9fr) minmax(320px, 1fr);
+  gap: 36px;
+}
+
+.gc-dropzone {
+  min-height: 176px;
+  border: 1px dashed #cad2dc;
+  background: #fbfcfd;
+  color: #111827;
+}
+
+.gc-dropzone:hover,
+.gc-dropzone.is-dragging {
+  border-color: #0e9f6e;
+  background: #f8fffc;
+}
+
+.gc-dropzone.has-file {
+  border-color: #0e9f6e;
+}
+
+.gc-upload-mark {
+  border-color: #d8dee7;
+  background: #ffffff;
+}
+
+.gc-upload-mark span {
+  border-color: #111827;
+}
+
+.gc-upload-mark span::before,
+.gc-upload-mark span::after {
+  background: #111827;
+}
+
+.gc-format-row span,
+.gc-selected-file {
+  border-color: #e5eaf0;
+  background: #f7f9fb;
+  color: #5b6472;
+}
+
+.gc-upload-heading h2,
+.gc-panel-heading h2,
+.gc-title-cell strong,
+.gc-table td,
+.gc-table th {
+  color: #111827;
+}
+
+.gc-field-stack label,
+.gc-search-label {
+  color: #111827;
+}
+
+.gc-dark-page select,
+.gc-dark-page input {
+  border-color: #d9e0ea;
+  background: #ffffff;
+  color: #111827;
+}
+
+.gc-dark-page input::placeholder {
+  color: #8a93a3;
+}
+
+.gc-primary {
+  border-color: #0e9f6e;
+  background: #0e9f6e;
+  color: #ffffff;
+}
+
+.gc-primary:hover:not(:disabled) {
+  border-color: #087d5f;
+  background: #087d5f;
+}
+
+.gc-ghost,
+.gc-compact-link,
+.gc-filter-tabs button {
+  border-color: #d9e0ea;
+  background: #ffffff;
+  color: #111827;
+}
+
+.gc-ghost:hover,
+.gc-compact-link:hover,
+.gc-filter-tabs button:hover {
+  border-color: #0e9f6e;
+  color: #075e45;
+}
+
+.gc-filter-tabs button.is-active,
+.gc-filter-tabs button[aria-selected="true"] {
+  border-color: #0e9f6e;
+  background: #ffffff;
+  color: #075e45;
+}
+
+.gc-compact-danger {
+  border-color: #f2d7d9;
+  background: #ffffff;
+  color: #c92036;
+}
+
+.gc-compact-danger:hover:not(:disabled) {
+  border-color: #e7a8b4;
+  background: #fcecee;
+}
+
+.gc-controls {
+  box-shadow: none;
+}
+
+.gc-table-panel {
+  overflow: hidden;
+}
+
+.gc-table-scroll {
+  border-color: #e5eaf0;
+  background: #ffffff;
+}
+
+.gc-table {
+  background: #ffffff;
+}
+
+.gc-table thead {
+  background: #fbfcfd;
+}
+
+.gc-table th,
+.gc-table td {
+  border-bottom-color: #edf1f5;
+}
+
+.gc-table tbody tr:hover td {
+  background: #fbfcfd;
+}
+
+.gc-type-badge {
+  border-color: #e5eaf0;
+  background: #f7f9fb;
+  color: #344054;
+}
+
+.gc-signal,
+.gc-run-status {
+  border-color: #e5eaf0;
+  background: #f2f4f7;
+  color: #344054;
+}
+
+.gc-signal.is-good {
+  border-color: transparent;
+  background: #eaf8f1;
+  color: #075e45;
+}
+
+.gc-signal.is-info {
+  border-color: transparent;
+  background: #eaf3fb;
+  color: #1d70b8;
+}
+
+.gc-signal.is-warn {
+  border-color: transparent;
+  background: #fff7df;
+  color: #8a5d00;
+}
+
+.gc-signal.is-bad,
+.gc-error-text {
+  color: #c92036;
+}
+
+.gc-signal.is-bad {
+  border-color: transparent;
+  background: #fcecee;
+}
+
+.gc-alert {
+  border: 1px solid #f2d7d9;
+  background: #fcecee;
+  color: #a5122a;
+}
+
+.gc-empty {
+  border-color: #e5eaf0;
+  background: #fbfcfd;
+  color: #5b6472;
+}
+
+.gc-dark-page .badge {
+  border-color: transparent;
+  background: #f2f4f7;
+  color: #344054;
+}
+
+.gc-dark-page .badge.ok {
+  background: #eaf8f2;
+  color: #075e45;
+}
+
+.gc-dark-page .badge.info {
+  background: #eaf3fb;
+  color: #1d70b8;
+}
+
+.gc-dark-page .badge.warning {
+  background: #fff7df;
+  color: #7a4300;
+}
+
+.gc-dark-page .badge.danger {
+  background: #fcecee;
+  color: #a5122a;
+}
+
+@media (max-width: 760px) {
+  .gc-dark-page {
+    padding: 22px 12px 36px;
+  }
+
+  .gc-upload-form {
+    grid-template-columns: 1fr;
+    gap: 16px;
   }
 }
 `;

@@ -81,7 +81,7 @@ export default function BenchmarksPage() {
   return (
     <AppShell>
       <main className="benchmarks-console">
-        <style>{benchmarksStyles}</style>
+        <style>{`${benchmarksStyles}\n${paperBenchmarksOverrides}`}</style>
         <section className="benchmarks-hero">
           <div>
             <div className="benchmarks-eyebrow">Dark launch console</div>
@@ -597,6 +597,158 @@ const benchmarksStyles = `
   .benchmarks-kpis,
   .benchmarks-form-grid {
     grid-template-columns: 1fr;
+  }
+}
+`;
+
+const paperBenchmarksOverrides = `
+.benchmarks-console {
+  width: min(1536px, 100%);
+  padding: 28px 36px 48px;
+  color: #111827;
+}
+
+.benchmarks-console h1 {
+  color: #111827;
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 38px;
+}
+
+.benchmarks-console h2,
+.benchmarks-console table,
+.benchmarks-console td {
+  color: #111827;
+}
+
+.benchmarks-console button,
+.benchmarks-open {
+  border-color: #0e9f6e;
+  background: #0e9f6e;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.benchmarks-open:hover,
+.benchmarks-console button:hover:not(:disabled) {
+  border-color: #087d5f;
+  background: #087d5f;
+}
+
+.benchmarks-console input,
+.benchmarks-console select,
+.benchmarks-console textarea {
+  border-color: #d6dee8;
+  background: #ffffff;
+  color: #111827;
+}
+
+.benchmarks-console label {
+  color: #111827;
+}
+
+.benchmarks-console th {
+  border-bottom-color: #e5eaf0;
+  color: #5b6472;
+}
+
+.benchmarks-console td {
+  border-bottom-color: #edf1f5;
+}
+
+.benchmarks-console .badge {
+  border-color: transparent;
+  background: #f2f4f7;
+  color: #344054;
+}
+
+.benchmarks-console .badge.ok,
+.benchmarks-ready,
+.benchmarks-score--good {
+  border-color: transparent;
+  background: #eaf8f2;
+  color: #075e45;
+}
+
+.benchmarks-console .badge.info {
+  border-color: transparent;
+  background: #eaf3fb;
+  color: #1d70b8;
+}
+
+.benchmarks-console .badge.danger,
+.benchmarks-not-ready {
+  border-color: transparent;
+  background: #fcecee;
+  color: #a5122a;
+}
+
+.benchmarks-hero,
+.benchmarks-card,
+.benchmarks-alert,
+.benchmarks-kpi,
+.benchmarks-inspector-row,
+.benchmarks-requirements {
+  border-color: #d6dee8;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.benchmarks-hero {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.benchmarks-hero p,
+.benchmarks-card__header p,
+.benchmarks-muted,
+.benchmarks-state,
+.benchmarks-requirements,
+.benchmarks-kpi span,
+.benchmarks-inspector-row span {
+  color: #5b6472;
+}
+
+.benchmarks-eyebrow {
+  color: #5b6472;
+}
+
+.benchmarks-kpi,
+.benchmarks-inspector-row,
+.benchmarks-requirements {
+  background: #f7f9fb;
+}
+
+.benchmarks-table-wrap {
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  overflow: auto;
+}
+
+.benchmarks-table-wrap table {
+  background: #ffffff;
+}
+
+.benchmarks-table-wrap thead {
+  background: #fbfcfd;
+}
+
+.benchmarks-state {
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.benchmarks-alert {
+  border-color: #f2d7d9;
+  background: #fcecee;
+  color: #a5122a;
+}
+
+@media (max-width: 680px) {
+  .benchmarks-console {
+    padding: 18px 12px 32px;
   }
 }
 `;

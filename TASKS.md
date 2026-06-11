@@ -21,6 +21,10 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Implement the Paper feedback card on the analysis result page: replace
+  the old usefulness select/benchmark checkbox with a 5-point icon rating,
+  optional comment textarea with a 1000-character counter, and full-width
+  submit action while preserving the existing feedback API usefulness contract.
 - [x] Add structured Layer 1 / Layer 2 rendering on the analysis result page:
   Layer 2 questions now group under their parent Layer 1 item and show the
   contract `status` as `PASS` / `PARTIAL` / `FAIL`, with the Gate Challenger
@@ -515,3 +519,17 @@ Exit criteria:
   Devil's Advocate is normalized to JSON/native markdown instead of producing
   annotated `.docx` comments, and the current `full_ic_voting` naming differs
   from older plan text that used `ic_voting_full`.
+- 2026-06-11: Applied the new Paper light enterprise redesign across the main
+  frontend surfaces: app shell, documents list/detail, analysis result,
+  benchmarks list/detail, login, markdown, tables, forms, statuses, and nested
+  Layer 1/Layer 2 result blocks. Added a frontend token regression test,
+  rebuilt the local web container, and verified desktop/mobile browser views
+  have the Paper light background without visible dark legacy blocks or
+  horizontal overflow. Rebuilt the worker container after confirming it still
+  had the stale main-analysis schema without `layer_2.status`; updated the e2e
+  MVP fixture to the tightened Layer 1 contract and current tabbed Devil's
+  Advocate UI. Verified `npm --prefix apps/web run test`, `npm --prefix
+  apps/web run build`, and the full Playwright MVP flow against
+  `http://127.0.0.1:3000`. Backend contract pytest could not run in the host or
+  runtime api container because pytest/dev dependencies are not installed
+  there.

@@ -28,6 +28,7 @@ import {
   splitDevilsAdvocateMarkdown,
   stripAssessmentHeading,
 } from "./analysisDisplay";
+import { usefulnessForFeedbackRating, type FeedbackUsefulness } from "./feedbackDisplay";
 
 type AnalysisTab = "mainOutput" | "devilsAdvocate" | "fullOutput";
 
@@ -46,6 +47,16 @@ const analysisTabs: Array<{ id: AnalysisTab; label: string }> = [
   { id: "fullOutput", label: "Full Output" },
 ];
 
+const feedbackRatings = [
+  { value: 1, label: "Not useful" },
+  { value: 2, label: "Slightly useful" },
+  { value: 3, label: "Neutral" },
+  { value: 4, label: "Useful" },
+  { value: 5, label: "Very useful" },
+] as const;
+
+type FeedbackRating = (typeof feedbackRatings)[number]["value"];
+
 export default function AnalysisDetailPage() {
   const params = useParams<{ analysisId: string }>();
   const [analysis, setAnalysis] = useState<AnalysisRecord | null>(null);
@@ -53,8 +64,8 @@ export default function AnalysisDetailPage() {
   const [error, setError] = useState("");
   const [feedbackStatus, setFeedbackStatus] = useState("");
   const [feedbackComment, setFeedbackComment] = useState("");
-  const [usefulness, setUsefulness] = useState<"useful" | "partially_useful" | "useless">("useful");
-  const [canUseForBenchmark, setCanUseForBenchmark] = useState(false);
+  const [feedbackRating, setFeedbackRating] = useState<FeedbackRating>(4);
+  const [usefulness, setUsefulness] = useState<FeedbackUsefulness>("useful");
   const [etalonPending, setEtalonPending] = useState(false);
   const [activeTab, setActiveTab] = useState<AnalysisTab>("mainOutput");
   const [runDetailsOpen, setRunDetailsOpen] = useState(false);
@@ -103,13 +114,18 @@ export default function AnalysisDetailPage() {
         has_false_findings: null,
         has_missed_findings: null,
         comment: feedbackComment || null,
-        can_use_for_benchmark: canUseForBenchmark,
+        can_use_for_benchmark: false,
       });
       setFeedbackStatus("Feedback saved");
       setFeedbackComment("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit feedback");
     }
+  }
+
+  function chooseFeedbackRating(rating: FeedbackRating) {
+    setFeedbackRating(rating);
+    setUsefulness(usefulnessForFeedbackRating(rating));
   }
 
   async function createDraft() {
@@ -146,7 +162,7 @@ export default function AnalysisDetailPage() {
   return (
     <AppShell>
       <main className="analysis-workbench">
-        <style>{analysisStyles}</style>
+        <style>{`${analysisStyles}\n${paperAnalysisOverrides}`}</style>
         {error ? <section className="analysis-alert">{error}</section> : null}
         {analysis ? (
           <>
@@ -205,30 +221,46 @@ export default function AnalysisDetailPage() {
                   </button>
                 </section>
 
-                <section className="analysis-card stack" id="feedback">
+                <section className="analysis-card analysis-feedback-card stack" id="feedback">
                   <h2>Feedback</h2>
-                  <label>
-                    Usefulness
-                    <select value={usefulness} onChange={(event) => setUsefulness(event.target.value as typeof usefulness)}>
-                      <option value="useful">Useful</option>
-                      <option value="partially_useful">Partially useful</option>
-                      <option value="useless">Useless</option>
-                    </select>
-                  </label>
-                  <label className="analysis-checkbox">
-                    <input
-                      checked={canUseForBenchmark}
-                      type="checkbox"
-                      onChange={(event) => setCanUseForBenchmark(event.target.checked)}
+                  <div className="analysis-feedback-field">
+                    <span className="analysis-feedback-label">How useful was this analysis?</span>
+                    <div className="analysis-feedback-rating" role="radiogroup" aria-label="How useful was this analysis?">
+                      {feedbackRatings.map((rating) => (
+                        <button
+                          aria-checked={feedbackRating === rating.value}
+                          aria-label={rating.label}
+                          className={
+                            feedbackRating === rating.value
+                              ? "analysis-feedback-rating__button analysis-feedback-rating__button--selected"
+                              : "analysis-feedback-rating__button"
+                          }
+                          key={rating.value}
+                          role="radio"
+                          title={rating.label}
+                          type="button"
+                          onClick={() => chooseFeedbackRating(rating.value)}
+                        >
+                          <FeedbackFaceIcon rating={rating.value} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <label className="analysis-feedback-field">
+                    <span className="analysis-feedback-label">Your comments (optional)</span>
+                    <textarea
+                      className="analysis-feedback-textarea"
+                      maxLength={1000}
+                      placeholder="Good coverage of key risks. Need more evidence on long-term deterrence and adversarial testing results."
+                      value={feedbackComment}
+                      onChange={(event) => setFeedbackComment(event.target.value)}
                     />
-                    Use for benchmark review
                   </label>
-                  <label>
-                    Comment
-                    <textarea value={feedbackComment} onChange={(event) => setFeedbackComment(event.target.value)} />
-                  </label>
-                  <div className="analysis-action-row">
-                    <button type="button" onClick={sendFeedback}>
+                  <div className="analysis-feedback-footer">
+                    <span>{feedbackComment.length} / 1000</span>
+                  </div>
+                  <div className="analysis-feedback-actions">
+                    <button className="analysis-feedback-submit" type="button" onClick={sendFeedback}>
                       Submit feedback
                     </button>
                     {feedbackStatus ? <span className="analysis-success">{feedbackStatus}</span> : null}
@@ -242,6 +274,28 @@ export default function AnalysisDetailPage() {
         )}
       </main>
     </AppShell>
+  );
+}
+
+function FeedbackFaceIcon({ rating }: { rating: FeedbackRating }) {
+  const mouthPath =
+    rating === 1
+      ? "M8 15.6C9.15 14.2 10.47 13.5 12 13.5C13.53 13.5 14.85 14.2 16 15.6"
+      : rating === 2
+        ? "M8.8 15C9.72 14.15 10.78 13.72 12 13.72C13.22 13.72 14.28 14.15 15.2 15"
+        : rating === 3
+          ? "M8.8 14.1H15.2"
+          : rating === 4
+            ? "M8.6 13.5C9.65 14.65 10.78 15.22 12 15.22C13.22 15.22 14.35 14.65 15.4 13.5"
+            : "M8.4 13.2C9.45 14.78 10.65 15.58 12 15.58C13.35 15.58 14.55 14.78 15.6 13.2";
+
+  return (
+    <svg aria-hidden="true" className="analysis-feedback-face" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="9" cy="10.5" r="1.05" fill="currentColor" />
+      <circle cx="15" cy="10.5" r="1.05" fill="currentColor" />
+      <path d={mouthPath} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+    </svg>
   );
 }
 
@@ -1823,6 +1877,456 @@ const analysisStyles = `
   .analysis-modal__header {
     align-items: stretch;
     flex-direction: column;
+  }
+}
+`;
+
+const paperAnalysisOverrides = `
+.analysis-workbench {
+  width: min(100%, 1536px);
+  padding: 28px 36px 48px;
+  color: #111827;
+}
+
+.analysis-workbench h1 {
+  color: #111827;
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 38px;
+}
+
+.analysis-workbench h2,
+.analysis-workbench h3 {
+  color: #111827;
+}
+
+.analysis-workbench button,
+.analysis-workbench .secondary-link {
+  border-color: #0e9f6e;
+  background: #0e9f6e;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.analysis-workbench button:hover:not(:disabled) {
+  border-color: #087d5f;
+  background: #087d5f;
+  transform: none;
+}
+
+.analysis-run-details-action,
+.analysis-secondary-action {
+  border-color: #d6dee8 !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+}
+
+.analysis-run-details-action:hover:not(:disabled),
+.analysis-secondary-action:hover:not(:disabled) {
+  border-color: #0e9f6e !important;
+  background: #eaf8f2 !important;
+  color: #075e45 !important;
+}
+
+.analysis-workbench button:focus-visible,
+.analysis-workbench input:focus-visible,
+.analysis-workbench select:focus-visible,
+.analysis-workbench textarea:focus-visible {
+  outline: 2px solid rgba(14, 159, 110, 0.6);
+}
+
+.analysis-workbench input,
+.analysis-workbench select,
+.analysis-workbench textarea {
+  border-color: #d6dee8;
+  background: #ffffff;
+  color: #111827;
+}
+
+.analysis-workbench label,
+.analysis-hero__date,
+.analysis-lead,
+.analysis-card p,
+.analysis-card__label,
+.analysis-wrap,
+.analysis-token,
+.analysis-chip {
+  color: #5b6472;
+}
+
+.analysis-hero,
+.analysis-card,
+.analysis-alert,
+.analysis-loading,
+.analysis-modal,
+.analysis-details,
+.analysis-trace,
+.analysis-token,
+.analysis-chip,
+.analysis-layer-group,
+.analysis-layer-table,
+.analysis-layer-question,
+.analysis-short-summary,
+.analysis-empty,
+.analysis-json,
+.analysis-markdown-card {
+  border-color: #d6dee8;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.analysis-hero {
+  margin-bottom: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.analysis-chip-row {
+  margin-top: 2px;
+}
+
+.analysis-verdict,
+.analysis-workbench .badge,
+.analysis-status-pill,
+.analysis-layer-status {
+  border-color: transparent;
+  background: #f2f4f7;
+  color: #344054;
+}
+
+.analysis-verdict--ok,
+.analysis-workbench .badge.ok,
+.analysis-status-pill--pass,
+.analysis-layer-status--pass {
+  background: #eaf8f2;
+  color: #075e45;
+}
+
+.analysis-verdict--warning,
+.analysis-workbench .badge.warning,
+.analysis-status-pill--partial,
+.analysis-layer-status--partial {
+  background: #fff7df;
+  color: #7a4300;
+}
+
+.analysis-verdict--danger,
+.analysis-workbench .badge.danger,
+.analysis-status-pill--fail,
+.analysis-layer-status--fail {
+  background: #fcecee;
+  color: #a5122a;
+}
+
+.analysis-workbench .badge.info {
+  background: #eaf3fb;
+  color: #1d70b8;
+}
+
+.analysis-layout {
+  gap: 16px;
+}
+
+.analysis-tabs {
+  height: 52px;
+  border: 1px solid #d6dee8;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 6px;
+}
+
+.analysis-tab {
+  min-height: 38px;
+  border: 0 !important;
+  border-radius: 7px;
+  background: transparent !important;
+  color: #344054 !important;
+  box-shadow: none !important;
+}
+
+.analysis-tab--active,
+.analysis-tab[aria-pressed="true"] {
+  background: #eaf8f2 !important;
+  color: #075e45 !important;
+}
+
+.analysis-card {
+  border-radius: 8px;
+  padding: 22px 24px;
+}
+
+.analysis-short-summary {
+  border-color: #e5eaf0;
+  background: #f7f9fb;
+}
+
+.analysis-section-heading,
+.analysis-modal__header,
+.analysis-layer-row,
+.analysis-layer-question__header {
+  border-color: #eef2f6;
+}
+
+.analysis-layer-group {
+  border-color: #109b72;
+  background: #f8fffc;
+}
+
+.analysis-detail-checks {
+  border-top-color: #e5eaf0;
+}
+
+.analysis-detail-checks h3,
+.analysis-layer-group__summary strong,
+.analysis-layer2-question h4 {
+  color: #111827;
+}
+
+.analysis-layer-group__summary span,
+.analysis-layer2-list__heading,
+.analysis-layer2-question__top > span:first-child {
+  color: #1d70b8;
+}
+
+.analysis-layer-group__body {
+  border-top-color: #bfebdd;
+}
+
+.analysis-layer-fields,
+.analysis-layer-fields--compact,
+.analysis-layer2-question {
+  border-color: #e5eaf0;
+  background: #ffffff;
+}
+
+.analysis-layer-field span {
+  color: #5b6472;
+}
+
+.analysis-layer-field p {
+  color: #344054;
+}
+
+.analysis-answer {
+  border-color: #e5eaf0;
+  background: #f2f4f7;
+  color: #344054;
+}
+
+.analysis-answer--good {
+  border-color: transparent;
+  background: #eaf8f2;
+  color: #075e45;
+}
+
+.analysis-answer--warn {
+  border-color: transparent;
+  background: #fff7df;
+  color: #7a4300;
+}
+
+.analysis-answer--bad {
+  border-color: transparent;
+  background: #fcecee;
+  color: #a5122a;
+}
+
+.analysis-layer-group h3 {
+  color: #064e3b;
+}
+
+.analysis-layer-table__header {
+  border-bottom-color: #bfebdd;
+  background: #ecfdf5;
+  color: #0f766e;
+}
+
+.analysis-layer-row,
+.analysis-layer-question__detail {
+  background: #ffffff;
+}
+
+.analysis-layer-question__detail:nth-child(n + 2) {
+  background: #f9fafb;
+}
+
+.analysis-role-comments-scroll {
+  border-color: #e5eaf0;
+  background: #ffffff;
+}
+
+.analysis-role-comments-table {
+  color: #344054;
+}
+
+.analysis-role-comments-table th,
+.analysis-role-comments-table td {
+  border-bottom-color: #edf1f5;
+}
+
+.analysis-role-comments-table th {
+  background: #fbfcfd;
+  color: #111827;
+}
+
+.analysis-inspector {
+  width: 380px;
+}
+
+.analysis-modal-backdrop {
+  background: rgba(17, 24, 39, 0.28);
+}
+
+.analysis-modal {
+  box-shadow: 0 16px 42px rgba(17, 24, 39, 0.12);
+}
+
+.analysis-alert {
+  border-color: #f2d7d9;
+  background: #fcecee;
+  color: #a5122a;
+}
+
+.analysis-success {
+  color: #075e45;
+}
+
+.analysis-json,
+.analysis-details pre {
+  background: #fbfcfd;
+  color: #111827;
+}
+
+.analysis-markdown :where(p, li, td, th),
+.analysis-markdown-card,
+.analysis-native-output {
+  color: #344054;
+}
+
+.analysis-markdown :where(h1, h2, h3, h4, strong),
+.analysis-native-output :where(h1, h2, h3, h4, strong) {
+  color: #111827;
+}
+
+.analysis-markdown table,
+.analysis-native-output table {
+  border-color: #e5eaf0;
+}
+
+.analysis-markdown th,
+.analysis-native-output th {
+  background: #fbfcfd;
+  color: #111827;
+}
+
+.analysis-feedback-card {
+  gap: 18px;
+}
+
+.analysis-feedback-card h2 {
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.analysis-feedback-field {
+  display: grid;
+  gap: 10px;
+}
+
+.analysis-feedback-label {
+  color: #344054;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 20px;
+}
+
+.analysis-feedback-rating {
+  display: grid;
+  grid-template-columns: repeat(5, 44px);
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.analysis-feedback-rating__button {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  min-height: 42px;
+  place-items: center;
+  border: 1px solid transparent !important;
+  border-radius: 8px;
+  background: #f7f9fb !important;
+  color: #6b7280 !important;
+  box-shadow: none !important;
+  padding: 0;
+}
+
+.analysis-feedback-rating__button:hover:not(:disabled) {
+  border-color: #b9c4d1 !important;
+  background: #f2f5f8 !important;
+  color: #344054 !important;
+}
+
+.analysis-feedback-rating__button--selected,
+.analysis-feedback-rating__button--selected:hover:not(:disabled) {
+  border-color: #73c8a6 !important;
+  background: #eaf8f2 !important;
+  color: #0e9f6e !important;
+}
+
+.analysis-feedback-face {
+  width: 26px;
+  height: 26px;
+}
+
+.analysis-feedback-textarea {
+  width: 100%;
+  min-height: 92px !important;
+  resize: vertical;
+  border-radius: 8px;
+  padding: 12px;
+  color: #344054 !important;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.analysis-feedback-textarea::placeholder {
+  color: #344054;
+  opacity: 1;
+}
+
+.analysis-feedback-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -8px;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.analysis-feedback-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.analysis-feedback-submit {
+  width: 100%;
+  min-height: 42px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+@media (max-width: 1080px) {
+  .analysis-inspector {
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .analysis-workbench {
+    padding: 18px 12px 32px;
   }
 }
 `;

@@ -315,7 +315,7 @@ export default function DocumentDetailPage() {
   return (
     <AppShell>
       <main className="gc-dark-page document-workflow">
-        <style>{detailStyles}</style>
+        <style>{`${detailStyles}\n${paperDetailOverrides}`}</style>
         {document ? (
           <>
             <section className="gc-hero">
@@ -1289,6 +1289,288 @@ const detailStyles = `
 
   .gc-document-actions {
     grid-template-columns: 1fr;
+  }
+}
+`;
+
+const paperDetailOverrides = `
+.shell:has(.gc-dark-page) {
+  background: #f7f9fb;
+}
+
+.gc-dark-page {
+  width: min(1536px, 100%);
+  min-height: calc(100vh - 64px);
+  padding: 28px 36px 48px;
+  color: #111827;
+}
+
+.gc-hero h1 {
+  color: #111827;
+  font-size: 28px;
+  font-weight: 760;
+  line-height: 36px;
+}
+
+.gc-eyebrow {
+  color: #5b6472;
+}
+
+.gc-muted,
+.gc-panel-heading p,
+.gc-provider-note span,
+.gc-table small,
+.gc-note,
+.gc-step small {
+  color: #5b6472;
+}
+
+.gc-stepper {
+  flex: 0 1 680px;
+  gap: 10px;
+}
+
+.gc-step {
+  min-height: 50px;
+  border: 1px solid #e5eaf0;
+  background: #ffffff;
+  color: #111827;
+}
+
+.gc-step span {
+  border-color: transparent;
+  background: transparent;
+  color: #0e9f6e;
+}
+
+.gc-step strong {
+  color: #111827;
+}
+
+.gc-step.is-done {
+  border-color: #e5eaf0;
+}
+
+.gc-step.is-done span {
+  border-color: transparent;
+  background: transparent;
+  color: #0e9f6e;
+}
+
+.gc-step.is-active {
+  border-color: #1d70b8;
+}
+
+.gc-step.is-active span {
+  border-color: transparent;
+  background: transparent;
+  color: #1d70b8;
+}
+
+.gc-step.is-blocked {
+  border-color: #f2d7d9;
+}
+
+.gc-step.is-blocked span {
+  border-color: transparent;
+  background: transparent;
+  color: #c92036;
+}
+
+.gc-detail-grid {
+  gap: 12px;
+}
+
+.gc-panel,
+.gc-model-modal,
+.gc-provider-note,
+.gc-run-status,
+.gc-source-trace {
+  border-color: #e5eaf0;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.gc-text-panel {
+  min-height: 728px;
+}
+
+.gc-panel-heading h2,
+.gc-table th,
+.gc-table td,
+.gc-markdown-preview--full,
+.gc-model-modal h2 {
+  color: #111827;
+}
+
+.gc-primary {
+  border-color: #0e9f6e;
+  background: #0e9f6e;
+  color: #ffffff;
+}
+
+.gc-primary:hover:not(:disabled) {
+  border-color: #087d5f;
+  background: #087d5f;
+}
+
+.gc-ghost,
+.gc-compact-link,
+.gc-icon-button {
+  border-color: #d9e0ea;
+  background: #ffffff;
+  color: #111827;
+}
+
+.gc-ghost:hover,
+.gc-compact-link:hover,
+.gc-icon-button:hover {
+  border-color: #0e9f6e;
+  color: #075e45;
+}
+
+.gc-danger {
+  border-color: #f2d7d9;
+  background: #ffffff;
+  color: #c92036;
+}
+
+.gc-danger:hover:not(:disabled) {
+  background: #fcecee;
+}
+
+.gc-dark-page input,
+.gc-dark-page select,
+.gc-dark-page textarea {
+  border-color: #d9e0ea;
+  background: #ffffff;
+  color: #111827;
+}
+
+.gc-dark-page input::placeholder,
+.gc-dark-page textarea::placeholder {
+  color: #8a93a3;
+}
+
+.gc-table-scroll,
+.gc-table {
+  background: #ffffff;
+}
+
+.gc-table th,
+.gc-table td {
+  border-bottom-color: #edf1f5;
+}
+
+.gc-table thead {
+  background: #fbfcfd;
+}
+
+.gc-table tbody tr:hover td {
+  background: #fbfcfd;
+}
+
+.gc-history-panel .gc-table tr {
+  border-color: #e5eaf0;
+  background: #ffffff;
+}
+
+.gc-history-panel .gc-table td::before {
+  color: #5b6472;
+}
+
+.gc-run-status {
+  border-color: transparent;
+  background: #f2f4f7;
+  color: #344054;
+}
+
+.gc-run-status.is-good {
+  background: #eaf8f2;
+  color: #075e45;
+}
+
+.gc-run-status.is-info {
+  background: #eaf3fb;
+  color: #1d70b8;
+}
+
+.gc-run-status.is-bad,
+.gc-error-text {
+  color: #c92036;
+}
+
+.gc-run-status.is-bad {
+  background: #fcecee;
+}
+
+.gc-language-toggle,
+.gc-language-option {
+  border-color: #d9e0ea;
+  background: #ffffff;
+  color: #344054;
+}
+
+.gc-language-option.is-active,
+.gc-language-option[aria-pressed="true"] {
+  background: #eaf8f2;
+  color: #075e45;
+}
+
+.gc-provider-note.is-warning {
+  border-color: #f4d98d;
+  background: #fff7df;
+}
+
+.gc-provider-note.is-warning strong,
+.gc-provider-note.is-warning span {
+  color: #7a4300;
+}
+
+.gc-modal-backdrop {
+  background: rgba(17, 24, 39, 0.28);
+}
+
+.gc-model-modal {
+  box-shadow: 0 16px 42px rgba(17, 24, 39, 0.12);
+}
+
+.gc-alert {
+  border: 1px solid #f2d7d9;
+  background: #fcecee;
+  color: #a5122a;
+}
+
+.gc-empty {
+  border-color: #e5eaf0;
+  background: #fbfcfd;
+  color: #5b6472;
+}
+
+.gc-dark-page .badge {
+  border-color: transparent;
+  background: #f2f4f7;
+  color: #344054;
+}
+
+.gc-dark-page .badge.ok {
+  background: #eaf8f2;
+  color: #075e45;
+}
+
+.gc-dark-page .badge.info {
+  background: #eaf3fb;
+  color: #1d70b8;
+}
+
+.gc-dark-page .badge.danger {
+  background: #fcecee;
+  color: #a5122a;
+}
+
+@media (max-width: 720px) {
+  .gc-dark-page {
+    padding: 22px 12px 36px;
   }
 }
 `;

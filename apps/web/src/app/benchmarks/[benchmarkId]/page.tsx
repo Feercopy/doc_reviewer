@@ -61,7 +61,7 @@ export default function BenchmarkDetailPage() {
   return (
     <AppShell>
       <main className="benchmark-dashboard">
-        <style>{benchmarkDetailStyles}</style>
+        <style>{`${benchmarkDetailStyles}\n${paperBenchmarkDetailOverrides}`}</style>
         {error ? <section className="benchmark-alert">{error}</section> : null}
         {loading && !benchmark ? (
           <section className="benchmark-state">Loading benchmark...</section>
@@ -969,6 +969,189 @@ const benchmarkDetailStyles = `
   .benchmark-count-grid,
   .benchmark-mini-scores {
     grid-template-columns: 1fr;
+  }
+}
+`;
+
+const paperBenchmarkDetailOverrides = `
+.benchmark-dashboard {
+  width: min(1536px, 100%);
+  padding: 28px 36px 48px;
+  color: #111827;
+}
+
+.benchmark-dashboard h1 {
+  color: #111827;
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 38px;
+}
+
+.benchmark-dashboard h2,
+.benchmark-dashboard h3,
+.benchmark-chip strong,
+.benchmark-inspector-row strong,
+.benchmark-count strong,
+.benchmark-metric strong,
+.benchmark-mini-scores strong {
+  color: #111827;
+}
+
+.benchmark-dashboard button {
+  border-color: #0e9f6e;
+  background: #0e9f6e;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.benchmark-dashboard button:hover:not(:disabled) {
+  border-color: #087d5f;
+  background: #087d5f;
+}
+
+.benchmark-secondary {
+  border-color: #d6dee8 !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+}
+
+.benchmark-dashboard .badge,
+.benchmark-pill--neutral {
+  border-color: transparent;
+  background: #f2f4f7;
+  color: #344054;
+}
+
+.benchmark-dashboard .badge.ok,
+.benchmark-pill--good {
+  border-color: transparent;
+  background: #eaf8f2;
+  color: #075e45;
+}
+
+.benchmark-dashboard .badge.info {
+  border-color: transparent;
+  background: #eaf3fb;
+  color: #1d70b8;
+}
+
+.benchmark-dashboard .badge.danger,
+.benchmark-pill--bad {
+  border-color: transparent;
+  background: #fcecee;
+  color: #a5122a;
+}
+
+.benchmark-pill--warn {
+  border-color: transparent;
+  background: #fff7df;
+  color: #7a4300;
+}
+
+.benchmark-hero,
+.benchmark-card,
+.benchmark-alert,
+.benchmark-state,
+.benchmark-chip,
+.benchmark-metric,
+.benchmark-count,
+.benchmark-inspector-row,
+.benchmark-doc,
+.benchmark-issue,
+.benchmark-details,
+.benchmark-pre {
+  border-color: #d6dee8;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.benchmark-hero {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.benchmark-hero p,
+.benchmark-card__header p,
+.benchmark-muted,
+.benchmark-doc p,
+.benchmark-issue p,
+.benchmark-state,
+.benchmark-list,
+.benchmark-chip,
+.benchmark-chip span,
+.benchmark-inspector-row span,
+.benchmark-count span,
+.benchmark-metric span,
+.benchmark-mini-scores span {
+  color: #5b6472;
+}
+
+.benchmark-eyebrow,
+.benchmark-details summary {
+  color: #0f766e;
+}
+
+.benchmark-metric,
+.benchmark-count,
+.benchmark-inspector-row,
+.benchmark-doc,
+.benchmark-issue,
+.benchmark-details {
+  background: #fbfcfd;
+}
+
+.benchmark-metric--good {
+  border-color: #bfebdd;
+}
+
+.benchmark-metric--warn {
+  border-color: #f4d98d;
+}
+
+.benchmark-metric--bad,
+.benchmark-count--bad {
+  border-color: #f2d7d9;
+}
+
+.benchmark-tabs {
+  border-color: #d6dee8;
+  background: #ffffff;
+}
+
+.benchmark-tab {
+  color: #344054 !important;
+}
+
+.benchmark-tab--active {
+  border-color: transparent !important;
+  background: #eaf8f2 !important;
+  color: #075e45 !important;
+}
+
+.benchmark-pre {
+  background: #fbfcfd;
+  color: #111827;
+}
+
+.benchmark-issue blockquote {
+  border-left-color: #0e9f6e;
+  color: #344054;
+}
+
+.benchmark-alert,
+.benchmark-error-text {
+  color: #a5122a !important;
+}
+
+.benchmark-alert {
+  border-color: #f2d7d9;
+  background: #fcecee;
+}
+
+@media (max-width: 680px) {
+  .benchmark-dashboard {
+    padding: 18px 12px 32px;
   }
 }
 `;

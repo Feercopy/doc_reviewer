@@ -25,11 +25,8 @@ const mainAnalysisResult = {
     {
       id: "L1-001",
       severity: "high",
-      title: "Metric proof is incomplete",
       issue: "The document claims traction without a cohort or control-group readout.",
       evidence: "The document names traction but does not provide a cohort or control-group readout.",
-      impact: "Committee cannot separate product pull from market or sales effects.",
-      recommendation: "Add an experiment or holdout readout before approval.",
     },
   ],
   layer_2_markdown: "Layer 2\nL2-001 - Incrementality evidence is missing.",
@@ -221,12 +218,12 @@ test("admin creates user and user completes the MVP document analysis flow", asy
   await page.goto(`${baseUrl}/analyses/${analysis.id}`);
   await expect(page.getByRole("heading", { name: "Analysis" })).toBeVisible();
   await expect(page.getByText("Needs stronger metric evidence.", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Metric proof is incomplete").first()).toBeVisible();
+  await expect(page.getByText("The document claims traction without a cohort or control-group readout.").first()).toBeVisible();
+  await page.getByRole("button", { name: "Devil's Advocate" }).click();
   await expect(page.getByRole("heading", { name: "Devil's Advocate" })).toBeVisible();
   await expect(page.getByText("What is incremental impact?", { exact: true }).first()).toBeVisible();
 
-  await page.getByLabel("Comment").fill("E2E feedback: result is useful for review.");
-  await page.getByLabel("Use for benchmark review").check();
+  await page.getByRole("textbox", { name: "Your comments (optional)" }).fill("E2E feedback: result is useful for review.");
   await page.getByRole("button", { name: "Submit feedback" }).click();
   await expect(page.getByText("Feedback saved")).toBeVisible();
 
