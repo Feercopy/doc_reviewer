@@ -4,7 +4,6 @@ import Link from "next/link";
 import { DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
-import { StatusBadge } from "@/components/StatusBadge";
 import {
   USER_SELECTABLE_DOCUMENT_TYPES,
   deleteDocument,
@@ -14,7 +13,8 @@ import {
   type DocumentType,
   type ParseStatus,
 } from "@/lib/api/documents";
-import { formatDate, formatLabel } from "@/lib/format";
+import { formatDate } from "@/lib/format";
+import { formatDocumentTypeLabel, getDocumentFileKind, getDocumentParsePresentation } from "./documentsDisplay";
 
 type ParseFilter = "all" | ParseStatus;
 
@@ -25,11 +25,11 @@ const parseFilters: { label: string; value: ParseFilter }[] = [
   { label: "Ready", value: "completed" },
   { label: "Parsing", value: "running" },
   { label: "Queued", value: "queued" },
-  { label: "Needs attention", value: "failed" },
+  { label: "Failed", value: "failed" },
 ];
 
 function getEffectiveType(document: DocumentRecord): string {
-  return formatLabel(document.manual_document_type ?? document.detected_document_type);
+  return formatDocumentTypeLabel(document.manual_document_type ?? document.detected_document_type);
 }
 
 function formatBytes(value: number): string {
@@ -183,10 +183,13 @@ export default function DocumentsPage() {
     });
   }, [documents, parseFilter, query]);
 
+  const shownStart = filteredDocuments.length > 0 ? 1 : 0;
+  const shownEnd = filteredDocuments.length;
+
   return (
     <AppShell>
-      <main className="gc-dark-page documents-review">
-        <style>{`${documentsStyles}\n${paperReviewOverrides}`}</style>
+      <main className="documents-review">
+        <style>{documentsStyles}</style>
         <section className="gc-hero">
           <div>
             <h1>Documents</h1>
@@ -224,23 +227,16 @@ export default function DocumentsPage() {
                 <span />
               </div>
               <div className="gc-drop-copy">
-                <strong>{file ? "File selected" : "Drop a document here"}</strong>
-                <p>{file ? "Review details before uploading." : "Choose or drag a supported defense document."}</p>
+                <strong>{file ? "File selected" : "Drag and drop files here"}</strong>
+                <p>{file ? "Review details before uploading." : "or click to browse"}</p>
               </div>
               <div className="gc-format-row" aria-label="Supported formats">
-                {supportedExtensions.map((extension) => (
-                  <span key={extension}>{extension}</span>
-                ))}
+                <span>Supported formats: {supportedExtensions.join(", ")}</span>
+                <span>Max file size: 100 MB</span>
               </div>
             </div>
 
             <div className="gc-upload-details">
-              <div className="gc-upload-heading">
-                <p className="gc-eyebrow">New evidence</p>
-                <h2>Upload document</h2>
-                <p>Parsing and type detection run after upload.</p>
-              </div>
-
               {file ? (
                 <div className="gc-selected-file">
                   <div>
@@ -264,7 +260,7 @@ export default function DocumentsPage() {
               ) : null}
 
               <div className="gc-field-stack">
-                <label>
+                <label className="gc-title-field">
                   <span>Title</span>
                   <input
                     placeholder={inferredTitle || "Optional display title"}
@@ -273,17 +269,30 @@ export default function DocumentsPage() {
                   />
                 </label>
 
-                <label>
-                  <span>Manual type</span>
-                  <select value={manualType} onChange={(event) => setManualType(event.target.value as DocumentType | "")}>
-                    <option value="">Auto detect</option>
-                    {USER_SELECTABLE_DOCUMENT_TYPES.map((item) => (
-                      <option key={item} value={item}>
-                        {formatLabel(item)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div className="gc-upload-row">
+                  <label>
+                    <span>Document type</span>
+                    <span className="gc-select-control">
+                      <select
+                        aria-label="Manual type"
+                        className={manualType ? "" : "is-placeholder"}
+                        value={manualType}
+                        onChange={(event) => setManualType(event.target.value as DocumentType | "")}
+                      >
+                        <option value="">Select document type</option>
+                        {USER_SELECTABLE_DOCUMENT_TYPES.map((item) => (
+                          <option key={item} value={item}>
+                            {formatDocumentTypeLabel(item)}
+                          </option>
+                        ))}
+                      </select>
+                    </span>
+                  </label>
+
+                  <button className="gc-primary gc-submit" disabled={pendingUpload || !file} type="submit">
+                    {pendingUpload ? "Uploading..." : "Upload document"}
+                  </button>
+                </div>
               </div>
 
               {uploadError ? <div className="gc-alert inline">{uploadError}</div> : null}
@@ -298,19 +307,16 @@ export default function DocumentsPage() {
                 </div>
               ) : null}
 
-              <button className="gc-primary gc-submit" disabled={pendingUpload || !file} type="submit">
-                {pendingUpload ? "Uploading..." : "Upload document"}
-              </button>
             </div>
           </form>
         </section>
 
         <section className="gc-controls" aria-label="Document filters">
           <label className="gc-search-label">
-            <span>Search</span>
+            <span className="gc-sr-only">Search</span>
             <input
               aria-label="Search documents"
-              placeholder="Title, filename, type, parser error"
+              placeholder="Search documents"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -331,13 +337,6 @@ export default function DocumentsPage() {
         </section>
 
         <section className="gc-panel gc-table-panel">
-          <div className="gc-panel-heading">
-            <div>
-              <h2>Queue</h2>
-              <p>{loading ? "Loading documents" : `${filteredDocuments.length} shown from ${documents.length}`}</p>
-            </div>
-          </div>
-
           {loading ? <div className="gc-empty">Loading documents...</div> : null}
           {!loading && documents.length === 0 ? (
             <div className="gc-empty">
@@ -365,22 +364,32 @@ export default function DocumentsPage() {
                 <tbody>
                   {filteredDocuments.map((document) => {
                     const signal = getDocumentSignal(document);
+                    const fileKind = getDocumentFileKind(document.original_filename);
+                    const parseState = getDocumentParsePresentation(document.parse_status);
 
                     return (
                       <tr key={document.id}>
                         <td>
-                          <div className="gc-title-cell">
-                            <strong>{document.title}</strong>
-                            <span>{document.original_filename}</span>
-                            <small>{formatBytes(document.file_size_bytes)}</small>
+                          <div className="gc-document-cell">
+                            <span className={`gc-file-kind is-${fileKind.tone}`} aria-hidden="true">
+                              {fileKind.label}
+                            </span>
+                            <div className="gc-title-cell">
+                              <strong>{document.title}</strong>
+                              <span>{document.original_filename}</span>
+                              <small>{formatBytes(document.file_size_bytes)}</small>
+                            </div>
                           </div>
                         </td>
                         <td>
-                          <span className="gc-type-badge">{getEffectiveType(document)}</span>
+                          <span className="gc-type-text">{getEffectiveType(document)}</span>
                           {document.manual_document_type ? <div className="gc-subtle">manual override</div> : null}
                         </td>
                         <td>
-                          <StatusBadge status={document.parse_status} />
+                          <span className={`gc-parse-state is-${parseState.tone}`}>
+                            <span aria-hidden="true" />
+                            {parseState.label}
+                          </span>
                           {document.parse_error ? <div className="gc-error-text">{document.parse_error}</div> : null}
                         </td>
                         <td>
@@ -409,6 +418,11 @@ export default function DocumentsPage() {
                   })}
                 </tbody>
               </table>
+              <div className="gc-table-footer">
+                <span>
+                  Showing {shownStart} to {shownEnd} of {documents.length} documents
+                </span>
+              </div>
             </div>
           ) : null}
         </section>
@@ -418,175 +432,89 @@ export default function DocumentsPage() {
 }
 
 const documentsStyles = `
-.shell:has(.gc-dark-page) {
-  background: #070a12;
-}
-
-.shell:has(.gc-dark-page) .topbar {
-  border-bottom-color: rgba(148, 163, 184, 0.16);
-  background: #090d16;
-  color: #f8fafc;
-}
-
-.shell:has(.gc-dark-page) .nav {
-  color: #a8b3c7;
-}
-
-.shell:has(.gc-dark-page) .brand {
-  color: #f8fafc;
-}
-
-.shell:has(.gc-dark-page) .topbar button.secondary {
-  border-color: rgba(148, 163, 184, 0.22);
-  background: #111827;
-  color: #f8fafc;
-}
-
-.gc-dark-page {
-  width: min(1440px, 100%);
-  min-height: calc(100vh - 69px);
+.documents-review {
+  width: min(1536px, 100%);
+  min-height: calc(100vh - var(--app-header-height));
   margin: 0 auto;
-  padding: 32px 24px 48px;
-  color: #eef2ff;
-}
-
-.gc-hero,
-.gc-controls,
-.gc-upload-form,
-.gc-action-row,
-.gc-filter-tabs {
-  display: flex;
+  padding: 32px 36px 48px;
+  color: #111827;
 }
 
 .gc-hero {
+  display: flex;
   align-items: flex-start;
   margin-bottom: 22px;
 }
 
 .gc-hero h1 {
   margin: 0;
-  font-size: 40px;
-  line-height: 1.05;
-  letter-spacing: 0;
-}
-
-.gc-eyebrow {
-  margin: 0 0 8px;
-  color: #7dd3fc;
-  font-size: 12px;
+  color: #111827;
+  font-size: 30px;
   font-weight: 800;
+  line-height: 38px;
   letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.gc-muted,
-.gc-panel-heading p,
-.gc-subtle,
-.gc-date,
-.gc-title-cell span,
-.gc-title-cell small {
-  color: #94a3b8;
 }
 
 .gc-muted {
   margin: 8px 0 0;
-}
-
-.gc-action-row {
-  align-items: center;
-  gap: 10px;
-}
-
-.gc-primary,
-.gc-ghost,
-.gc-compact-link,
-.gc-compact-danger,
-.gc-filter-tabs button {
-  display: inline-flex;
-  min-height: 40px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  font-weight: 800;
-  letter-spacing: 0;
-  white-space: nowrap;
-}
-
-.gc-primary {
-  border: 1px solid #22d3ee;
-  background: #06b6d4;
-  color: #07111f;
-  padding: 0 16px;
-}
-
-.gc-ghost,
-.gc-filter-tabs button {
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(15, 23, 42, 0.88);
-  color: #dbeafe;
-  padding: 0 14px;
-}
-
-.gc-ghost:hover,
-.gc-compact-link:hover,
-.gc-filter-tabs button:hover {
-  border-color: rgba(125, 211, 252, 0.54);
+  color: #5b6472;
+  font-size: 14px;
+  line-height: 22px;
 }
 
 .gc-upload-card,
-.gc-panel,
-.gc-controls,
-.gc-selected-file {
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: #0d1424;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.24);
+.gc-panel {
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: none;
 }
 
 .gc-upload-card {
-  border-radius: 8px;
-  margin-bottom: 14px;
-  padding: 14px;
+  margin-bottom: 22px;
+  padding: 18px;
 }
 
 .gc-upload-form {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
-  gap: 14px;
-  align-items: stretch;
+  grid-template-columns: minmax(340px, 0.9fr) minmax(320px, 1fr);
+  gap: 36px;
+  align-items: center;
 }
 
 .gc-dropzone {
-  display: grid;
-  min-height: 220px;
-  place-items: center;
-  gap: 14px;
-  border: 1px dashed rgba(125, 211, 252, 0.38);
+  display: flex;
+  min-height: 176px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 9px;
+  border: 1px dashed #cad2dc;
   border-radius: 8px;
-  background:
-    linear-gradient(180deg, rgba(8, 145, 178, 0.12), rgba(15, 23, 42, 0.26)),
-    #090d16;
-  color: #f8fafc;
+  background: #fbfcfd;
+  color: #111827;
   cursor: pointer;
-  padding: 20px;
+  padding: 18px;
   text-align: center;
-  transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
 }
 
 .gc-dropzone:hover,
 .gc-dropzone.is-dragging {
-  border-color: rgba(34, 211, 238, 0.86);
-  background:
-    linear-gradient(180deg, rgba(8, 145, 178, 0.22), rgba(15, 23, 42, 0.42)),
-    #090d16;
+  border-color: #0e9f6e;
+  background: #f8fffc;
 }
 
 .gc-dropzone.is-dragging {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 
 .gc-dropzone.has-file {
   border-style: solid;
-  border-color: rgba(34, 197, 94, 0.48);
+  border-color: #0e9f6e;
 }
 
 .gc-dropzone input {
@@ -595,99 +523,84 @@ const documentsStyles = `
 
 .gc-upload-mark {
   display: grid;
-  width: 64px;
-  height: 64px;
+  width: 44px;
+  height: 44px;
   place-items: center;
-  border: 1px solid rgba(125, 211, 252, 0.36);
-  border-radius: 8px;
-  background: rgba(14, 116, 144, 0.18);
+  border: 1px solid #d8dee7;
+  border-radius: 12px;
+  background: #ffffff;
 }
 
 .gc-upload-mark span {
   position: relative;
-  width: 27px;
-  height: 34px;
-  border: 2px solid #a5f3fc;
+  width: 22px;
+  height: 28px;
+  border: 2px solid #111827;
   border-radius: 5px;
 }
 
 .gc-upload-mark span::before,
 .gc-upload-mark span::after {
   position: absolute;
+  left: 6px;
+  height: 2px;
+  background: #111827;
   content: "";
-  background: #a5f3fc;
 }
 
 .gc-upload-mark span::before {
-  top: 9px;
-  left: 7px;
-  width: 11px;
-  height: 2px;
+  top: 8px;
+  width: 9px;
 }
 
 .gc-upload-mark span::after {
-  top: 16px;
-  left: 7px;
-  width: 15px;
-  height: 2px;
+  top: 15px;
+  width: 13px;
 }
 
 .gc-drop-copy {
   display: grid;
-  gap: 6px;
+  gap: 5px;
 }
 
 .gc-drop-copy strong {
-  font-size: 22px;
-  line-height: 1.2;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 22px;
 }
 
 .gc-drop-copy p,
-.gc-upload-heading p,
+.gc-format-row,
 .gc-selected-file span,
-.gc-upload-progress small {
-  color: #94a3b8;
+.gc-upload-progress small,
+.gc-subtle,
+.gc-date,
+.gc-title-cell span,
+.gc-title-cell small {
+  color: #5b6472;
 }
 
-.gc-drop-copy p,
-.gc-upload-heading p {
+.gc-drop-copy p {
   margin: 0;
+  font-size: 14px;
+  line-height: 20px;
 }
 
 .gc-format-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-}
-
-.gc-format-row span {
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.82);
-  color: #cbd5e1;
-  padding: 6px 10px;
+  display: grid;
+  gap: 2px;
   font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
+  line-height: 18px;
 }
 
 .gc-upload-details {
   display: flex;
   min-width: 0;
+  min-height: 150px;
   flex-direction: column;
-  justify-content: space-between;
-}
-
-.gc-upload-heading {
-  margin-bottom: 14px;
-}
-
-.gc-upload-heading h2 {
-  margin: 0 0 6px;
-  color: #f8fafc;
-  font-size: 20px;
-  letter-spacing: 0;
+  justify-content: center;
+  gap: 14px;
 }
 
 .gc-selected-file {
@@ -695,61 +608,136 @@ const documentsStyles = `
   align-items: center;
   justify-content: space-between;
   gap: 14px;
+  border: 1px solid #e5eaf0;
   border-radius: 8px;
-  margin-bottom: 14px;
-  padding: 12px;
+  background: #f7f9fb;
+  padding: 10px 12px;
 }
 
-.gc-selected-file div {
+.gc-selected-file div,
+.gc-field-stack {
   display: grid;
-  gap: 4px;
   min-width: 0;
+  gap: 8px;
 }
 
 .gc-selected-file strong {
   overflow: hidden;
-  color: #f8fafc;
+  color: #111827;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .gc-field-stack {
-  display: grid;
-  gap: 12px;
+  gap: 18px;
 }
 
 .gc-field-stack label {
-  color: #cbd5e1;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 18px;
 }
 
-.gc-submit {
-  width: 100%;
-  margin-top: 16px;
+.gc-upload-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 184px;
+  align-items: end;
+  gap: 24px;
+}
+
+.documents-review input,
+.documents-review select {
+  min-height: 40px;
+  border-color: #d9e0ea;
+  background: #ffffff;
+  color: #111827;
+  font-size: 13px;
+}
+
+.documents-review input::placeholder {
+  color: #8a93a3;
+}
+
+.gc-select-control {
+  position: relative;
+  display: block;
+}
+
+.gc-select-control::after {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid #111827;
+  border-bottom: 1.5px solid #111827;
+  content: "";
+  pointer-events: none;
+  transform: translateY(-65%) rotate(45deg);
+}
+
+.gc-select-control select {
+  appearance: none;
+  padding-right: 40px;
+}
+
+.gc-select-control select.is-placeholder {
+  color: #8a93a3;
+  font-weight: 500;
+}
+
+.gc-primary,
+.gc-compact-link,
+.gc-compact-danger,
+.gc-filter-tabs button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.gc-primary {
+  border: 1px solid #0e9f6e;
+  background: #0e9f6e;
+  color: #ffffff;
+  padding: 0 16px;
+}
+
+.gc-primary:hover:not(:disabled) {
+  border-color: #087d5f;
+  background: #087d5f;
+  color: #ffffff;
 }
 
 .gc-primary:disabled {
   opacity: 0.48;
 }
 
+.gc-submit {
+  width: 100%;
+}
+
 .gc-upload-progress {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 14px;
-  border: 1px solid rgba(34, 211, 238, 0.26);
+  border: 1px solid #bfe5d6;
   border-radius: 8px;
-  background: rgba(8, 145, 178, 0.14);
+  background: #eaf8f2;
   padding: 12px;
 }
 
 .gc-upload-progress span {
   width: 12px;
   height: 12px;
-  border: 2px solid rgba(165, 243, 252, 0.32);
-  border-top-color: #a5f3fc;
+  border: 2px solid rgba(14, 159, 110, 0.24);
+  border-top-color: #0e9f6e;
   border-radius: 999px;
   animation: gc-spin 900ms linear infinite;
 }
@@ -760,83 +748,76 @@ const documentsStyles = `
 }
 
 .gc-upload-progress strong {
-  color: #f8fafc;
+  color: #075e45;
 }
 
 .gc-controls {
-  align-items: end;
+  display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-  border-radius: 8px;
-  padding: 14px;
+  gap: 18px;
+  margin-bottom: 22px;
 }
 
 .gc-search-label {
-  width: min(460px, 100%);
-  color: #cbd5e1;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
+  position: relative;
+  flex: 1 1 auto;
+  max-width: none;
 }
 
-.gc-search-label input,
-.gc-dark-page select,
-.gc-dark-page input {
-  border-color: rgba(148, 163, 184, 0.22);
-  background: #090d16;
-  color: #eef2ff;
+.gc-search-label input {
+  padding-left: 14px;
 }
 
-.gc-search-label input::placeholder {
-  color: #64748b;
+.gc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
 }
 
 .gc-filter-tabs {
-  flex-wrap: wrap;
-  gap: 8px;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  border: 1px solid #d9e0ea;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
 }
 
 .gc-filter-tabs button {
-  min-height: 36px;
-  font-size: 13px;
+  min-width: 84px;
+  border: 0;
+  border-left: 1px solid #d9e0ea;
+  border-radius: 0;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 18px;
 }
 
-.gc-filter-tabs button.is-active {
-  border-color: rgba(34, 211, 238, 0.82);
-  background: rgba(8, 145, 178, 0.24);
-  color: #a5f3fc;
+.gc-filter-tabs button:first-child {
+  min-width: 64px;
+  border-left: 0;
 }
 
-.gc-panel {
-  border-radius: 8px;
-  padding: 16px;
+.gc-filter-tabs button:hover {
+  background: #fbfcfd;
+  color: #075e45;
+}
+
+.gc-filter-tabs button.is-active,
+.gc-filter-tabs button[aria-selected="true"] {
+  box-shadow: inset 0 0 0 1px #0e9f6e;
+  color: #075e45;
 }
 
 .gc-table-panel {
   min-width: 0;
-  padding: 0;
   overflow: hidden;
-}
-
-.gc-panel-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 16px 12px;
-}
-
-.gc-panel-heading h2 {
-  margin: 0;
-  color: #f8fafc;
-  font-size: 16px;
-  letter-spacing: 0;
-}
-
-.gc-panel-heading p {
-  margin: 5px 0 0;
-  font-size: 13px;
+  padding: 0;
 }
 
 .gc-table-scroll {
@@ -845,165 +826,281 @@ const documentsStyles = `
 }
 
 .gc-table {
-  min-width: 920px;
+  min-width: 1060px;
+  background: #ffffff;
+}
+
+.gc-table thead {
+  background: #fbfcfd;
 }
 
 .gc-table th,
 .gc-table td {
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-  padding: 13px 16px;
+  border-bottom: 1px solid #edf1f5;
+  padding: 13px 18px;
 }
 
 .gc-table th {
-  color: #94a3b8;
-  font-size: 11px;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 800;
   letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.gc-table td {
+  color: #111827;
+  font-size: 13px;
+  line-height: 18px;
+  vertical-align: middle;
+}
+
+.gc-table th:nth-child(1),
+.gc-table td:nth-child(1) {
+  width: 30%;
 }
 
 .gc-table th:nth-child(2),
-.gc-table td:nth-child(2) {
-  width: 118px;
+.gc-table td:nth-child(2),
+.gc-table th:nth-child(3),
+.gc-table td:nth-child(3),
+.gc-table th:nth-child(5),
+.gc-table td:nth-child(5) {
+  width: 14%;
 }
 
 .gc-table th:nth-child(4),
 .gc-table td:nth-child(4) {
-  width: 156px;
+  width: 15%;
 }
 
-.gc-table tbody tr:hover {
-  background: rgba(15, 23, 42, 0.72);
+.gc-table th:nth-child(6),
+.gc-table td:nth-child(6) {
+  width: 13%;
+}
+
+.gc-table tbody tr:hover td {
+  background: #fbfcfd;
+}
+
+.gc-document-cell,
+.gc-action-row {
+  display: flex;
+  align-items: center;
+}
+
+.gc-document-cell {
+  gap: 12px;
+  min-width: 0;
+}
+
+.gc-file-kind {
+  display: inline-flex;
+  width: 26px;
+  height: 32px;
+  flex: 0 0 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.gc-file-kind.is-word {
+  background: #2f7dd1;
+}
+
+.gc-file-kind.is-pdf {
+  background: #d82436;
+}
+
+.gc-file-kind.is-markdown,
+.gc-file-kind.is-generic {
+  background: #6b7280;
+}
+
+.gc-file-kind.is-text {
+  background: #4b5563;
 }
 
 .gc-title-cell {
   display: grid;
-  gap: 4px;
-  min-width: 240px;
+  min-width: 0;
+  gap: 2px;
 }
 
 .gc-title-cell strong {
-  color: #f8fafc;
+  overflow-wrap: anywhere;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 750;
 }
 
-.gc-type-badge,
-.gc-signal,
-.gc-dark-page .badge {
-  display: inline-flex;
-  min-height: 26px;
-  align-items: center;
-  border-radius: 999px;
-  padding: 0 10px;
+.gc-title-cell span,
+.gc-title-cell small,
+.gc-subtle {
   font-size: 12px;
-  font-weight: 800;
-  line-height: 1.15;
-  text-transform: uppercase;
-  white-space: nowrap;
+  line-height: 18px;
 }
 
-.gc-type-badge {
-  border: 1px solid rgba(125, 211, 252, 0.32);
-  background: rgba(14, 116, 144, 0.16);
-  color: #bae6fd;
+.gc-type-text {
+  color: #111827;
 }
 
-.gc-dark-page .badge {
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  background: rgba(15, 23, 42, 0.96);
-  color: #cbd5e1;
+.gc-parse-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #344054;
 }
 
-.gc-dark-page .badge.ok {
-  border-color: rgba(34, 197, 94, 0.38);
-  background: rgba(20, 83, 45, 0.36);
-  color: #86efac;
+.gc-parse-state > span {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
 }
 
-.gc-dark-page .badge.info {
-  border-color: rgba(56, 189, 248, 0.38);
-  background: rgba(12, 74, 110, 0.36);
-  color: #7dd3fc;
+.gc-parse-state.is-good {
+  color: #087d5f;
 }
 
-.gc-dark-page .badge.danger {
-  border-color: rgba(248, 113, 113, 0.42);
-  background: rgba(127, 29, 29, 0.32);
-  color: #fca5a5;
+.gc-parse-state.is-good > span {
+  border-color: transparent;
+  background: currentColor;
+}
+
+.gc-parse-state.is-info {
+  color: #1d70b8;
+}
+
+.gc-parse-state.is-warn {
+  color: #8a5d00;
+}
+
+.gc-parse-state.is-bad {
+  color: #c92036;
+}
+
+.gc-parse-state.is-bad > span {
+  border-radius: 2px;
+  background: currentColor;
 }
 
 .gc-signal {
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.8);
-  color: #cbd5e1;
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  border-radius: 6px;
+  background: #f2f4f7;
+  color: #344054;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 18px;
+  white-space: nowrap;
 }
 
 .gc-signal.is-good {
-  border-color: rgba(34, 197, 94, 0.36);
-  color: #bbf7d0;
+  background: #eaf8f1;
+  color: #075e45;
 }
 
 .gc-signal.is-info {
-  border-color: rgba(56, 189, 248, 0.36);
-  color: #bae6fd;
+  background: #eaf3fb;
+  color: #1d70b8;
 }
 
 .gc-signal.is-warn {
-  border-color: rgba(245, 158, 11, 0.38);
-  color: #fde68a;
+  background: #fff7df;
+  color: #8a5d00;
 }
 
 .gc-signal.is-bad {
-  border-color: rgba(248, 113, 113, 0.42);
-  color: #fecaca;
+  background: #fcecee;
+  color: #c92036;
 }
 
 .gc-error-text {
   max-width: 260px;
-  margin-top: 8px;
-  color: #fca5a5;
+  margin-top: 7px;
+  color: #c92036;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 18px;
+}
+
+.gc-action-row {
+  justify-content: center;
+  gap: 10px;
 }
 
 .gc-compact-link,
 .gc-compact-danger {
-  min-height: 34px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(15, 23, 42, 0.92);
-  color: #dbeafe;
-  padding: 0 10px;
-  font-size: 12px;
+  min-height: 36px;
+  border: 1px solid #d9e0ea;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 18px;
+}
+
+.gc-compact-link:hover {
+  border-color: #0e9f6e;
+  color: #075e45;
 }
 
 .gc-compact-danger {
-  border-color: rgba(248, 113, 113, 0.34);
-  color: #fecaca;
+  border-color: #f2d7d9;
+  color: #c92036;
+}
+
+.gc-compact-danger:hover:not(:disabled) {
+  border-color: #e7a8b4;
+  background: #fcecee;
+  color: #a5122a;
+}
+
+.gc-table-footer {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid #edf1f5;
+  color: #5b6472;
+  padding: 0 18px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .gc-empty {
   display: grid;
-  gap: 14px;
-  place-items: center;
   min-height: 180px;
-  color: #94a3b8;
+  place-items: center;
+  gap: 10px;
+  background: #fbfcfd;
+  color: #5b6472;
   padding: 24px;
   text-align: center;
 }
 
-.gc-empty.compact {
-  min-height: 88px;
-  padding: 16px;
+.gc-empty strong {
+  color: #111827;
 }
 
 .gc-alert {
   margin-bottom: 16px;
-  border: 1px solid rgba(248, 113, 113, 0.34);
+  border: 1px solid #f2d7d9;
   border-radius: 8px;
-  background: rgba(127, 29, 29, 0.28);
-  color: #fecaca;
+  background: #fcecee;
+  color: #a5122a;
   padding: 14px 16px;
 }
 
 .gc-alert.inline {
-  margin: 14px 0 0;
+  margin: 0;
 }
 
 @keyframes gc-spin {
@@ -1022,43 +1119,6 @@ const documentsStyles = `
   }
 }
 
-@media (max-width: 980px) {
-  .gc-upload-form {
-    grid-template-columns: 1fr;
-  }
-
-  .gc-controls,
-  .gc-hero {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-}
-
-@media (max-width: 640px) {
-  .gc-dark-page {
-    padding: 22px 10px 36px;
-  }
-
-  .gc-hero h1 {
-    font-size: 32px;
-  }
-
-  .gc-action-row {
-    flex-wrap: wrap;
-  }
-
-  .gc-dropzone {
-    min-height: 240px;
-    padding: 18px;
-  }
-
-  .gc-selected-file {
-    align-items: stretch;
-    flex-direction: column;
-  }
-}
-
 @media (max-width: 1100px) {
   .gc-table-scroll {
     overflow-x: visible;
@@ -1068,6 +1128,7 @@ const documentsStyles = `
     display: block;
     min-width: 0;
     width: 100%;
+    background: transparent;
   }
 
   .gc-table thead {
@@ -1077,34 +1138,31 @@ const documentsStyles = `
   .gc-table tbody {
     display: grid;
     gap: 10px;
-    padding: 0 10px 10px;
+    padding: 10px;
   }
 
   .gc-table tr {
     display: grid;
-    gap: 0;
-    border: 1px solid rgba(148, 163, 184, 0.16);
+    border: 1px solid #e5eaf0;
     border-radius: 8px;
-    background: rgba(15, 23, 42, 0.7);
+    background: #ffffff;
     overflow: hidden;
   }
 
   .gc-table th,
   .gc-table td {
-    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    border-bottom: 1px solid #edf1f5;
     padding: 11px 12px;
   }
 
-  .gc-table th:nth-child(2),
-  .gc-table td:nth-child(2),
-  .gc-table th:nth-child(4),
-  .gc-table td:nth-child(4) {
+  .gc-table th:nth-child(n),
+  .gc-table td:nth-child(n) {
     width: auto;
   }
 
   .gc-table td {
     display: grid;
-    grid-template-columns: minmax(90px, 0.38fr) minmax(0, 1fr);
+    grid-template-columns: minmax(90px, 0.36fr) minmax(0, 1fr);
     gap: 12px;
     align-items: start;
   }
@@ -1114,7 +1172,7 @@ const documentsStyles = `
   }
 
   .gc-table td::before {
-    color: #94a3b8;
+    color: #5b6472;
     font-size: 11px;
     font-weight: 850;
     letter-spacing: 0;
@@ -1145,306 +1203,76 @@ const documentsStyles = `
     content: "Actions";
   }
 
-  .gc-title-cell {
-    min-width: 0;
+  .gc-action-row {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 980px) {
+  .gc-upload-form {
+    grid-template-columns: 1fr;
+    gap: 18px;
   }
 
-  .gc-date,
-  .gc-title-cell strong,
-  .gc-title-cell span,
-  .gc-title-cell small {
-    overflow-wrap: anywhere;
-    white-space: normal;
+  .gc-upload-details {
+    min-height: 0;
+  }
+
+  .gc-controls,
+  .gc-hero {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .gc-filter-tabs {
+    align-self: flex-start;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .documents-review {
+    padding: 22px 12px 36px;
+  }
+
+  .gc-upload-card {
+    padding: 14px;
+  }
+
+  .gc-upload-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .gc-filter-tabs {
+    width: 100%;
+  }
+
+  .gc-filter-tabs button {
+    flex: 1 0 auto;
+    min-width: max-content;
+  }
+}
+
+@media (max-width: 520px) {
+  .gc-table td {
+    grid-template-columns: 1fr;
+    gap: 6px;
   }
 
   .gc-action-row {
     align-items: stretch;
+    flex-wrap: wrap;
   }
 
   .gc-action-row > * {
     flex: 1 1 96px;
   }
-}
-`;
 
-const paperReviewOverrides = `
-.shell:has(.gc-dark-page) {
-  background: #f7f9fb;
-}
-
-.gc-dark-page {
-  width: min(1536px, 100%);
-  min-height: calc(100vh - 64px);
-  padding: 32px 36px 48px;
-  color: #111827;
-}
-
-.gc-hero {
-  margin-bottom: 22px;
-}
-
-.gc-hero h1 {
-  color: #111827;
-  font-size: 30px;
-  font-weight: 800;
-  line-height: 38px;
-}
-
-.gc-eyebrow {
-  color: #5b6472;
-}
-
-.gc-muted,
-.gc-panel-heading p,
-.gc-subtle,
-.gc-date,
-.gc-title-cell span,
-.gc-title-cell small {
-  color: #5b6472;
-}
-
-.gc-upload-card,
-.gc-panel,
-.gc-controls,
-.gc-selected-file {
-  border: 1px solid #e5eaf0;
-  background: #ffffff;
-  box-shadow: none;
-}
-
-.gc-upload-card,
-.gc-panel {
-  border-radius: 8px;
-}
-
-.gc-upload-form {
-  grid-template-columns: minmax(340px, 0.9fr) minmax(320px, 1fr);
-  gap: 36px;
-}
-
-.gc-dropzone {
-  min-height: 176px;
-  border: 1px dashed #cad2dc;
-  background: #fbfcfd;
-  color: #111827;
-}
-
-.gc-dropzone:hover,
-.gc-dropzone.is-dragging {
-  border-color: #0e9f6e;
-  background: #f8fffc;
-}
-
-.gc-dropzone.has-file {
-  border-color: #0e9f6e;
-}
-
-.gc-upload-mark {
-  border-color: #d8dee7;
-  background: #ffffff;
-}
-
-.gc-upload-mark span {
-  border-color: #111827;
-}
-
-.gc-upload-mark span::before,
-.gc-upload-mark span::after {
-  background: #111827;
-}
-
-.gc-format-row span,
-.gc-selected-file {
-  border-color: #e5eaf0;
-  background: #f7f9fb;
-  color: #5b6472;
-}
-
-.gc-upload-heading h2,
-.gc-panel-heading h2,
-.gc-title-cell strong,
-.gc-table td,
-.gc-table th {
-  color: #111827;
-}
-
-.gc-field-stack label,
-.gc-search-label {
-  color: #111827;
-}
-
-.gc-dark-page select,
-.gc-dark-page input {
-  border-color: #d9e0ea;
-  background: #ffffff;
-  color: #111827;
-}
-
-.gc-dark-page input::placeholder {
-  color: #8a93a3;
-}
-
-.gc-primary {
-  border-color: #0e9f6e;
-  background: #0e9f6e;
-  color: #ffffff;
-}
-
-.gc-primary:hover:not(:disabled) {
-  border-color: #087d5f;
-  background: #087d5f;
-}
-
-.gc-ghost,
-.gc-compact-link,
-.gc-filter-tabs button {
-  border-color: #d9e0ea;
-  background: #ffffff;
-  color: #111827;
-}
-
-.gc-ghost:hover,
-.gc-compact-link:hover,
-.gc-filter-tabs button:hover {
-  border-color: #0e9f6e;
-  color: #075e45;
-}
-
-.gc-filter-tabs button.is-active,
-.gc-filter-tabs button[aria-selected="true"] {
-  border-color: #0e9f6e;
-  background: #ffffff;
-  color: #075e45;
-}
-
-.gc-compact-danger {
-  border-color: #f2d7d9;
-  background: #ffffff;
-  color: #c92036;
-}
-
-.gc-compact-danger:hover:not(:disabled) {
-  border-color: #e7a8b4;
-  background: #fcecee;
-}
-
-.gc-controls {
-  box-shadow: none;
-}
-
-.gc-table-panel {
-  overflow: hidden;
-}
-
-.gc-table-scroll {
-  border-color: #e5eaf0;
-  background: #ffffff;
-}
-
-.gc-table {
-  background: #ffffff;
-}
-
-.gc-table thead {
-  background: #fbfcfd;
-}
-
-.gc-table th,
-.gc-table td {
-  border-bottom-color: #edf1f5;
-}
-
-.gc-table tbody tr:hover td {
-  background: #fbfcfd;
-}
-
-.gc-type-badge {
-  border-color: #e5eaf0;
-  background: #f7f9fb;
-  color: #344054;
-}
-
-.gc-signal,
-.gc-run-status {
-  border-color: #e5eaf0;
-  background: #f2f4f7;
-  color: #344054;
-}
-
-.gc-signal.is-good {
-  border-color: transparent;
-  background: #eaf8f1;
-  color: #075e45;
-}
-
-.gc-signal.is-info {
-  border-color: transparent;
-  background: #eaf3fb;
-  color: #1d70b8;
-}
-
-.gc-signal.is-warn {
-  border-color: transparent;
-  background: #fff7df;
-  color: #8a5d00;
-}
-
-.gc-signal.is-bad,
-.gc-error-text {
-  color: #c92036;
-}
-
-.gc-signal.is-bad {
-  border-color: transparent;
-  background: #fcecee;
-}
-
-.gc-alert {
-  border: 1px solid #f2d7d9;
-  background: #fcecee;
-  color: #a5122a;
-}
-
-.gc-empty {
-  border-color: #e5eaf0;
-  background: #fbfcfd;
-  color: #5b6472;
-}
-
-.gc-dark-page .badge {
-  border-color: transparent;
-  background: #f2f4f7;
-  color: #344054;
-}
-
-.gc-dark-page .badge.ok {
-  background: #eaf8f2;
-  color: #075e45;
-}
-
-.gc-dark-page .badge.info {
-  background: #eaf3fb;
-  color: #1d70b8;
-}
-
-.gc-dark-page .badge.warning {
-  background: #fff7df;
-  color: #7a4300;
-}
-
-.gc-dark-page .badge.danger {
-  background: #fcecee;
-  color: #a5122a;
-}
-
-@media (max-width: 760px) {
-  .gc-dark-page {
-    padding: 22px 12px 36px;
-  }
-
-  .gc-upload-form {
-    grid-template-columns: 1fr;
-    gap: 16px;
+  .gc-selected-file {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 `;

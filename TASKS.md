@@ -181,6 +181,15 @@ Primary plan index:
 - [x] Split Devil's Advocate result markdown into three reader-facing sections:
   pre-role critique, Role comments / voter synthesis, and Actionable JTBDs;
   verified with frontend tests, production build, and web container rebuild.
+- [x] Finish the Paper Documents screen cleanup: remove the old dark-style
+  override stack, align upload/search/table layout with `Editable / Documents`,
+  add compact file markers and parse labels, and verify with frontend tests,
+  production build, web container rebuild, and localhost browser layout smoke;
+  full e2e is blocked locally until `E2E_ADMIN_LOGIN` and
+  `E2E_ADMIN_PASSWORD` are set.
+- [x] Tighten the Documents `Document type` control to match Paper: use a
+  `Select document type` placeholder, title-case option/table labels, and a
+  custom select chevron instead of the raw native select look.
 
 ## Phase 1: Skeleton And Data Foundation
 
