@@ -1557,7 +1557,7 @@ const analysisStyles = `
 }
 
 .analysis-secondary-action {
-  min-height: 40px;
+  min-height: 44px;
   border-radius: 8px;
   padding: 0 14px;
   font-size: 13px;
@@ -1908,7 +1908,7 @@ const analysisStyles = `
 }
 
 .analysis-tab {
-  min-height: 38px;
+  min-height: 44px;
   border-color: transparent !important;
   background: transparent !important;
   box-shadow: none !important;
@@ -2601,7 +2601,7 @@ const analysisStyles = `
 
   .analysis-run-details-action {
     align-self: flex-start;
-    min-height: 34px;
+    min-height: 44px;
     padding-inline: 12px;
     font-size: 12px;
   }
@@ -2778,7 +2778,7 @@ const paperAnalysisOverrides = `
 }
 
 .analysis-tabs {
-  height: 52px;
+  min-height: 52px;
   border: 1px solid #d6dee8;
   border-radius: 8px;
   background: #ffffff;
@@ -2786,7 +2786,7 @@ const paperAnalysisOverrides = `
 }
 
 .analysis-tab {
-  min-height: 38px;
+  min-height: 44px;
   border: 0 !important;
   border-radius: 7px;
   background: transparent !important;
@@ -3157,9 +3157,9 @@ const paperAnalysisOverrides = `
 
 .analysis-feedback-rating__button {
   display: grid;
-  width: 42px;
-  height: 42px;
-  min-height: 42px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
   place-items: center;
   border: 1px solid transparent !important;
   border-radius: 8px;
@@ -3219,7 +3219,7 @@ const paperAnalysisOverrides = `
 
 .analysis-feedback-submit {
   width: 100%;
-  min-height: 42px;
+  min-height: 44px;
   border-radius: 8px;
   font-size: 14px;
   font-weight: 800;
@@ -3531,7 +3531,12 @@ const paperAnalysisOverrides = `
 
 @media (max-width: 640px) {
   .analysis-workbench {
-    padding: 18px 12px 32px;
+    padding: 18px 12px 96px;
+  }
+
+  .analysis-tabs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
 
   .analysis-feedback-fab {

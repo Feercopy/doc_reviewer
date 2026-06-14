@@ -79,10 +79,58 @@ const devilsAdvocateResult = {
     },
   ],
   role_comments: [
-    { voter: "MP", vote: "reject", rationale: "No incrementality proof.", comments: [] },
-    { voter: "CPO", vote: "reject", rationale: "Funnel target needs evidence.", comments: [] },
-    { voter: "TechDir", vote: "reject", rationale: "No experiment delta.", comments: [] },
-    { voter: "VertDir", vote: "approve", rationale: "Direction is useful.", comments: [] },
+    {
+      voter: "MP",
+      vote: "reject",
+      rationale: "No incrementality proof.",
+      comments: [
+        {
+          anchor_text: "incrementality proof",
+          body: "Show a control group or comparable holdout before IC approval.",
+          comment_type: "missing_data",
+          severity: "critical",
+        },
+      ],
+    },
+    {
+      voter: "CPO",
+      vote: "reject",
+      rationale: "Funnel target needs evidence.",
+      comments: [
+        {
+          anchor_text: "funnel target",
+          body: "Tie the target to observed cohort behavior and product changes.",
+          comment_type: "methodology_issue",
+          severity: "important",
+        },
+      ],
+    },
+    {
+      voter: "TechDir",
+      vote: "reject",
+      rationale: "No experiment delta.",
+      comments: [
+        {
+          anchor_text: "experiment delta",
+          body: "Provide the experiment readout and guardrails before scaling.",
+          comment_type: "missing_data",
+          severity: "important",
+        },
+      ],
+    },
+    {
+      voter: "VertDir",
+      vote: "approve",
+      rationale: "Direction is useful.",
+      comments: [
+        {
+          anchor_text: "direction is useful",
+          body: "Continue vertical rollout only after the evidence gates are satisfied.",
+          comment_type: "risk_not_addressed",
+          severity: "minor",
+        },
+      ],
+    },
   ],
   tough_questions: [
     { question: "What is incremental impact?", persona: "Managing Partner" },
@@ -217,19 +265,16 @@ test("admin creates user and user completes the MVP document analysis flow", asy
   await page.goto(`${baseUrl}/analyses/${analysis.id}`);
   await expect(page.getByRole("heading", { name: "Analysis" })).toBeVisible();
   await expect(page.getByText("Needs stronger metric evidence.", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("The document claims traction without a cohort or control-group readout.").first()).toBeVisible();
+  await expect(page.getByText("Рекомендация: strengthen metric evidence before approval.").first()).toBeVisible();
   await page.getByRole("button", { name: "Full Output" }).click();
   await expect(page.getByRole("heading", { name: "Devil's Advocate" })).toBeVisible();
   await expect(page.getByText("What is incremental impact?", { exact: true }).first()).toBeVisible();
 
+  await page.getByRole("button", { name: "Leave feedback" }).click();
   await page.getByRole("textbox", { name: "Your comments (optional)" }).fill("E2E feedback: result is useful for review.");
   await page.getByRole("button", { name: "Submit feedback" }).click();
   await expect(page.getByText("Feedback saved")).toBeVisible();
-
-  await page.getByRole("button", { name: "Create etalon draft" }).click();
-  await expect(page).toHaveURL(/\/annotation\/[0-9a-f-]+$/);
-  await expect(page.getByRole("heading", { name: "Annotation" })).toBeVisible();
-  await expect(page.getByText("draft", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create etalon draft" })).toHaveCount(0);
 });
 
 function resolveApiBaseUrl(baseUrl) {

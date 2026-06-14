@@ -365,7 +365,7 @@ const benchmarksStyles = `
 .benchmarks-console button,
 .benchmarks-open {
   display: inline-flex;
-  min-height: 40px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(94, 234, 212, 0.28);

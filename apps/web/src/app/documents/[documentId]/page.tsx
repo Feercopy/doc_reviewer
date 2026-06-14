@@ -640,9 +640,9 @@ const documentDetailStyles = `
 
 .document-detail .gc-back-link {
   display: inline-flex;
-  min-height: 18px;
+  min-height: 44px;
   align-items: center;
-  margin-bottom: 18px;
+  margin-bottom: 10px;
   color: #111827;
   font-size: 13px;
   line-height: 18px;
@@ -686,9 +686,9 @@ const documentDetailStyles = `
 
 .document-detail .gc-title-edit-button {
   display: inline-grid;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 32px;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
   place-items: center;
   border: 0;
   border-radius: 6px;
@@ -714,7 +714,7 @@ const documentDetailStyles = `
 .document-detail .gc-title-edit-form input {
   width: 100%;
   min-width: 0;
-  min-height: 40px;
+  min-height: 44px;
   border: 1px solid #b8d8f1;
   border-radius: 6px;
   background: #ffffff;
@@ -728,7 +728,7 @@ const documentDetailStyles = `
 .document-detail .gc-title-save-button,
 .document-detail .gc-title-cancel-button {
   display: inline-flex;
-  min-height: 40px;
+  min-height: 44px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
@@ -790,7 +790,7 @@ const documentDetailStyles = `
 .document-detail .gc-compact-link,
 .document-detail .gc-copy-action {
   display: inline-flex;
-  min-height: 40px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   border-radius: 6px;
@@ -881,10 +881,11 @@ const documentDetailStyles = `
 
 .document-detail .gc-step {
   display: flex;
-  width: 150px;
+  width: auto;
+  min-width: 150px;
   min-height: 50px;
-  flex: 0 0 auto;
-  align-items: center;
+  flex: 1 1 150px;
+  align-items: flex-start;
   gap: 10px;
   border: 1px solid #e5eaf0;
   border-radius: 6px;
@@ -930,23 +931,25 @@ const documentDetailStyles = `
   gap: 2px;
 }
 
+.document-detail .gc-step strong,
+.document-detail .gc-step small {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .document-detail .gc-step strong {
-  overflow: hidden;
   color: #111827;
   font-size: 12px;
   font-weight: 750;
   line-height: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .document-detail .gc-step small {
-  overflow: hidden;
   color: #5b6472;
   font-size: 11px;
   line-height: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .document-detail .gc-detail-columns {
@@ -988,7 +991,7 @@ const documentDetailStyles = `
 }
 
 .document-detail .gc-copy-action {
-  min-height: 24px;
+  min-height: 44px;
   border: 0;
   background: transparent;
   color: #5b6472;
@@ -1033,7 +1036,7 @@ const documentDetailStyles = `
 
 .document-detail .gc-markdown-preview--full table {
   min-width: 620px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid #e5eaf0;
   border-radius: 6px;
   background: #ffffff;
@@ -1041,11 +1044,14 @@ const documentDetailStyles = `
 
 .document-detail .gc-markdown-preview--full th,
 .document-detail .gc-markdown-preview--full td {
+  min-width: 0;
   border-color: #e5eaf0;
   padding: 9px 10px;
   color: #111827;
   font-size: 12px;
   line-height: 22px;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .document-detail .gc-markdown-preview--full th {
@@ -1237,7 +1243,7 @@ const documentDetailStyles = `
 }
 
 .document-detail .gc-compact-link {
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 16px;
 }
 
@@ -1268,7 +1274,7 @@ const documentDetailStyles = `
 
 .document-detail .gc-model-popover select,
 .document-detail .gc-model-popover input {
-  min-height: 34px;
+  min-height: 44px;
   border-color: #d9e0ea;
   background: #ffffff;
   color: #111827;
@@ -1278,7 +1284,7 @@ const documentDetailStyles = `
 
 .document-detail .gc-language-toggle {
   display: grid;
-  min-height: 34px;
+  min-height: 48px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 2px;
   border: 1px solid #d9e0ea;
@@ -1288,7 +1294,7 @@ const documentDetailStyles = `
 }
 
 .document-detail .gc-language-option {
-  min-height: 28px;
+  min-height: 44px;
   min-width: 0;
   border: 0;
   border-radius: 4px;
@@ -1315,7 +1321,7 @@ const documentDetailStyles = `
 
 .document-detail .gc-popover-actions .gc-ghost,
 .document-detail .gc-popover-actions .gc-primary {
-  min-height: 34px;
+  min-height: 44px;
   padding: 0 12px;
   font-size: 12px;
 }

@@ -333,6 +333,7 @@ tbody tr:last-child td {
 
 .brand {
   display: flex;
+  min-height: 44px;
   gap: 12px;
   align-items: center;
   width: 214px;
@@ -673,7 +674,7 @@ tbody tr:last-child td {
 .tab,
 .tabs a,
 .tabs button {
-  min-height: 42px;
+  min-height: 44px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   background: transparent;
@@ -883,13 +884,19 @@ details.details-panel[open] summary {
 }
 
 .checkbox-label {
+  min-height: 44px;
   grid-template-columns: auto 1fr;
   align-items: center;
+  column-gap: 10px;
   color: var(--foreground);
+  cursor: pointer;
 }
 
 .checkbox-label input {
-  width: auto;
+  width: 18px;
+  height: 18px;
+  justify-self: start;
+  cursor: inherit;
 }
 
 .form-grid {
@@ -1026,7 +1033,7 @@ details.details-panel[open] summary {
   }
 
   .nav-link {
-    min-height: 40px;
+    min-height: 44px;
     min-width: max-content;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);

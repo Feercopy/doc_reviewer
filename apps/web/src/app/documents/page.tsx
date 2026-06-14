@@ -648,7 +648,7 @@ const documentsStyles = `
 
 .documents-review input,
 .documents-review select {
-  min-height: 40px;
+  min-height: 44px;
   border-color: #d9e0ea;
   background: #ffffff;
   color: #111827;
@@ -692,7 +692,7 @@ const documentsStyles = `
 .gc-compact-danger,
 .gc-filter-tabs button {
   display: inline-flex;
-  min-height: 40px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   border-radius: 6px;
@@ -1040,7 +1040,7 @@ const documentsStyles = `
 
 .gc-compact-link,
 .gc-compact-danger {
-  min-height: 36px;
+  min-height: 44px;
   border: 1px solid #d9e0ea;
   background: #ffffff;
   color: #111827;
@@ -1246,12 +1246,14 @@ const documentsStyles = `
   }
 
   .gc-filter-tabs {
+    flex-wrap: wrap;
     width: 100%;
+    overflow: visible;
   }
 
   .gc-filter-tabs button {
-    flex: 1 0 auto;
-    min-width: max-content;
+    flex: 1 1 104px;
+    min-width: 0;
   }
 }
 

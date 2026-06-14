@@ -157,4 +157,29 @@ describe("analysis result page", () => {
     expect(fullOutputSource).toContain("<DetailedGateChecksOutput analysis={analysis} />");
     expect(fullOutputSource).toContain("Detail run failed");
   });
+
+  it("lets analysis tabs wrap on narrow screens without clipping Full Output", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const tabStyles = pageSource.slice(
+      pageSource.indexOf(".analysis-tabs {", pageSource.indexOf("const paperAnalysisOverrides")),
+      pageSource.indexOf(".analysis-tab {", pageSource.indexOf("const paperAnalysisOverrides")),
+    );
+    const mobileStyles = pageSource.slice(
+      pageSource.indexOf("@media (max-width: 640px)", pageSource.indexOf("const paperAnalysisOverrides")),
+      pageSource.indexOf(".analysis-document-panel", pageSource.indexOf("@media (max-width: 640px)", pageSource.indexOf("const paperAnalysisOverrides"))),
+    );
+
+    expect(tabStyles).toContain("min-height: 52px");
+    expect(tabStyles).not.toContain("\n  height: 52px;");
+    expect(mobileStyles).toContain("grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))");
+  });
+
+  it("keeps analysis controls at accessible touch target height", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+
+    expect(pageSource).toContain(".analysis-secondary-action {\n  min-height: 44px;");
+    expect(pageSource).toContain(".analysis-tab {\n  min-height: 44px;");
+    expect(pageSource).toContain("width: 44px;\n  height: 44px;\n  min-height: 44px;");
+    expect(pageSource).toContain(".analysis-feedback-submit {\n  width: 100%;\n  min-height: 44px;");
+  });
 });
