@@ -14,7 +14,11 @@ from app.storage.local import LocalDocumentStorage
 
 
 RETRIEVAL_VERSION = "deterministic-lexical-v1"
+EVIDENCE_PACKET_VERSION = "expanded-wiki-evidence-v1"
+EVIDENCE_SECTION_CHAR_LIMIT = 6_000
+EVIDENCE_PACKET_CHAR_LIMIT = 30_000
 TOKEN_RE = re.compile(r"[\w]+", re.UNICODE)
+CASE_ID_RE = re.compile(r"(?:raw-)?(?:ic-)?(\d{4}-\d{3})", re.IGNORECASE)
 
 
 def build_devils_retrieval_dossier(
@@ -46,6 +50,7 @@ def build_devils_retrieval_dossier(
         for group in selected_items.values()
         for item in group
     ]
+    evidence_packet = _build_evidence_packet(files_root=files_root, selected_items=selected_items)
 
     return {
         "retrieval_mode": "deterministic_topk",
@@ -54,9 +59,15 @@ def build_devils_retrieval_dossier(
         "query_fingerprint": query_fingerprint,
         "selected_items": selected_items,
         "selected_paths": selected_paths,
+        "evidence_packet": evidence_packet,
         "retrieval_rationale": {
             "scoring": "lexical token overlap; ties sorted by relative source path",
             "top_k": top_k,
+            "evidence_packet": {
+                "packet_version": EVIDENCE_PACKET_VERSION,
+                "section_char_limit": EVIDENCE_SECTION_CHAR_LIMIT,
+                "packet_char_limit": EVIDENCE_PACKET_CHAR_LIMIT,
+            },
         },
     }
 
@@ -143,6 +154,109 @@ def _score_group(paths: list[Path], query_tokens: set[str], *, top_k: int) -> li
             }
         )
     return sorted(scored, key=lambda item: (-item["score"], item["path"]))[:top_k]
+
+
+def _build_evidence_packet(*, files_root: Path, selected_items: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    sections = []
+    seen_paths: set[str] = set()
+    remaining_chars = EVIDENCE_PACKET_CHAR_LIMIT
+
+    for group, items in selected_items.items():
+        for item in items:
+            path = _safe_source_path(files_root=files_root, relative_path=item["path"])
+            remaining_chars = _append_evidence_section(
+                sections=sections,
+                seen_paths=seen_paths,
+                source_group=group,
+                path=path,
+                remaining_chars=remaining_chars,
+            )
+            if group == "top_cases":
+                for raw_path in _related_raw_material_paths(files_root=files_root, case_path=path):
+                    remaining_chars = _append_evidence_section(
+                        sections=sections,
+                        seen_paths=seen_paths,
+                        source_group="related_raw_material",
+                        path=raw_path,
+                        remaining_chars=remaining_chars,
+                    )
+            if remaining_chars <= 0:
+                break
+        if remaining_chars <= 0:
+            break
+
+    return {
+        "packet_version": EVIDENCE_PACKET_VERSION,
+        "sections": sections,
+        "markdown": _evidence_packet_markdown(sections),
+        "section_char_limit": EVIDENCE_SECTION_CHAR_LIMIT,
+        "packet_char_limit": EVIDENCE_PACKET_CHAR_LIMIT,
+    }
+
+
+def _append_evidence_section(
+    *,
+    sections: list[dict[str, Any]],
+    seen_paths: set[str],
+    source_group: str,
+    path: Path,
+    remaining_chars: int,
+) -> int:
+    if remaining_chars <= 0 or not path.is_file():
+        return remaining_chars
+    relative_path = _relative_source_path(path)
+    if relative_path in seen_paths:
+        return remaining_chars
+
+    text = path.read_text(encoding="utf-8", errors="replace")
+    limit = min(EVIDENCE_SECTION_CHAR_LIMIT, remaining_chars)
+    content = text[:limit]
+    sections.append(
+        {
+            "path": relative_path,
+            "source_group": source_group,
+            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "content": content,
+            "truncated": len(text) > len(content),
+        }
+    )
+    seen_paths.add(relative_path)
+    return remaining_chars - len(content)
+
+
+def _related_raw_material_paths(*, files_root: Path, case_path: Path) -> list[Path]:
+    case_id = _case_id(case_path)
+    if not case_id:
+        return []
+    return [
+        files_root / "wiki-ic" / "raw" / "comments" / f"raw-ic-{case_id}-comments.md",
+        files_root / "wiki-ic" / "raw" / "minutes" / f"raw-ic-{case_id}-minutes.md",
+    ]
+
+
+def _case_id(path: Path) -> str | None:
+    match = CASE_ID_RE.search(path.stem)
+    return match.group(1) if match else None
+
+
+def _safe_source_path(*, files_root: Path, relative_path: str) -> Path:
+    path = (files_root / relative_path).resolve()
+    if not path.is_relative_to(files_root):
+        raise RuntimeError("source_snapshot_unavailable")
+    return path
+
+
+def _evidence_packet_markdown(sections: list[dict[str, Any]]) -> str:
+    parts = []
+    for section in sections:
+        heading = f"# {section['path']}"
+        if section.get("source_group"):
+            heading += f" ({section['source_group']})"
+        content = section.get("content") or ""
+        if section.get("truncated"):
+            content = f"{content}\n\n[truncated]"
+        parts.append(f"{heading}\n{content}".strip())
+    return "\n\n".join(parts)
 
 
 def _build_query_text(*, document: Any, analysis: Any) -> str:

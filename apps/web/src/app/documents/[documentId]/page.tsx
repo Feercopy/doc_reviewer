@@ -42,7 +42,15 @@ const providerLabels: Record<Provider, string> = {
 const outputLanguageOptions: readonly OutputLanguage[] = ["ru", "en"];
 
 function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisRecord[]): WorkflowStep[] {
-  const hasCompletedAnalysis = analyses.some((analysis) => analysis.status === "completed");
+  const completedAnalyses = analyses
+    .filter((analysis) => analysis.status === "completed")
+    .sort(
+      (left, right) =>
+        new Date(right.completed_at ?? right.created_at).getTime() -
+        new Date(left.completed_at ?? left.created_at).getTime(),
+    );
+  const latestCompletedAnalysis = completedAnalyses[0] ?? null;
+  const hasCompletedAnalysis = completedAnalyses.length > 0;
   const hasRunningAnalysis = analyses.some((analysis) => analysis.status === "queued" || analysis.status === "running");
   const hasFailedAnalysis = analyses.some((analysis) => analysis.status === "failed");
   const parseDone = document.parse_status === "completed";
@@ -56,7 +64,7 @@ function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisRecord[]
     },
     {
       label: "Parsed",
-      note: formatLabel(document.parse_status),
+      note: parseDone ? formatDate(document.updated_at) : formatLabel(document.parse_status),
       state: parseDone ? "done" : parseFailed ? "blocked" : "active",
     },
     {
@@ -66,7 +74,11 @@ function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisRecord[]
     },
     {
       label: "Analysis complete",
-      note: hasCompletedAnalysis ? "Completed run available" : hasRunningAnalysis ? "Run in progress" : "No completed run",
+      note: latestCompletedAnalysis
+        ? formatDate(latestCompletedAnalysis.completed_at ?? latestCompletedAnalysis.created_at)
+        : hasRunningAnalysis
+          ? "Run in progress"
+          : "No completed run",
       state: hasCompletedAnalysis ? "done" : hasRunningAnalysis ? "active" : hasFailedAnalysis ? "blocked" : "idle",
     },
   ];
@@ -97,6 +109,33 @@ function getSourceTraceLabel(analysis: AnalysisRecord): string {
     return trace.source_fingerprint.slice(0, 12);
   }
   return "-";
+}
+
+function getVerdictTone(verdict: string | null): "good" | "warn" | "bad" | "neutral" {
+  if (!verdict) {
+    return "neutral";
+  }
+  if (["approve", "pass", "completed", "low"].includes(verdict)) {
+    return "good";
+  }
+  if (["approve_with_conditions", "conditional_approve", "partial", "need_evidence", "medium", "important"].includes(verdict)) {
+    return "warn";
+  }
+  if (["reject", "rework", "fail", "failed", "critical", "high"].includes(verdict)) {
+    return "bad";
+  }
+  return "neutral";
+}
+
+function formatDateStack(value: string | null | undefined): { date: string; time: string } {
+  if (!value) {
+    return { date: "-", time: "" };
+  }
+  const date = new Date(value);
+  return {
+    date: new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(date),
+    time: new Intl.DateTimeFormat("en", { timeStyle: "short" }).format(date),
+  };
 }
 
 function formatAnalysisError(message: string): string {
@@ -147,6 +186,7 @@ export default function DocumentDetailPage() {
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [draftProvider, setDraftProvider] = useState<Provider>("openai_compatible");
   const [draftModel, setDraftModel] = useState("");
+  const [copiedParsed, setCopiedParsed] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
 
@@ -263,6 +303,16 @@ export default function DocumentDetailPage() {
     setModelDialogOpen(false);
   }
 
+  async function copyParsedText() {
+    if (!parsedText || !navigator.clipboard) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(parsedText);
+    setCopiedParsed(true);
+    window.setTimeout(() => setCopiedParsed(false), 1600);
+  }
+
   async function reparse() {
     setPending(true);
     setError("");
@@ -314,181 +364,73 @@ export default function DocumentDetailPage() {
 
   return (
     <AppShell>
-      <main className="gc-dark-page document-workflow">
-        <style>{`${detailStyles}\n${paperDetailOverrides}`}</style>
+      <main className="document-detail">
+        <style>{documentDetailStyles}</style>
         {document ? (
           <>
-            <section className="gc-hero">
-              <div className="gc-hero__content">
-                <p className="gc-eyebrow">Document workflow</p>
-                <div className="gc-hero__title-row">
-                  <div className="gc-hero__title-copy">
-                    <h1>{document.title}</h1>
-                    <p className="gc-muted">
-                      {document.original_filename} · {formatDate(document.created_at)}
-                    </p>
-                  </div>
-                  <div className="gc-stepper" aria-label="Document workflow status">
-                    {workflowSteps.map((step, index) => (
-                      <div className={`gc-step is-${step.state}`} key={step.label}>
-                        <span>{index + 1}</span>
-                        <div>
-                          <strong>{step.label}</strong>
-                          <small>{step.note}</small>
-                        </div>
+            <Link className="gc-back-link" href="/documents">
+              ‹ Documents
+            </Link>
+
+            <section className="gc-document-hero">
+              <div className="gc-document-summary">
+                <div className="gc-title-line">
+                  <h1>{document.title}</h1>
+                  <span aria-hidden="true" className="gc-title-edit-mark">
+                    ✎
+                  </span>
+                </div>
+                <p className="gc-muted">
+                  {document.original_filename} · {formatDate(document.created_at)}
+                </p>
+
+                <div className="gc-stepper" aria-label="Document workflow status">
+                  {workflowSteps.map((step) => (
+                    <div className={`gc-step is-${step.state}`} key={step.label}>
+                      <span aria-hidden="true" />
+                      <div>
+                        <strong>{step.label}</strong>
+                        <small>{step.note}</small>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </section>
 
-            {error ? <section className="gc-alert">{error}</section> : null}
+              <div className="gc-action-stack">
+                <div className="gc-top-actions" aria-label="Document and analysis actions">
+                  <a className="gc-ghost" href={`${resolveApiBaseUrl()}/documents/${document.id}/raw`}>
+                    Download raw
+                  </a>
+                  <button className="gc-ghost" disabled={pending} type="button" onClick={reparse}>
+                    Reparse
+                  </button>
+                  <button className="gc-danger" disabled={pending} type="button" onClick={removeDocument}>
+                    Delete
+                  </button>
+                  <button
+                    aria-expanded={modelDialogOpen}
+                    className="gc-ghost"
+                    disabled={pending}
+                    type="button"
+                    onClick={openModelDialog}
+                  >
+                    Model{modelDialogOpen ? "⌃" : "⌄"}
+                  </button>
+                  <button
+                    className="gc-primary"
+                    disabled={pending || document.parse_status !== "completed" || !model.trim() || !selectedProviderKey?.has_key}
+                    type="button"
+                    onClick={launchAnalysis}
+                  >
+                    {pending ? "Starting..." : "▷ Start analysis"}
+                  </button>
+                </div>
 
-            <div className="gc-detail-grid">
-              <div className="gc-left-column">
-                <section className="gc-panel gc-text-panel">
-                  <div className="gc-panel-heading">
-                    <div>
-                      <h2>Parsed text</h2>
-                      <p>{parsedText ? `${parsedText.length.toLocaleString()} characters extracted` : "Text appears after parsing completes."}</p>
-                    </div>
-                    <div className="gc-action-row gc-document-actions" aria-label="Document actions">
-                      <a className="gc-ghost" href={`${resolveApiBaseUrl()}/documents/${document.id}/raw`}>
-                        Download raw
-                      </a>
-                      <button className="gc-ghost" disabled={pending} type="button" onClick={reparse}>
-                        Reparse
-                      </button>
-                      <button className="gc-danger" disabled={pending} type="button" onClick={removeDocument}>
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-
-                  {parsedText ? (
-                    <MarkdownPreview markdown={parsedText} className="gc-markdown-preview--full" />
-                  ) : (
-                    <div className="gc-empty">Parsed text is not available yet.</div>
-                  )}
-                </section>
-              </div>
-
-              <aside className="gc-right-column">
-                <section className="gc-panel gc-history-panel">
-                  <div className="gc-panel-heading">
-                    <div>
-                      <h2>Analysis history</h2>
-                      <p>{analyses.length ? `${analyses.length} run${analyses.length === 1 ? "" : "s"}` : "No runs yet."}</p>
-                    </div>
-                  </div>
-
-                  <div className="gc-history-actions" aria-label="Analysis actions">
-                    <button className="gc-ghost" disabled={pending} type="button" onClick={openModelDialog}>
-                      Model
-                    </button>
-                    <div className="gc-language-toggle" aria-label="Output language">
-                      {outputLanguageOptions.map((language) => (
-                        <button
-                          aria-pressed={outputLanguage === language}
-                          className={`gc-language-option${outputLanguage === language ? " is-active" : ""}`}
-                          disabled={pending}
-                          key={language}
-                          type="button"
-                          onClick={() => setOutputLanguage(language)}
-                        >
-                          {language.toUpperCase()}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      className="gc-primary"
-                      disabled={pending || document.parse_status !== "completed" || !model.trim() || !selectedProviderKey?.has_key}
-                      type="button"
-                      onClick={launchAnalysis}
-                    >
-                      {pending ? "Starting..." : "Start new analysis"}
-                    </button>
-                  </div>
-
-                  {analyses.length > 0 ? (
-                    <div className="gc-table-scroll">
-                      <table className="gc-table">
-                        <thead>
-                          <tr>
-                            <th>Status</th>
-                            <th>Provider</th>
-                            <th>Verdict</th>
-                            <th>Skill snapshot</th>
-                            <th>Created</th>
-                            <th>Open</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {analyses.map((analysis) => (
-                            <tr key={analysis.id}>
-                              <td>
-                                <span className={`gc-run-status is-${getAnalysisTone(analysis.status)}`}>
-                                  {formatLabel(analysis.status)}
-                                </span>
-                                {analysis.error_message ? (
-                                  <div className="gc-error-text" title={analysis.error_message}>
-                                    {formatAnalysisError(analysis.error_message)}
-                                  </div>
-                                ) : null}
-                              </td>
-                              <td>
-                                <strong>{formatLabel(analysis.provider)}</strong>
-                                <small>{analysis.model}</small>
-                              </td>
-                              <td>{formatLabel(analysis.verdict)}</td>
-                              <td>
-                                <span className="gc-source-trace">{getSourceTraceLabel(analysis)}</span>
-                              </td>
-                              <td>{formatDate(analysis.created_at)}</td>
-                              <td>
-                                <Link className="gc-compact-link" href={`/analyses/${analysis.id}`}>
-                                  Open
-                                </Link>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="gc-empty compact">Analysis history appears here after the first run.</div>
-                  )}
-                </section>
-              </aside>
-            </div>
-
-            {modelDialogOpen ? (
-              <div
-                className="gc-modal-backdrop"
-                onMouseDown={(event) => {
-                  if (event.currentTarget === event.target) {
-                    setModelDialogOpen(false);
-                  }
-                }}
-              >
-                <form
-                  aria-labelledby="gc-model-dialog-title"
-                  aria-modal="true"
-                  className="gc-model-modal"
-                  role="dialog"
-                  onSubmit={saveModelSettings}
-                >
-                  <div className="gc-model-modal-header">
-                    <h2 id="gc-model-dialog-title">Model</h2>
-                    <button className="gc-icon-button" type="button" aria-label="Close" onClick={() => setModelDialogOpen(false)}>
-                      x
-                    </button>
-                  </div>
-
-                  <div className="gc-field-stack">
+                {modelDialogOpen ? (
+                  <form aria-label="Model settings" className="gc-model-popover" onSubmit={saveModelSettings}>
                     <label>
-                      <span>Saved key</span>
+                      <span>Provider</span>
                       <select
                         disabled={providerKeyOptions.length === 0}
                         value={draftProvider}
@@ -507,27 +449,134 @@ export default function DocumentDetailPage() {
                       </select>
                     </label>
 
+                    <div className="gc-key-state">
+                      <span>Saved key</span>
+                      <strong className={selectedDraftProviderKey?.has_key ? "is-valid" : "is-missing"}>
+                        {selectedDraftProviderKey?.has_key ? "Valid" : "Missing"}
+                      </strong>
+                    </div>
+
                     <label>
                       <span>Model</span>
                       <input value={draftModel} onChange={(event) => changeDraftModel(event.target.value)} />
                     </label>
-                  </div>
 
-                  {!selectedDraftProviderKey?.has_key ? (
-                    <div className="gc-provider-note is-warning">
-                      <strong>No saved key</strong>
-                      <span>Add a provider key in Settings before starting analysis.</span>
+                    <div className="gc-popover-field">
+                      <span>Output language</span>
+                      <div className="gc-language-toggle" aria-label="Output language">
+                        {outputLanguageOptions.map((language) => (
+                          <button
+                            aria-pressed={outputLanguage === language}
+                            className={`gc-language-option${outputLanguage === language ? " is-active" : ""}`}
+                            disabled={pending}
+                            key={language}
+                            type="button"
+                            onClick={() => setOutputLanguage(language)}
+                          >
+                            {language.toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  ) : null}
 
-                  <div className="gc-modal-actions">
-                    <button className="gc-primary" disabled={!draftModel.trim() || !selectedDraftProviderKey?.has_key} type="submit">
-                      Save
-                    </button>
-                  </div>
-                </form>
+                    {!selectedDraftProviderKey?.has_key ? (
+                      <div className="gc-provider-note is-warning">
+                        <strong>No saved key</strong>
+                        <span>Add a provider key in Settings before starting analysis.</span>
+                      </div>
+                    ) : null}
+
+                    <div className="gc-popover-actions">
+                      <button className="gc-ghost" type="button" onClick={() => setModelDialogOpen(false)}>
+                        Cancel
+                      </button>
+                      <button className="gc-primary" disabled={!draftModel.trim() || !selectedDraftProviderKey?.has_key} type="submit">
+                        Apply
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
               </div>
-            ) : null}
+            </section>
+
+            {error ? <section className="gc-alert">{error}</section> : null}
+
+            <div className="gc-detail-columns">
+              <section className="gc-panel gc-text-panel">
+                <div className="gc-panel-heading">
+                  <h2>Parsed document</h2>
+                  <button className="gc-copy-action" disabled={!parsedText} type="button" onClick={copyParsedText}>
+                    {copiedParsed ? "Copied" : "Copy markdown ⛶"}
+                  </button>
+                </div>
+
+                {parsedText ? (
+                  <MarkdownPreview markdown={parsedText} className="gc-markdown-preview--full" />
+                ) : (
+                  <div className="gc-empty">Parsed document appears after parsing completes.</div>
+                )}
+              </section>
+
+              <section className="gc-panel gc-history-panel">
+                <div className="gc-panel-heading">
+                  <h2>Analysis history</h2>
+                </div>
+
+                {analyses.length > 0 ? (
+                  <div className="gc-table-scroll">
+                    <table className="gc-table">
+                      <thead>
+                        <tr>
+                          <th>Status &amp; verdict</th>
+                          <th>Provider</th>
+                          <th>Run date</th>
+                          <th>Open</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {analyses.map((analysis) => {
+                          const runDate = formatDateStack(analysis.completed_at ?? analysis.created_at);
+
+                          return (
+                            <tr key={analysis.id}>
+                              <td>
+                                <span className={`gc-run-status is-${getAnalysisTone(analysis.status)}`}>
+                                  {formatLabel(analysis.status)}
+                                </span>
+                                <div className={`gc-verdict-line is-${getVerdictTone(analysis.verdict)}`}>
+                                  {formatLabel(analysis.verdict)}
+                                </div>
+                                {analysis.error_message ? (
+                                  <div className="gc-error-text" title={analysis.error_message}>
+                                    {formatAnalysisError(analysis.error_message)}
+                                  </div>
+                                ) : null}
+                              </td>
+                              <td>
+                                <strong>{providerLabels[analysis.provider] ?? formatLabel(analysis.provider)}</strong>
+                                <small>{analysis.model}</small>
+                                <small className="gc-source-trace">{getSourceTraceLabel(analysis)}</small>
+                              </td>
+                              <td>
+                                <span>{runDate.date}</span>
+                                {runDate.time ? <small>{runDate.time}</small> : null}
+                              </td>
+                              <td className="gc-open-cell">
+                                <Link className="gc-compact-link" href={`/analyses/${analysis.id}`}>
+                                  Open
+                                </Link>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="gc-empty compact">Analysis history appears here after the first run.</div>
+                )}
+              </section>
+            </div>
           </>
         ) : (
           <section className="gc-panel gc-loading">Loading document...</section>
@@ -537,1040 +586,755 @@ export default function DocumentDetailPage() {
   );
 }
 
-const detailStyles = `
-.shell:has(.gc-dark-page) {
-  background: #070a12;
-}
-
-.shell:has(.gc-dark-page) .topbar {
-  border-bottom-color: rgba(148, 163, 184, 0.16);
-  background: #090d16;
-  color: #f8fafc;
-}
-
-.shell:has(.gc-dark-page) .nav {
-  color: #a8b3c7;
-}
-
-.shell:has(.gc-dark-page) .brand {
-  color: #f8fafc;
-}
-
-.shell:has(.gc-dark-page) .topbar button.secondary {
-  border-color: rgba(148, 163, 184, 0.22);
-  background: #111827;
-  color: #f8fafc;
-}
-
-.gc-dark-page {
-  width: min(1680px, 100%);
-  min-height: calc(100vh - 69px);
-  margin: 0 auto;
-  padding: 32px 24px 48px;
-  color: #eef2ff;
-}
-
-.gc-hero,
-.gc-action-row {
-  display: flex;
-}
-
-.gc-hero {
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 24px;
-  margin-bottom: 18px;
-}
-
-.gc-hero__content {
-  display: grid;
-  width: 100%;
-  min-width: 0;
-}
-
-.gc-hero__title-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  min-width: 0;
-}
-
-.gc-hero__title-copy {
-  min-width: 0;
-}
-
-.gc-hero h1 {
-  max-width: 980px;
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-size: 38px;
-  line-height: 1.08;
-  letter-spacing: 0;
-}
-
-.gc-eyebrow {
-  margin: 0 0 8px;
-  color: #7dd3fc;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.gc-muted,
-.gc-panel-heading p,
-.gc-provider-note span,
-.gc-table small,
-.gc-note {
-  color: #94a3b8;
-}
-
-.gc-muted {
-  margin: 8px 0 0;
-}
-
-.gc-action-row {
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.gc-primary,
-.gc-ghost,
-.gc-danger,
-.gc-compact-link {
-  display: inline-flex;
-  min-height: 40px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  font-weight: 800;
-  letter-spacing: 0;
-  white-space: nowrap;
-}
-
-.gc-primary:disabled,
-.gc-ghost:disabled,
-.gc-danger:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.gc-primary {
-  border: 1px solid #22d3ee;
-  background: #06b6d4;
-  color: #07111f;
-  padding: 0 16px;
-}
-
-.gc-ghost {
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(15, 23, 42, 0.88);
-  color: #dbeafe;
-  padding: 0 14px;
-}
-
-.gc-danger {
-  border: 1px solid rgba(248, 113, 113, 0.34);
-  background: rgba(127, 29, 29, 0.18);
-  color: #fecaca;
-  padding: 0 14px;
-}
-
-.gc-stepper {
-  display: flex;
-  width: auto;
-  flex: 0 1 760px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 0;
-}
-
-.gc-step {
-  display: flex;
-  min-height: 42px;
-  flex: 0 1 178px;
-  max-width: 188px;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 8px;
-  background: #0d1424;
-  padding: 7px 9px;
-}
-
-.gc-step span {
-  display: grid;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 999px;
-  color: #cbd5e1;
-  font-size: 11px;
-  font-weight: 900;
-}
-
-.gc-step div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.gc-step strong {
-  overflow: hidden;
-  color: #f8fafc;
-  font-size: 12px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gc-step small {
-  overflow: hidden;
-  color: #94a3b8;
-  font-size: 11px;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gc-step.is-done {
-  border-color: rgba(34, 197, 94, 0.28);
-}
-
-.gc-step.is-done span {
-  border-color: rgba(34, 197, 94, 0.42);
-  background: rgba(20, 83, 45, 0.34);
-  color: #86efac;
-}
-
-.gc-step.is-active {
-  border-color: rgba(56, 189, 248, 0.34);
-}
-
-.gc-step.is-active span {
-  border-color: rgba(56, 189, 248, 0.48);
-  background: rgba(12, 74, 110, 0.38);
-  color: #7dd3fc;
-}
-
-.gc-step.is-blocked {
-  border-color: rgba(248, 113, 113, 0.36);
-}
-
-.gc-step.is-blocked span {
-  border-color: rgba(248, 113, 113, 0.48);
-  background: rgba(127, 29, 29, 0.34);
-  color: #fecaca;
-}
-
-.gc-detail-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
-  gap: 16px;
-  align-items: start;
-}
-
-.gc-left-column,
-.gc-right-column {
-  display: grid;
-  gap: 16px;
-  min-width: 0;
-}
-
-.gc-panel {
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 8px;
-  background: #0d1424;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.24);
-  padding: 16px;
-}
-
-.gc-text-panel {
-  min-width: 0;
-}
-
-.gc-text-panel .gc-markdown-preview--full {
-  overflow-x: auto;
-  overflow-y: visible;
-}
-
-.gc-panel-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.gc-panel-heading h2 {
-  margin: 0;
-  color: #f8fafc;
-  font-size: 16px;
-  letter-spacing: 0;
-}
-
-.gc-panel-heading p {
-  margin: 5px 0 0;
-  font-size: 13px;
-}
-
-.gc-dark-page .badge {
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  background: rgba(15, 23, 42, 0.96);
-  color: #cbd5e1;
-}
-
-.gc-dark-page .badge.ok {
-  border-color: rgba(34, 197, 94, 0.38);
-  background: rgba(20, 83, 45, 0.36);
-  color: #86efac;
-}
-
-.gc-dark-page .badge.info {
-  border-color: rgba(56, 189, 248, 0.38);
-  background: rgba(12, 74, 110, 0.36);
-  color: #7dd3fc;
-}
-
-.gc-dark-page .badge.danger {
-  border-color: rgba(248, 113, 113, 0.42);
-  background: rgba(127, 29, 29, 0.32);
-  color: #fca5a5;
-}
-
-.gc-field-stack span {
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.gc-dark-page input,
-.gc-dark-page select {
-  border-color: rgba(148, 163, 184, 0.22);
-  background: #090d16;
-  color: #eef2ff;
-}
-
-.gc-dark-page input::placeholder {
-  color: #64748b;
-}
-
-.gc-note {
-  margin-top: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  border-radius: 8px;
-  background: rgba(15, 23, 42, 0.52);
-  padding: 12px;
-  line-height: 1.5;
-}
-
-.gc-alert {
-  margin-bottom: 16px;
-  border: 1px solid rgba(248, 113, 113, 0.34);
-  border-radius: 8px;
-  background: rgba(127, 29, 29, 0.28);
-  color: #fecaca;
-  padding: 14px 16px;
-}
-
-.gc-alert.compact {
-  margin: 12px 0 0;
-}
-
-.gc-action-row {
-  margin-top: 14px;
-}
-
-.gc-document-actions {
-  flex: 0 0 auto;
-  margin-top: 0;
-  justify-content: flex-end;
-}
-
-.gc-field-stack label {
-  color: #cbd5e1;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.gc-field-stack {
-  display: grid;
-  gap: 14px;
-}
-
-.gc-provider-note {
-  display: grid;
-  gap: 4px;
-  margin-top: 14px;
-  border: 1px solid rgba(56, 189, 248, 0.22);
-  border-radius: 8px;
-  background: rgba(12, 74, 110, 0.2);
-  padding: 12px;
-}
-
-.gc-provider-note strong {
-  color: #e0f2fe;
-}
-
-.gc-provider-note span {
-  line-height: 1.4;
-}
-
-.gc-provider-note.is-warning {
-  border-color: rgba(250, 204, 21, 0.32);
-  background: rgba(113, 63, 18, 0.18);
-}
-
-.gc-provider-note.is-warning strong {
-  color: #fde68a;
-}
-
-.gc-history-actions {
-  display: grid;
-  grid-template-columns: minmax(76px, 0.65fr) minmax(90px, auto) minmax(138px, 1.35fr);
-  align-items: stretch;
-  gap: 10px;
-  margin-bottom: 12px;
-  border: 1px solid rgba(34, 211, 238, 0.18);
-  border-radius: 8px;
-  background: rgba(8, 145, 178, 0.12);
-  padding: 12px;
-}
-
-.gc-history-actions .gc-ghost,
-.gc-history-actions .gc-primary {
-  width: 100%;
-  min-width: 0;
-  padding-inline: 12px;
-}
-
-.gc-language-toggle {
-  display: grid;
-  min-width: 90px;
-  min-height: 40px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 8px;
-  background: rgba(15, 23, 42, 0.88);
-  padding: 2px;
-}
-
-.gc-language-option {
-  min-width: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #94a3b8;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0;
-}
-
-.gc-language-option.is-active {
-  background: #22d3ee;
-  color: #07111f;
-}
-
-.gc-language-option:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.gc-table-scroll {
-  width: 100%;
-  overflow-x: auto;
-}
-
-.gc-table {
-  min-width: 820px;
-}
-
-.gc-history-panel .gc-table {
-  display: block;
-  min-width: 0;
-  width: 100%;
-}
-
-.gc-history-panel .gc-table thead {
-  display: none;
-}
-
-.gc-history-panel .gc-table tbody {
-  display: grid;
-  gap: 10px;
-}
-
-.gc-history-panel .gc-table tr {
-  display: grid;
-  gap: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  border-radius: 8px;
-  background: rgba(15, 23, 42, 0.56);
-  padding: 12px;
-}
-
-.gc-history-panel .gc-table td {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  border-bottom: 0;
-  padding: 0;
-}
-
-.gc-history-panel .gc-table td::before {
-  color: #94a3b8;
-  font-size: 11px;
-  font-weight: 850;
-  text-transform: uppercase;
-}
-
-.gc-history-panel .gc-table td:nth-child(1)::before {
-  content: "Status";
-}
-
-.gc-history-panel .gc-table td:nth-child(2)::before {
-  content: "Provider";
-}
-
-.gc-history-panel .gc-table td:nth-child(3)::before {
-  content: "Verdict";
-}
-
-.gc-history-panel .gc-table td:nth-child(4)::before {
-  content: "Skill snapshot";
-}
-
-.gc-history-panel .gc-table td:nth-child(5)::before {
-  content: "Created";
-}
-
-.gc-history-panel .gc-table td:nth-child(6)::before {
-  content: "Open";
-}
-
-.gc-table th,
-.gc-table td {
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-  padding: 11px 10px;
-}
-
-.gc-table th {
-  color: #94a3b8;
-  font-size: 11px;
-  letter-spacing: 0;
-}
-
-.gc-table td strong,
-.gc-table td small {
-  display: block;
-}
-
-.gc-run-status,
-.gc-source-trace {
-  display: inline-flex;
-  min-height: 26px;
-  align-items: center;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.74);
-  color: #cbd5e1;
-  padding: 0 10px;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.gc-run-status.is-good {
-  border-color: rgba(34, 197, 94, 0.36);
-  color: #bbf7d0;
-}
-
-.gc-run-status.is-info {
-  border-color: rgba(56, 189, 248, 0.36);
-  color: #bae6fd;
-}
-
-.gc-run-status.is-bad {
-  border-color: rgba(248, 113, 113, 0.42);
-  color: #fecaca;
-}
-
-.gc-source-trace {
-  max-width: 100%;
-  overflow: hidden;
-  color: #bae6fd;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gc-error-text {
-  display: -webkit-box;
-  max-width: 100%;
-  margin-top: 8px;
-  overflow: hidden;
-  color: #fca5a5;
-  font-size: 12px;
-  line-height: 1.4;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
-.gc-compact-link {
-  min-height: 34px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(15, 23, 42, 0.92);
-  color: #dbeafe;
-  padding: 0 10px;
-  font-size: 12px;
-}
-
-.gc-empty,
-.gc-loading {
-  display: grid;
-  place-items: center;
-  min-height: 180px;
-  color: #94a3b8;
-  text-align: center;
-}
-
-.gc-empty.compact {
-  min-height: 88px;
-}
-
-.gc-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: grid;
-  align-items: start;
-  justify-items: center;
-  background: rgba(3, 7, 18, 0.62);
-  padding: 112px 16px 24px;
-}
-
-.gc-model-modal {
-  width: min(420px, 100%);
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 8px;
-  background: #0d1424;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.46);
-  padding: 16px;
-}
-
-.gc-model-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.gc-model-modal-header h2 {
-  margin: 0;
-  color: #f8fafc;
-  font-size: 16px;
-  letter-spacing: 0;
-}
-
-.gc-icon-button {
-  display: inline-grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 8px;
-  background: rgba(15, 23, 42, 0.82);
-  color: #dbeafe;
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 900;
-}
-
-.gc-modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 16px;
-}
-
-@media (max-width: 1100px) {
-  .gc-detail-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .gc-hero__title-row {
-    flex-direction: column;
-    justify-content: flex-start;
-  }
-
-  .gc-stepper {
-    width: min(100%, 940px);
-    flex: none;
-    justify-content: flex-start;
-  }
-
-  .gc-step {
-    flex: 1 1 190px;
-    max-width: none;
-  }
-
-  .gc-right-column {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 900px) {
-  .gc-right-column {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 720px) {
-  .gc-dark-page {
-    padding: 22px 10px 36px;
-  }
-
-  .gc-hero {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .gc-hero h1 {
-    font-size: 30px;
-  }
-
-  .gc-stepper {
-    width: 100%;
-  }
-
-  .gc-step {
-    flex-basis: calc(50% - 4px);
-  }
-
-  .gc-panel-heading {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .gc-document-actions {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    width: 100%;
-  }
-
-  .gc-document-actions .gc-ghost,
-  .gc-document-actions .gc-danger {
-    min-width: 0;
-    padding-inline: 10px;
-  }
-}
-
-@media (max-width: 460px) {
-  .gc-step small {
-    display: none;
-  }
-
-  .gc-history-actions {
-    grid-template-columns: minmax(0, 1fr) minmax(90px, auto);
-  }
-
-  .gc-history-actions .gc-primary {
-    grid-column: 1 / -1;
-  }
-
-  .gc-document-actions {
-    grid-template-columns: 1fr;
-  }
-}
-`;
-
-const paperDetailOverrides = `
-.shell:has(.gc-dark-page) {
-  background: #f7f9fb;
-}
-
-.gc-dark-page {
+const documentDetailStyles = `
+.document-detail {
   width: min(1536px, 100%);
-  min-height: calc(100vh - 64px);
+  min-height: calc(100vh - var(--app-header-height));
+  margin: 0 auto;
   padding: 28px 36px 48px;
   color: #111827;
 }
 
-.gc-hero h1 {
+.document-detail .gc-back-link {
+  display: inline-flex;
+  min-height: 18px;
+  align-items: center;
+  margin-bottom: 18px;
+  color: #111827;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.document-detail .gc-back-link:hover {
+  color: #075e45;
+}
+
+.document-detail .gc-document-hero {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+
+.document-detail .gc-document-summary {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.document-detail .gc-title-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.document-detail h1 {
+  margin: 0;
+  overflow-wrap: anywhere;
   color: #111827;
   font-size: 28px;
   font-weight: 760;
   line-height: 36px;
+  letter-spacing: 0;
 }
 
-.gc-eyebrow {
+.document-detail .gc-title-edit-mark {
+  flex: 0 0 auto;
   color: #5b6472;
+  font-size: 18px;
+  line-height: 22px;
 }
 
-.gc-muted,
-.gc-panel-heading p,
-.gc-provider-note span,
-.gc-table small,
-.gc-note,
-.gc-step small {
+.document-detail .gc-muted {
+  margin: -8px 0 0;
   color: #5b6472;
+  font-size: 13px;
+  line-height: 18px;
 }
 
-.gc-stepper {
-  flex: 0 1 680px;
+.document-detail .gc-action-stack {
+  position: relative;
+  display: grid;
+  justify-items: end;
   gap: 10px;
+  min-width: 0;
 }
 
-.gc-step {
-  min-height: 50px;
-  border: 1px solid #e5eaf0;
-  background: #ffffff;
-  color: #111827;
-}
-
-.gc-step span {
-  border-color: transparent;
-  background: transparent;
-  color: #0e9f6e;
-}
-
-.gc-step strong {
-  color: #111827;
-}
-
-.gc-step.is-done {
-  border-color: #e5eaf0;
-}
-
-.gc-step.is-done span {
-  border-color: transparent;
-  background: transparent;
-  color: #0e9f6e;
-}
-
-.gc-step.is-active {
-  border-color: #1d70b8;
-}
-
-.gc-step.is-active span {
-  border-color: transparent;
-  background: transparent;
-  color: #1d70b8;
-}
-
-.gc-step.is-blocked {
-  border-color: #f2d7d9;
-}
-
-.gc-step.is-blocked span {
-  border-color: transparent;
-  background: transparent;
-  color: #c92036;
-}
-
-.gc-detail-grid {
+.document-detail .gc-top-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 12px;
 }
 
-.gc-panel,
-.gc-model-modal,
-.gc-provider-note,
-.gc-run-status,
-.gc-source-trace {
-  border-color: #e5eaf0;
-  background: #ffffff;
-  box-shadow: none;
+.document-detail .gc-primary,
+.document-detail .gc-ghost,
+.document-detail .gc-danger,
+.document-detail .gc-compact-link,
+.document-detail .gc-copy-action {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 16px;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 
-.gc-text-panel {
-  min-height: 728px;
-}
-
-.gc-panel-heading h2,
-.gc-table th,
-.gc-table td,
-.gc-markdown-preview--full,
-.gc-model-modal h2 {
-  color: #111827;
-}
-
-.gc-primary {
-  border-color: #0e9f6e;
+.document-detail .gc-primary {
+  border: 1px solid #0e9f6e;
   background: #0e9f6e;
+  color: #ffffff;
+  padding: 0 18px;
+}
+
+.document-detail .gc-primary:hover:not(:disabled) {
+  border-color: #087d5f;
+  background: #087d5f;
   color: #ffffff;
 }
 
-.gc-primary:hover:not(:disabled) {
-  border-color: #087d5f;
-  background: #087d5f;
-}
-
-.gc-ghost,
-.gc-compact-link,
-.gc-icon-button {
-  border-color: #d9e0ea;
+.document-detail .gc-ghost,
+.document-detail .gc-compact-link {
+  border: 1px solid #d9e0ea;
   background: #ffffff;
   color: #111827;
+  padding: 0 16px;
 }
 
-.gc-ghost:hover,
-.gc-compact-link:hover,
-.gc-icon-button:hover {
+.document-detail .gc-ghost:hover:not(:disabled),
+.document-detail .gc-compact-link:hover {
   border-color: #0e9f6e;
+  background: #ffffff;
   color: #075e45;
 }
 
-.gc-danger {
-  border-color: #f2d7d9;
+.document-detail .gc-danger {
+  border: 1px solid #f2d7d9;
   background: #ffffff;
   color: #c92036;
+  padding: 0 16px;
 }
 
-.gc-danger:hover:not(:disabled) {
+.document-detail .gc-danger:hover:not(:disabled) {
+  border-color: #e7a8b4;
   background: #fcecee;
+  color: #a5122a;
 }
 
-.gc-dark-page input,
-.gc-dark-page select,
-.gc-dark-page textarea {
-  border-color: #d9e0ea;
+.document-detail .gc-primary:disabled,
+.document-detail .gc-ghost:disabled,
+.document-detail .gc-danger:disabled,
+.document-detail .gc-copy-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+  transform: none;
+}
+
+.document-detail .gc-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.document-detail .gc-step {
+  display: flex;
+  width: 150px;
+  min-height: 50px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #e5eaf0;
+  border-radius: 6px;
   background: #ffffff;
+  padding: 9px 12px;
+}
+
+.document-detail .gc-step span {
+  display: block;
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
+  border: 0;
+  border-radius: 999px;
+  background: #0e9f6e;
+}
+
+.document-detail .gc-step.is-active span {
+  background: #1d70b8;
+}
+
+.document-detail .gc-step.is-idle span {
+  border: 1px solid #8a93a3;
+  background: transparent;
+}
+
+.document-detail .gc-step.is-blocked span {
+  border-radius: 2px;
+  background: #c92036;
+}
+
+.document-detail .gc-step.is-active {
+  border-color: #b8d8f1;
+}
+
+.document-detail .gc-step.is-blocked {
+  border-color: #f2d7d9;
+}
+
+.document-detail .gc-step div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.document-detail .gc-step strong {
+  overflow: hidden;
   color: #111827;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.gc-dark-page input::placeholder,
-.gc-dark-page textarea::placeholder {
-  color: #8a93a3;
+.document-detail .gc-step small {
+  overflow: hidden;
+  color: #5b6472;
+  font-size: 11px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.gc-table-scroll,
-.gc-table {
+.document-detail .gc-detail-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 56fr) minmax(420px, 44fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.document-detail .gc-panel {
+  min-width: 0;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: none;
+  padding: 24px;
+}
+
+.document-detail .gc-text-panel,
+.document-detail .gc-history-panel {
+  min-height: 728px;
+}
+
+.document-detail .gc-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.document-detail .gc-panel-heading h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 17px;
+  font-weight: 760;
+  line-height: 22px;
+  letter-spacing: 0;
+}
+
+.document-detail .gc-copy-action {
+  min-height: 24px;
+  border: 0;
+  background: transparent;
+  color: #5b6472;
+  padding: 0;
+  font-weight: 500;
+}
+
+.document-detail .gc-copy-action:hover:not(:disabled) {
+  background: transparent;
+  color: #075e45;
+}
+
+.document-detail .gc-markdown-preview--full {
+  overflow-x: auto;
+  overflow-y: visible;
+  color: #111827;
+  font-size: 13px;
+  line-height: 22px;
+}
+
+.document-detail .gc-markdown-preview--full h1,
+.document-detail .gc-markdown-preview--full h2,
+.document-detail .gc-markdown-preview--full h3 {
+  color: #111827;
+  letter-spacing: 0;
+}
+
+.document-detail .gc-markdown-preview--full h1 {
+  font-size: 22px;
+  line-height: 30px;
+}
+
+.document-detail .gc-markdown-preview--full h2 {
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.document-detail .gc-markdown-preview--full h3 {
+  font-size: 17px;
+  line-height: 24px;
+}
+
+.document-detail .gc-markdown-preview--full table {
+  min-width: 620px;
+  overflow: hidden;
+  border: 1px solid #e5eaf0;
+  border-radius: 6px;
   background: #ffffff;
 }
 
-.gc-table th,
-.gc-table td {
-  border-bottom-color: #edf1f5;
-}
-
-.gc-table thead {
-  background: #fbfcfd;
-}
-
-.gc-table tbody tr:hover td {
-  background: #fbfcfd;
-}
-
-.gc-history-panel .gc-table tr {
+.document-detail .gc-markdown-preview--full th,
+.document-detail .gc-markdown-preview--full td {
   border-color: #e5eaf0;
+  padding: 9px 10px;
+  color: #111827;
+  font-size: 12px;
+  line-height: 22px;
+}
+
+.document-detail .gc-markdown-preview--full th {
+  background: #fbfcfd;
+  font-weight: 750;
+  text-transform: none;
+}
+
+.document-detail .gc-history-panel {
+  padding: 18px;
+}
+
+.document-detail .gc-history-panel .gc-panel-heading {
+  margin-bottom: 16px;
+}
+
+.document-detail .gc-table-scroll {
+  width: 100%;
+  overflow-x: auto;
   background: #ffffff;
 }
 
-.gc-history-panel .gc-table td::before {
+.document-detail .gc-table {
+  display: table;
+  min-width: 560px;
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+}
+
+.document-detail .gc-history-panel .gc-table {
+  display: table;
+}
+
+.document-detail .gc-history-panel .gc-table thead {
+  display: table-header-group;
+}
+
+.document-detail .gc-history-panel .gc-table tbody {
+  display: table-row-group;
+}
+
+.document-detail .gc-history-panel .gc-table tr {
+  display: table-row;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.document-detail .gc-history-panel .gc-table th,
+.document-detail .gc-history-panel .gc-table td {
+  display: table-cell;
+}
+
+.document-detail .gc-history-panel .gc-table td::before {
+  content: none;
+}
+
+.document-detail .gc-table th,
+.document-detail .gc-table td {
+  border-bottom: 1px solid #edf1f5;
+  padding: 14px 0;
+  color: #111827;
+  font-size: 12px;
+  line-height: 18px;
+  vertical-align: top;
+}
+
+.document-detail .gc-table th {
+  height: 36px;
+  padding-top: 0;
+  color: #5b6472;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.document-detail .gc-table th:nth-child(1),
+.document-detail .gc-table td:nth-child(1) {
+  width: 35%;
+  padding-right: 12px;
+}
+
+.document-detail .gc-table th:nth-child(2),
+.document-detail .gc-table td:nth-child(2) {
+  width: 30%;
+  padding-right: 12px;
+}
+
+.document-detail .gc-table th:nth-child(3),
+.document-detail .gc-table td:nth-child(3) {
+  width: 20%;
+  padding-right: 12px;
+}
+
+.document-detail .gc-table th:nth-child(4),
+.document-detail .gc-table td:nth-child(4) {
+  width: 15%;
+  text-align: right;
+}
+
+.document-detail .gc-table td strong,
+.document-detail .gc-table td small,
+.document-detail .gc-table td span {
+  display: block;
+}
+
+.document-detail .gc-table td strong {
+  color: #5b6472;
+  font-weight: 500;
+}
+
+.document-detail .gc-table td small {
   color: #5b6472;
 }
 
-.gc-run-status {
-  border-color: transparent;
-  background: #f2f4f7;
-  color: #344054;
+.document-detail .gc-source-trace {
+  max-width: 178px;
+  overflow: hidden;
+  margin-top: 4px;
+  color: #8a93a3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.gc-run-status.is-good {
+.document-detail .gc-run-status {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: #f2f4f7;
+  color: #344054;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 18px;
+  text-transform: capitalize;
+}
+
+.document-detail .gc-run-status.is-good {
   background: #eaf8f2;
   color: #075e45;
 }
 
-.gc-run-status.is-info {
+.document-detail .gc-run-status.is-info {
   background: #eaf3fb;
   color: #1d70b8;
 }
 
-.gc-run-status.is-bad,
-.gc-error-text {
+.document-detail .gc-run-status.is-bad {
+  background: #fcecee;
   color: #c92036;
 }
 
-.gc-run-status.is-bad {
-  background: #fcecee;
+.document-detail .gc-verdict-line {
+  margin-top: 8px;
+  color: #344054;
+  font-size: 12px;
+  line-height: 18px;
 }
 
-.gc-language-toggle,
-.gc-language-option {
+.document-detail .gc-verdict-line.is-good {
+  color: #087d5f;
+}
+
+.document-detail .gc-verdict-line.is-warn {
+  color: #8a5d00;
+}
+
+.document-detail .gc-verdict-line.is-bad {
+  color: #c92036;
+}
+
+.document-detail .gc-error-text {
+  display: -webkit-box;
+  max-width: 100%;
+  margin-top: 8px;
+  overflow: hidden;
+  color: #c92036;
+  font-size: 12px;
+  line-height: 18px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.document-detail .gc-open-cell {
+  text-align: right;
+}
+
+.document-detail .gc-compact-link {
+  min-height: 36px;
+  padding: 0 16px;
+}
+
+.document-detail .gc-model-popover {
+  position: absolute;
+  top: 50px;
+  right: 24px;
+  z-index: 20;
+  display: grid;
+  width: 214px;
+  gap: 10px;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 42px rgba(17, 24, 39, 0.12);
+  padding: 14px;
+}
+
+.document-detail .gc-model-popover label,
+.document-detail .gc-popover-field {
+  display: grid;
+  gap: 6px;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 18px;
+}
+
+.document-detail .gc-model-popover select,
+.document-detail .gc-model-popover input {
+  min-height: 34px;
   border-color: #d9e0ea;
   background: #ffffff;
-  color: #344054;
+  color: #111827;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
-.gc-language-option.is-active,
-.gc-language-option[aria-pressed="true"] {
+.document-detail .gc-key-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #111827;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.document-detail .gc-key-state strong {
+  border-radius: 5px;
+  padding: 3px 7px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.document-detail .gc-key-state .is-valid {
   background: #eaf8f2;
   color: #075e45;
 }
 
-.gc-provider-note.is-warning {
-  border-color: #f4d98d;
+.document-detail .gc-key-state .is-missing {
   background: #fff7df;
-}
-
-.gc-provider-note.is-warning strong,
-.gc-provider-note.is-warning span {
   color: #7a4300;
 }
 
-.gc-modal-backdrop {
-  background: rgba(17, 24, 39, 0.28);
+.document-detail .gc-language-toggle {
+  display: grid;
+  min-height: 34px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  border: 1px solid #d9e0ea;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 2px;
 }
 
-.gc-model-modal {
-  box-shadow: 0 16px 42px rgba(17, 24, 39, 0.12);
-}
-
-.gc-alert {
-  border: 1px solid #f2d7d9;
-  background: #fcecee;
-  color: #a5122a;
-}
-
-.gc-empty {
-  border-color: #e5eaf0;
-  background: #fbfcfd;
-  color: #5b6472;
-}
-
-.gc-dark-page .badge {
-  border-color: transparent;
-  background: #f2f4f7;
+.document-detail .gc-language-option {
+  min-height: 28px;
+  min-width: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
   color: #344054;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0;
 }
 
-.gc-dark-page .badge.ok {
+.document-detail .gc-language-option.is-active,
+.document-detail .gc-language-option[aria-pressed="true"] {
   background: #eaf8f2;
   color: #075e45;
 }
 
-.gc-dark-page .badge.info {
-  background: #eaf3fb;
-  color: #1d70b8;
+.document-detail .gc-provider-note {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #f4d98d;
+  border-radius: 6px;
+  background: #fff7df;
+  color: #7a4300;
+  padding: 10px;
+  font-size: 12px;
 }
 
-.gc-dark-page .badge.danger {
+.document-detail .gc-provider-note strong,
+.document-detail .gc-provider-note span {
+  color: #7a4300;
+  line-height: 17px;
+}
+
+.document-detail .gc-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.document-detail .gc-popover-actions .gc-ghost,
+.document-detail .gc-popover-actions .gc-primary {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.document-detail .gc-alert {
+  margin-bottom: 16px;
+  border: 1px solid #f2d7d9;
+  border-radius: 8px;
   background: #fcecee;
   color: #a5122a;
+  padding: 14px 16px;
+}
+
+.document-detail .gc-empty,
+.document-detail .gc-loading {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: #5b6472;
+  padding: 24px;
+  text-align: center;
+}
+
+.document-detail .gc-empty.compact {
+  min-height: 88px;
+}
+
+@media (max-width: 1280px) {
+  .document-detail .gc-document-hero {
+    flex-direction: column;
+  }
+
+  .document-detail .gc-action-stack {
+    width: 100%;
+    justify-items: start;
+  }
+
+  .document-detail .gc-top-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .document-detail .gc-model-popover {
+    right: auto;
+    left: 0;
+  }
+}
+
+@media (max-width: 1100px) {
+  .document-detail .gc-detail-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .document-detail .gc-text-panel,
+  .document-detail .gc-history-panel {
+    min-height: 0;
+  }
 }
 
 @media (max-width: 720px) {
-  .gc-dark-page {
+  .document-detail {
     padding: 22px 12px 36px;
+  }
+
+  .document-detail h1 {
+    font-size: 24px;
+    line-height: 31px;
+  }
+
+  .document-detail .gc-stepper {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .document-detail .gc-step {
+    width: auto;
+  }
+
+  .document-detail .gc-top-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .document-detail .gc-top-actions .gc-primary {
+    grid-column: 1 / -1;
+  }
+
+  .document-detail .gc-model-popover {
+    position: static;
+    width: min(100%, 320px);
+  }
+
+  .document-detail .gc-panel {
+    padding: 18px;
+  }
+}
+
+@media (max-width: 460px) {
+  .document-detail .gc-stepper,
+  .document-detail .gc-top-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .document-detail .gc-panel-heading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 `;

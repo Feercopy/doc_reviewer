@@ -59,6 +59,8 @@ def render_devils_advocate_prompt(
             source_text,
             "Retrieval dossier:",
             _retrieval_dossier_text(retrieval_snapshot),
+            "Expanded retrieval evidence packet:",
+            _retrieval_evidence_packet_text(retrieval_snapshot),
             "Selected knowledge base context:",
             "\n\n".join(wiki_sections) if wiki_sections else "No selected wiki pages were available.",
             _main_context_heading(has_main_context),
@@ -207,3 +209,21 @@ def _retrieval_dossier_text(retrieval_snapshot: RetrievalSnapshotMaterial | None
     if retrieval_snapshot is None:
         return "No retrieval dossier was attached."
     return json.dumps(retrieval_snapshot.dossier, ensure_ascii=False, sort_keys=True)
+
+
+def _retrieval_evidence_packet_text(retrieval_snapshot: RetrievalSnapshotMaterial | None) -> str:
+    if retrieval_snapshot is None:
+        return "No expanded evidence packet was attached."
+    evidence_packet = retrieval_snapshot.dossier.get("evidence_packet") or {}
+    markdown = evidence_packet.get("markdown")
+    if markdown:
+        return str(markdown)
+
+    sections = evidence_packet.get("sections") or []
+    rendered_sections = []
+    for section in sections:
+        path = section.get("path") or "unknown"
+        content = section.get("content") or ""
+        if content:
+            rendered_sections.append(f"# {path}\n{content}")
+    return "\n\n".join(rendered_sections) if rendered_sections else "No expanded evidence packet was attached."

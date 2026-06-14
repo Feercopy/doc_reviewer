@@ -388,6 +388,29 @@ def test_devils_advocate_renderer_uses_source_snapshot_and_retrieval_dossier(tmp
                         }
                     ],
                 },
+                "evidence_packet": {
+                    "packet_version": "expanded-wiki-evidence-v1",
+                    "sections": [
+                        {
+                            "path": "wiki-ic/cases/incrementality.md",
+                            "source_group": "top_cases",
+                            "sha256": "case-hash",
+                            "content": "Snapshot incrementality full case text should now be included",
+                        },
+                        {
+                            "path": "wiki-ic/patterns/missing-proof.md",
+                            "source_group": "top_patterns",
+                            "sha256": "pattern-hash",
+                            "content": "Snapshot missing proof full pattern text should now be included",
+                        },
+                    ],
+                    "markdown": (
+                        "# wiki-ic/cases/incrementality.md\n"
+                        "Snapshot incrementality full case text should now be included\n\n"
+                        "# wiki-ic/patterns/missing-proof.md\n"
+                        "Snapshot missing proof full pattern text should now be included"
+                    ),
+                },
             }
         ),
         encoding="utf-8",
@@ -428,8 +451,9 @@ def test_devils_advocate_renderer_uses_source_snapshot_and_retrieval_dossier(tmp
     assert "Snapshot output format" in prompt
     assert "Snapshot incrementality excerpt" in prompt
     assert "Snapshot missing proof excerpt" in prompt
-    assert "Snapshot incrementality full case text should not be included" not in prompt
-    assert "Snapshot missing proof full pattern text should not be included" not in prompt
+    assert "Expanded retrieval evidence packet:" in prompt
+    assert "Snapshot incrementality full case text should now be included" in prompt
+    assert "Snapshot missing proof full pattern text should now be included" in prompt
     assert "corpus-fingerprint" in prompt
     assert "Needs incrementality evidence" in prompt
     assert "Fallback DA prompt should not be used" not in prompt

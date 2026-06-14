@@ -135,7 +135,18 @@ def test_run_analysis_snapshots_devils_advocate_source_and_retrieval_before_gate
         assert predicted_run.run_parameters["run_order"] == "before_gate_challenger"
         dossier_path = tmp_path / "storage" / "retrieval-snapshots" / retrieval_snapshot_id / "dossier.json"
         dossier = json.loads(dossier_path.read_text(encoding="utf-8"))
-        assert "wiki-ic/cases/incrementality.md" in dossier["selected_paths"]
+        assert "wiki-ic/cases/ic-2025-292.md" in dossier["selected_paths"]
+        evidence_paths = [
+            section["path"] for section in dossier["evidence_packet"]["sections"]
+        ]
+        assert "wiki-ic/cases/ic-2025-292.md" in evidence_paths
+        assert "wiki-ic/raw/comments/raw-ic-2025-292-comments.md" in evidence_paths
+        assert "wiki-ic/raw/minutes/raw-ic-2025-292-minutes.md" in evidence_paths
+        evidence_packet_path = tmp_path / "storage" / "retrieval-snapshots" / retrieval_snapshot_id / "evidence_packet.md"
+        evidence_packet_text = evidence_packet_path.read_text(encoding="utf-8")
+        assert "marketplace budget incrementality control group holdout" in evidence_packet_text
+        assert "real MP comment: how much is incremental?" in evidence_packet_text
+        assert "real IC decision: rework until KPI gate is closed" in evidence_packet_text
         assert analysis.run_parameters["gate_challenger_layer_4_context"]["brutal_truth"] == "Fatal flaw."
         assert enqueued == []
     finally:
@@ -428,7 +439,8 @@ def test_run_predicted_comments_renders_prompt_from_source_and_retrieval_snapsho
         rendered_prompt = Path(predicted_run.run_parameters["rendered_prompt_artifact_path"]).read_text(encoding="utf-8")
         assert "Snapshot IC voting orchestrator" in rendered_prompt
         assert "Snapshot incrementality excerpt" in rendered_prompt
-        assert "Snapshot incrementality full case text should not be included" not in rendered_prompt
+        assert "Expanded retrieval evidence packet:" in rendered_prompt
+        assert "Snapshot incrementality full case text should now be included" in rendered_prompt
         assert "Devil's Advocate stub should not be used" not in rendered_prompt
     finally:
         get_settings.cache_clear()
@@ -656,13 +668,23 @@ def _create_predicted_skill_with_source(db: Session, tmp_path) -> Skill:
     (source_root / "wiki-ic" / "cases").mkdir(parents=True)
     (source_root / "wiki-ic" / "patterns").mkdir(parents=True)
     (source_root / "wiki-ic" / "personas").mkdir(parents=True)
+    (source_root / "wiki-ic" / "raw" / "comments").mkdir(parents=True)
+    (source_root / "wiki-ic" / "raw" / "minutes").mkdir(parents=True)
     (source_root / "ic-voting-prompt.md").write_text("IC voting orchestrator snapshot", encoding="utf-8")
     (source_root / "workflow-ic-cases.md").write_text("Workflow", encoding="utf-8")
     (source_root / "wiki-ic" / "CLAUDE.md").write_text("Wiki instructions", encoding="utf-8")
     (source_root / "wiki-ic" / "schema.md").write_text("Wiki schema", encoding="utf-8")
     (source_root / "wiki-ic" / "meta" / "output-format.md").write_text("Output format", encoding="utf-8")
-    (source_root / "wiki-ic" / "cases" / "incrementality.md").write_text(
+    (source_root / "wiki-ic" / "cases" / "ic-2025-292.md").write_text(
         "marketplace budget incrementality control group holdout",
+        encoding="utf-8",
+    )
+    (source_root / "wiki-ic" / "raw" / "comments" / "raw-ic-2025-292-comments.md").write_text(
+        "real MP comment: how much is incremental?",
+        encoding="utf-8",
+    )
+    (source_root / "wiki-ic" / "raw" / "minutes" / "raw-ic-2025-292-minutes.md").write_text(
+        "real IC decision: rework until KPI gate is closed",
         encoding="utf-8",
     )
     (source_root / "wiki-ic" / "patterns" / "missing-proof.md").write_text(
@@ -734,7 +756,7 @@ def _create_da_source_snapshot_artifact(tmp_path, source_snapshot_id):
     (files_dir / "wiki-ic" / "schema.md").write_text("Snapshot wiki schema", encoding="utf-8")
     (files_dir / "wiki-ic" / "meta" / "output-format.md").write_text("Snapshot output format", encoding="utf-8")
     (files_dir / "wiki-ic" / "cases" / "incrementality.md").write_text(
-        "Snapshot incrementality full case text should not be included",
+        "Snapshot incrementality full case text should now be included",
         encoding="utf-8",
     )
     (source_snapshot_dir / "manifest.json").write_text(
@@ -774,6 +796,22 @@ def _create_da_retrieval_snapshot_artifact(tmp_path, retrieval_snapshot_id):
                             "excerpt": "Snapshot incrementality excerpt",
                         }
                     ],
+                },
+                "evidence_packet": {
+                    "packet_version": "expanded-wiki-evidence-v1",
+                    "sections": [
+                        {
+                            "path": "wiki-ic/cases/incrementality.md",
+                            "source_group": "top_cases",
+                            "sha256": "case-hash",
+                            "content": "Snapshot incrementality full case text should now be included",
+                            "truncated": False,
+                        }
+                    ],
+                    "markdown": (
+                        "# wiki-ic/cases/incrementality.md\n"
+                        "Snapshot incrementality full case text should now be included"
+                    ),
                 },
             }
         ),

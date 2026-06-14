@@ -82,6 +82,42 @@ def test_devils_retrieval_corpus_fingerprint_changes_when_file_changes(tmp_path)
     assert first["corpus_fingerprint"] != second["corpus_fingerprint"]
 
 
+def test_devils_retrieval_builds_evidence_packet_from_selected_pages_and_raw_material(tmp_path):
+    artifact_path = _create_source_snapshot(
+        tmp_path,
+        {
+            "wiki-ic/cases/ic-2025-292.md": "case summary incrementality hard KPI gate",
+            "wiki-ic/patterns/experimental-traction-gap.md": "pattern says missing holdout is a blocker",
+            "wiki-ic/raw/comments/raw-ic-2025-292-comments.md": "real MP comment: how much is incremental?",
+            "wiki-ic/raw/minutes/raw-ic-2025-292-minutes.md": "real IC decision: rework until KPI gate is closed",
+        },
+    )
+    document = SimpleNamespace(
+        title="Gate 2",
+        parsed_text="The proposal asks for budget but has no holdout or incrementality proof.",
+        detected_document_type="gate_2",
+    )
+    analysis = SimpleNamespace(summary="Needs incrementality evidence.", structured_output={})
+
+    dossier = build_devils_retrieval_dossier(
+        source_snapshot_artifact_path=artifact_path,
+        document=document,
+        analysis=analysis,
+        top_k=1,
+    )
+
+    evidence_packet = dossier["evidence_packet"]
+    evidence_paths = [section["path"] for section in evidence_packet["sections"]]
+    assert "wiki-ic/cases/ic-2025-292.md" in evidence_paths
+    assert "wiki-ic/patterns/experimental-traction-gap.md" in evidence_paths
+    assert "wiki-ic/raw/comments/raw-ic-2025-292-comments.md" in evidence_paths
+    assert "wiki-ic/raw/minutes/raw-ic-2025-292-minutes.md" in evidence_paths
+    assert "case summary incrementality hard KPI gate" in evidence_packet["markdown"]
+    assert "real MP comment: how much is incremental?" in evidence_packet["markdown"]
+    assert "real IC decision: rework until KPI gate is closed" in evidence_packet["markdown"]
+    assert evidence_packet["packet_version"] == "expanded-wiki-evidence-v1"
+
+
 def _create_source_snapshot(tmp_path, files: dict[str, str]):
     artifact_path = tmp_path / "skill-snapshots" / "source"
     files_root = artifact_path / "files"

@@ -21,6 +21,11 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Finish the Paper Document detail page cleanup: replace the remaining
+  dark-detail shell with the `Editable / Document detail` light layout,
+  top-level document actions, compact model popover, workflow cards, parsed
+  markdown panel, and tabular analysis history; verified with the Documents
+  frontend test slice and production build.
 - [x] Implement the Paper feedback card on the analysis result page: replace
   the old usefulness select/benchmark checkbox with a 5-point icon rating,
   optional comment textarea with a 1000-character counter, and full-width
@@ -181,6 +186,11 @@ Primary plan index:
 - [x] Split Devil's Advocate result markdown into three reader-facing sections:
   pre-role critique, Role comments / voter synthesis, and Actionable JTBDs;
   verified with frontend tests, production build, and web container rebuild.
+- [x] Upgrade Devil's Advocate retrieval from excerpt-only dossier to expanded
+  evidence packets: selected wiki cases, patterns, heuristics, personas, and
+  matching raw comments/minutes are snapshotted into `evidence_packet.md` and
+  injected into the DA prompt; DB-imported past-defense etalons remain out of
+  provider prompts until a dedicated access/privacy policy is added.
 - [x] Finish the Paper Documents screen cleanup: remove the old dark-style
   override stack, align upload/search/table layout with `Editable / Documents`,
   add compact file markers and parse labels, and verify with frontend tests,

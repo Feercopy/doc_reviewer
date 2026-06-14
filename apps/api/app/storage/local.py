@@ -121,7 +121,12 @@ class LocalDocumentStorage:
         selected_dir.mkdir(parents=True, exist_ok=True)
         source_files_dir = Path(source_snapshot_artifact_path).expanduser().resolve() / "files"
 
-        for path in dossier.get("selected_paths", []):
+        evidence_paths = [
+            section.get("path")
+            for section in (dossier.get("evidence_packet") or {}).get("sections", [])
+            if section.get("path")
+        ]
+        for path in [*dossier.get("selected_paths", []), *evidence_paths]:
             relative_path = self._safe_relative_path(path)
             source_path = (source_files_dir / relative_path).resolve()
             if not source_path.is_relative_to(source_files_dir) or not source_path.is_file():
@@ -132,6 +137,10 @@ class LocalDocumentStorage:
 
         dossier_path = self._ensure_under_root(snapshot_dir / "dossier.json")
         dossier_path.write_text(json.dumps(dossier, ensure_ascii=False, indent=2), encoding="utf-8")
+        evidence_markdown = (dossier.get("evidence_packet") or {}).get("markdown")
+        if evidence_markdown:
+            evidence_path = self._ensure_under_root(snapshot_dir / "evidence_packet.md")
+            evidence_path.write_text(str(evidence_markdown), encoding="utf-8")
         return snapshot_dir
 
     def _ensure_under_root(self, path: Path) -> Path:
