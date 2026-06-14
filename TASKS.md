@@ -21,6 +21,11 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Fix the document-detail `Model` button display by replacing the
+  concatenated text chevron with a dedicated CSS chevron and trigger spacing,
+  and simplify the model popover to only output language, model selection, and
+  save; verified with frontend tests, production build, web container rebuild,
+  and a localhost browser check.
 - [x] Move analysis-page `Detailed checks` and the full Devil's Advocate
   display into `Full Output`, leaving the main Gate Challenger tab focused on
   summary/narrative output and removing the standalone Devil's Advocate tab;

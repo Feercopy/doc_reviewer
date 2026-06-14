@@ -184,7 +184,6 @@ export default function DocumentDetailPage() {
   const [modelEdited, setModelEdited] = useState(false);
   const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>("en");
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
-  const [draftProvider, setDraftProvider] = useState<Provider>("openai_compatible");
   const [draftModel, setDraftModel] = useState("");
   const [copiedParsed, setCopiedParsed] = useState(false);
   const [error, setError] = useState("");
@@ -238,14 +237,9 @@ export default function DocumentDetailPage() {
   }, [modelEdited, provider, providerModels]);
 
   const configuredProviderModels = useMemo(() => providerModels.filter((item) => item.has_key), [providerModels]);
-  const providerModelOptions = configuredProviderModels.length > 0 ? configuredProviderModels : providerModels;
   const selectedProviderModel = useMemo(
     () => providerModels.find((item) => item.provider === provider) ?? null,
     [provider, providerModels],
-  );
-  const selectedDraftProviderModel = useMemo(
-    () => providerModels.find((item) => item.provider === draftProvider) ?? null,
-    [draftProvider, providerModels],
   );
   const workflowSteps = useMemo(() => (document ? buildWorkflowSteps(document, analyses) : []), [analyses, document]);
 
@@ -276,14 +270,8 @@ export default function DocumentDetailPage() {
   }, [provider, providerModels, configuredProviderModels]);
 
   function openModelDialog() {
-    setDraftProvider(provider);
     setDraftModel(model);
     setModelDialogOpen(true);
-  }
-
-  function changeDraftProvider(nextProvider: Provider) {
-    setDraftProvider(nextProvider);
-    setDraftModel(getProviderDefaultModel(providerModels, nextProvider));
   }
 
   function changeDraftModel(nextModel: string) {
@@ -293,13 +281,12 @@ export default function DocumentDetailPage() {
   function saveModelSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextModel = draftModel.trim();
-    if (!nextModel || !selectedDraftProviderModel?.has_key) {
+    if (!nextModel || !selectedProviderModel?.has_key) {
       return;
     }
 
-    setProvider(draftProvider);
     setModel(nextModel);
-    setModelEdited(nextModel !== getProviderDefaultModel(providerModels, draftProvider));
+    setModelEdited(nextModel !== getProviderDefaultModel(providerModels, provider));
     setModelDialogOpen(false);
   }
 
@@ -410,12 +397,16 @@ export default function DocumentDetailPage() {
                   </button>
                   <button
                     aria-expanded={modelDialogOpen}
-                    className="gc-ghost"
+                    className="gc-ghost gc-model-trigger"
                     disabled={pending}
                     type="button"
                     onClick={openModelDialog}
                   >
-                    Model{modelDialogOpen ? "⌃" : "⌄"}
+                    <span>Model</span>
+                    <span
+                      aria-hidden="true"
+                      className={`gc-model-chevron${modelDialogOpen ? " is-open" : ""}`}
+                    />
                   </button>
                   <button
                     className="gc-primary"
@@ -429,47 +420,6 @@ export default function DocumentDetailPage() {
 
                 {modelDialogOpen ? (
                   <form aria-label="Model settings" className="gc-model-popover" onSubmit={saveModelSettings}>
-                    <label>
-                      <span>Provider</span>
-                      <select
-                        disabled={providerModelOptions.length === 0}
-                        value={draftProvider}
-                        onChange={(event) => changeDraftProvider(event.target.value as Provider)}
-                      >
-                        {providerModelOptions.length > 0 ? (
-                          providerModelOptions.map((item) => (
-                            <option key={item.provider} value={item.provider}>
-                              {providerLabels[item.provider]}
-                            </option>
-                          ))
-                        ) : (
-                          <option value={draftProvider}>No shared provider</option>
-                        )}
-                      </select>
-                    </label>
-
-                    <div className="gc-key-state">
-                      <span>Shared key</span>
-                      <strong className={selectedDraftProviderModel?.has_key ? "is-valid" : "is-missing"}>
-                        {selectedDraftProviderModel?.has_key ? "Valid" : "Missing"}
-                      </strong>
-                    </div>
-
-                    <label>
-                      <span>Model</span>
-                      <select
-                        disabled={!selectedDraftProviderModel?.has_key || selectedDraftProviderModel.available_models.length === 0}
-                        value={draftModel}
-                        onChange={(event) => changeDraftModel(event.target.value)}
-                      >
-                        {(selectedDraftProviderModel?.available_models ?? []).map((item) => (
-                          <option key={item} value={item}>
-                            {item}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
                     <div className="gc-popover-field">
                       <span>Output language</span>
                       <div className="gc-language-toggle" aria-label="Output language">
@@ -488,19 +438,24 @@ export default function DocumentDetailPage() {
                       </div>
                     </div>
 
-                    {!selectedDraftProviderModel?.has_key ? (
-                      <div className="gc-provider-note is-warning">
-                        <strong>No shared key</strong>
-                        <span>Ask an admin to add a provider key in Settings before starting analysis.</span>
-                      </div>
-                    ) : null}
+                    <label>
+                      <span>Model</span>
+                      <select
+                        disabled={!selectedProviderModel?.has_key || selectedProviderModel.available_models.length === 0}
+                        value={draftModel}
+                        onChange={(event) => changeDraftModel(event.target.value)}
+                      >
+                        {(selectedProviderModel?.available_models ?? []).map((item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
                     <div className="gc-popover-actions">
-                      <button className="gc-ghost" type="button" onClick={() => setModelDialogOpen(false)}>
-                        Cancel
-                      </button>
-                      <button className="gc-primary" disabled={!draftModel.trim() || !selectedDraftProviderModel?.has_key} type="submit">
-                        Apply
+                      <button className="gc-primary" disabled={!draftModel.trim() || !selectedProviderModel?.has_key} type="submit">
+                        Save
                       </button>
                     </div>
                   </form>
@@ -722,6 +677,24 @@ const documentDetailStyles = `
   border-color: #0e9f6e;
   background: #ffffff;
   color: #075e45;
+}
+
+.document-detail .gc-model-trigger {
+  gap: 8px;
+}
+
+.document-detail .gc-model-chevron {
+  display: block;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.document-detail .gc-model-chevron.is-open {
+  transform: translateY(2px) rotate(225deg);
 }
 
 .document-detail .gc-danger {
@@ -1150,32 +1123,6 @@ const documentDetailStyles = `
   font-size: 12px;
 }
 
-.document-detail .gc-key-state {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #111827;
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.document-detail .gc-key-state strong {
-  border-radius: 5px;
-  padding: 3px 7px;
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.document-detail .gc-key-state .is-valid {
-  background: #eaf8f2;
-  color: #075e45;
-}
-
-.document-detail .gc-key-state .is-missing {
-  background: #fff7df;
-  color: #7a4300;
-}
-
 .document-detail .gc-language-toggle {
   display: grid;
   min-height: 34px;
@@ -1204,23 +1151,6 @@ const documentDetailStyles = `
 .document-detail .gc-language-option[aria-pressed="true"] {
   background: #eaf8f2;
   color: #075e45;
-}
-
-.document-detail .gc-provider-note {
-  display: grid;
-  gap: 4px;
-  border: 1px solid #f4d98d;
-  border-radius: 6px;
-  background: #fff7df;
-  color: #7a4300;
-  padding: 10px;
-  font-size: 12px;
-}
-
-.document-detail .gc-provider-note strong,
-.document-detail .gc-provider-note span {
-  color: #7a4300;
-  line-height: 17px;
 }
 
 .document-detail .gc-popover-actions {
