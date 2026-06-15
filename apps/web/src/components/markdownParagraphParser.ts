@@ -31,6 +31,10 @@ export function markdownParagraphClassName(lines: string[]): string {
   return "gc-md-paragraph";
 }
 
+export function shouldInsertParagraphSpacerAfter(lines: string[]): boolean {
+  return isStandaloneLeadLabelParagraph(lines);
+}
+
 function startsSectionLabelLine(trimmed: string): boolean {
   return (
     /^(\*\*[^*]{1,120}:\*\*|__[^_]{1,120}:__)\s+\S/.test(trimmed) ||

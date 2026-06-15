@@ -1,7 +1,11 @@
 import { type ReactNode } from "react";
 
 import { isOrderedListMarker, parseLooseOrderedList, type LooseOrderedListBlock } from "./markdownListParser";
-import { markdownParagraphClassName, parseMarkdownParagraphLines } from "./markdownParagraphParser";
+import {
+  markdownParagraphClassName,
+  parseMarkdownParagraphLines,
+  shouldInsertParagraphSpacerAfter,
+} from "./markdownParagraphParser";
 
 type MarkdownPreviewProps = {
   markdown: string;
@@ -117,6 +121,9 @@ export function MarkdownPreview({ markdown, className = "" }: MarkdownPreviewPro
         {renderInlineMarkdown(paragraph.lines.join(" "))}
       </p>,
     );
+    if (shouldInsertParagraphSpacerAfter(paragraph.lines)) {
+      blocks.push(<p aria-hidden="true" className="gc-md-paragraph-spacer" key={`paragraph-spacer-${index}`} />);
+    }
   }
 
   return (
@@ -364,7 +371,12 @@ const markdownPreviewStyles = `
 }
 
 .gc-md-paragraph--lead-label {
-  margin-bottom: 28px;
+  margin-bottom: 0;
+}
+
+.gc-md-paragraph-spacer {
+  height: 1.62em;
+  margin: 0;
 }
 
 .gc-md-list {

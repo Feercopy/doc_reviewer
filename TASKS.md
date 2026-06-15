@@ -21,6 +21,15 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Render an explicit blank paragraph after the Gate Challenger verdict line:
+  production data already contains a blank line after `Recommendation`, but the
+  markdown renderer intentionally skipped blank lines. The renderer now inserts
+  an `aria-hidden` spacer paragraph after standalone recommendation verdicts,
+  so the separation is structural instead of relying on collapsed markdown
+  whitespace. Local focused markdown tests, full frontend tests, and production
+  build pass. Deployed to `178.250.159.250`, rebuilt production web, verified
+  health/container status, and confirmed the built production bundle contains
+  `gc-md-paragraph-spacer` with `height: 1.62em`.
 - [x] Increase visible spacing after the Gate Challenger verdict line: the
   previous paragraph split reached production but still looked nearly identical
   because the default paragraph margin was too small. Standalone

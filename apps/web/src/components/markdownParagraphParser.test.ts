@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { markdownParagraphClassName, parseMarkdownParagraphLines } from "./markdownParagraphParser";
+import {
+  markdownParagraphClassName,
+  parseMarkdownParagraphLines,
+  shouldInsertParagraphSpacerAfter,
+} from "./markdownParagraphParser";
 
 describe("parseMarkdownParagraphLines", () => {
   it("separates Gate Challenger verdict lines from following section text", () => {
@@ -44,5 +48,14 @@ describe("parseMarkdownParagraphLines", () => {
     expect(markdownParagraphClassName(["**Decision Context:** We are facing a structural decline."])).toBe(
       "gc-md-paragraph",
     );
+  });
+
+  it("inserts an explicit spacer after standalone Gate Challenger verdict paragraphs", () => {
+    expect(
+      shouldInsertParagraphSpacerAfter([
+        "**Recommendation: Reject progress review and request comprehensive rework (Rework Required)**",
+      ]),
+    ).toBe(true);
+    expect(shouldInsertParagraphSpacerAfter(["**Decision Context:**"])).toBe(false);
   });
 });
