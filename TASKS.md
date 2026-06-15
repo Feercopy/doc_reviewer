@@ -21,6 +21,15 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Increase visible spacing after the Gate Challenger verdict line: the
+  previous paragraph split reached production but still looked nearly identical
+  because the default paragraph margin was too small. Standalone
+  `Recommendation:` verdict paragraphs now receive a dedicated lead-label
+  class with a larger bottom margin. Local focused markdown tests, full
+  frontend tests, and production build pass. Deployed to `178.250.159.250`,
+  rebuilt production web, verified health/login/container status, and confirmed
+  the built production bundle contains `gc-md-paragraph--lead-label` with
+  `margin-bottom: 28px`.
 - [x] Add visual separation between Gate Challenger verdict and following
   narrative text: markdown paragraph parsing now treats section-label lines
   such as `Decision Context:` as a new paragraph instead of joining them into

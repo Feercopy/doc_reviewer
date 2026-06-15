@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseMarkdownParagraphLines } from "./markdownParagraphParser";
+import { markdownParagraphClassName, parseMarkdownParagraphLines } from "./markdownParagraphParser";
 
 describe("parseMarkdownParagraphLines", () => {
   it("separates Gate Challenger verdict lines from following section text", () => {
@@ -33,5 +33,16 @@ describe("parseMarkdownParagraphLines", () => {
       lines: ["The model depends on optimistic assumptions", "that are contradicted by current facts."],
       nextIndex: 2,
     });
+  });
+
+  it("marks standalone Gate Challenger verdict paragraphs for extra visual separation", () => {
+    expect(
+      markdownParagraphClassName([
+        "**Recommendation: Reject progress review and request comprehensive rework (Rework Required)**",
+      ]),
+    ).toBe("gc-md-paragraph gc-md-paragraph--lead-label");
+    expect(markdownParagraphClassName(["**Decision Context:** We are facing a structural decline."])).toBe(
+      "gc-md-paragraph",
+    );
   });
 });

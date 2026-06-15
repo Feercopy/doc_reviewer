@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 
 import { isOrderedListMarker, parseLooseOrderedList, type LooseOrderedListBlock } from "./markdownListParser";
-import { parseMarkdownParagraphLines } from "./markdownParagraphParser";
+import { markdownParagraphClassName, parseMarkdownParagraphLines } from "./markdownParagraphParser";
 
 type MarkdownPreviewProps = {
   markdown: string;
@@ -113,7 +113,7 @@ export function MarkdownPreview({ markdown, className = "" }: MarkdownPreviewPro
     const paragraph = parseMarkdownParagraphLines(lines, index, isMarkdownBlockStart);
     index = paragraph.nextIndex;
     blocks.push(
-      <p className="gc-md-paragraph" key={`paragraph-${index}`}>
+      <p className={markdownParagraphClassName(paragraph.lines)} key={`paragraph-${index}`}>
         {renderInlineMarkdown(paragraph.lines.join(" "))}
       </p>,
     );
@@ -361,6 +361,10 @@ const markdownPreviewStyles = `
 .gc-md-paragraph {
   margin: 0 0 14px;
   overflow-wrap: anywhere;
+}
+
+.gc-md-paragraph--lead-label {
+  margin-bottom: 28px;
 }
 
 .gc-md-list {
