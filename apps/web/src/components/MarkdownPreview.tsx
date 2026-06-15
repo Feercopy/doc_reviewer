@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 
 import { isOrderedListMarker, parseLooseOrderedList, type LooseOrderedListBlock } from "./markdownListParser";
+import { parseMarkdownParagraphLines } from "./markdownParagraphParser";
 
 type MarkdownPreviewProps = {
   markdown: string;
@@ -109,15 +110,11 @@ export function MarkdownPreview({ markdown, className = "" }: MarkdownPreviewPro
       continue;
     }
 
-    const paragraphLines: string[] = [trimmed];
-    index += 1;
-    while (index < lines.length && lines[index].trim() && !isMarkdownBlockStart(lines, index)) {
-      paragraphLines.push(lines[index].trim());
-      index += 1;
-    }
+    const paragraph = parseMarkdownParagraphLines(lines, index, isMarkdownBlockStart);
+    index = paragraph.nextIndex;
     blocks.push(
       <p className="gc-md-paragraph" key={`paragraph-${index}`}>
-        {renderInlineMarkdown(paragraphLines.join(" "))}
+        {renderInlineMarkdown(paragraph.lines.join(" "))}
       </p>,
     );
   }

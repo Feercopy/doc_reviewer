@@ -21,6 +21,14 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Add visual separation between Gate Challenger verdict and following
+  narrative text: markdown paragraph parsing now treats section-label lines
+  such as `Decision Context:` as a new paragraph instead of joining them into
+  the previous verdict line. Local focused markdown tests, full frontend tests,
+  and production build pass. Deployed the updated web to `178.250.159.250` and
+  verified server-side API health, `/login`, and container status. Local web
+  container rebuild remains blocked because the Docker daemon is not running
+  after the earlier Colima image checksum mismatch.
 - [x] Fix Gate Challenger markdown display bug where a bold standalone section
   label after a loose ordered list was rendered as part of the previous list,
   causing the following improvement items to keep numbering as 6/7/... instead
