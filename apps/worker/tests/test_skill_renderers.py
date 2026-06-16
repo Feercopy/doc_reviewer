@@ -592,6 +592,9 @@ def test_devils_advocate_renderer_uses_source_snapshot_and_retrieval_dossier(tmp
     assert "Expanded retrieval evidence packet:" in prompt
     assert "Snapshot incrementality full case text should now be included" in prompt
     assert "Snapshot missing proof full pattern text should now be included" in prompt
+    assert prompt.count("Snapshot incrementality full case text should now be included") == 1
+    assert prompt.count("Snapshot missing proof full pattern text should now be included") == 1
+    assert "expanded_retrieval_evidence_packet" in prompt
     assert "corpus-fingerprint" in prompt
     assert "Needs incrementality evidence" in prompt
     assert "Fallback DA prompt should not be used" not in prompt

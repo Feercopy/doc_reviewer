@@ -21,6 +21,15 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Reduce Devil's Advocate prompt size without dropping retrieval evidence:
+  renderer no longer sends the expanded retrieval `evidence_packet` twice.
+  The retrieval dossier block now contains compact selection/trace metadata and
+  marks the full packet as included in the separate expanded evidence section,
+  while selected item excerpts and full retrieved evidence remain available to
+  the model. Verified focused DA renderer/job tests and the full worker test
+  suite. Deployed to `178.250.159.250`, rebuilt production worker, verified
+  container status, API health, `/login`, worker logs, and confirmed the
+  production worker imports the compact retrieval helper.
 - [x] Implement resilient Document comments anchoring: frontend anchor matching
   now falls back from exact/case-insensitive search to whitespace-normalized,
   punctuation-normalized, and high-confidence token-window matching while

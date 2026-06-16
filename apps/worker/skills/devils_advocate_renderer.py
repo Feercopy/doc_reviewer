@@ -225,7 +225,34 @@ def _source_lines(skill: Any, *, source_snapshot: SkillSourceSnapshotMaterial | 
 def _retrieval_dossier_text(retrieval_snapshot: RetrievalSnapshotMaterial | None) -> str:
     if retrieval_snapshot is None:
         return "No retrieval dossier was attached."
-    return json.dumps(retrieval_snapshot.dossier, ensure_ascii=False, sort_keys=True)
+    return json.dumps(_compact_retrieval_dossier(retrieval_snapshot.dossier), ensure_ascii=False, sort_keys=True)
+
+
+def _compact_retrieval_dossier(dossier: dict[str, Any]) -> dict[str, Any]:
+    compact = {
+        key: dossier[key]
+        for key in (
+            "retrieval_mode",
+            "retrieval_version",
+            "corpus_fingerprint",
+            "query_fingerprint",
+            "selected_paths",
+            "selected_items",
+            "retrieval_rationale",
+        )
+        if key in dossier
+    }
+    evidence_packet = dossier.get("evidence_packet") or {}
+    if isinstance(evidence_packet, dict):
+        sections = evidence_packet.get("sections") or []
+        compact["evidence_packet"] = {
+            "packet_version": evidence_packet.get("packet_version"),
+            "section_count": len(sections) if isinstance(sections, list) else 0,
+            "section_char_limit": evidence_packet.get("section_char_limit"),
+            "packet_char_limit": evidence_packet.get("packet_char_limit"),
+            "included_as": "expanded_retrieval_evidence_packet",
+        }
+    return compact
 
 
 def _retrieval_evidence_packet_text(retrieval_snapshot: RetrievalSnapshotMaterial | None) -> str:
