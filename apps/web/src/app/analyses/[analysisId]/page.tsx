@@ -8,6 +8,7 @@ import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
   createAnalysisDetails,
+  deleteAnalysis,
   getAnalysis,
   getDocument,
   getParsedText,
@@ -79,6 +80,7 @@ export default function AnalysisDetailPage() {
   const [runDetailsOpen, setRunDetailsOpen] = useState(false);
   const [isRefreshingAnalysis, setIsRefreshingAnalysis] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [isDeletingAnalysis, setIsDeletingAnalysis] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -216,6 +218,25 @@ export default function AnalysisDetailPage() {
     }
   }
 
+  async function deleteCurrentAnalysis() {
+    if (!analysis) {
+      return;
+    }
+    if (!window.confirm(`Delete analysis for "${analysisDocument?.title || "this document"}"?`)) {
+      return;
+    }
+
+    setIsDeletingAnalysis(true);
+    setError("");
+    try {
+      await deleteAnalysis(analysis.id);
+      window.location.href = `/documents/${analysis.document_id}`;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete analysis");
+      setIsDeletingAnalysis(false);
+    }
+  }
+
   function chooseFeedbackRating(rating: FeedbackRating) {
     setFeedbackRating(rating);
     setUsefulness(usefulnessForFeedbackRating(rating));
@@ -265,9 +286,19 @@ export default function AnalysisDetailPage() {
                     <h1>{analysisDocument?.title ? `Analysis: ${analysisDocument.title}` : "Analysis"}</h1>
                     <p className="analysis-hero__date">{formatDate(analysis.created_at)}</p>
                   </div>
-                  <button className="analysis-secondary-action analysis-run-details-action" type="button" onClick={() => setRunDetailsOpen(true)}>
-                    Run details
-                  </button>
+                  <div className="analysis-hero__actions">
+                    <button className="analysis-secondary-action analysis-run-details-action" type="button" onClick={() => setRunDetailsOpen(true)}>
+                      Run details
+                    </button>
+                    <button
+                      className="analysis-danger-action"
+                      disabled={isDeletingAnalysis}
+                      type="button"
+                      onClick={deleteCurrentAnalysis}
+                    >
+                      {isDeletingAnalysis ? "Deleting" : "Delete"}
+                    </button>
+                  </div>
                 </div>
                 <div className="analysis-chip-row">
                   <span className={`analysis-verdict analysis-verdict--${toneForValue(analysis.verdict)}`}>
@@ -1566,6 +1597,13 @@ const analysisStyles = `
   white-space: nowrap;
 }
 
+.analysis-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .analysis-run-details-action {
   border-color: rgba(148, 163, 184, 0.22);
   background: rgba(15, 23, 42, 0.52);
@@ -1577,6 +1615,23 @@ const analysisStyles = `
   border-color: rgba(148, 163, 184, 0.36);
   background: rgba(30, 41, 59, 0.72);
   color: #cbd5e1;
+}
+
+.analysis-danger-action {
+  min-height: 44px;
+  border-radius: 8px;
+  border-color: rgba(248, 113, 113, 0.34) !important;
+  background: rgba(127, 29, 29, 0.42) !important;
+  color: #fecaca !important;
+  box-shadow: none !important;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.analysis-danger-action:hover:not(:disabled) {
+  border-color: rgba(248, 113, 113, 0.58) !important;
+  background: rgba(153, 27, 27, 0.6) !important;
 }
 
 .analysis-workbench button:focus-visible,
@@ -2599,6 +2654,10 @@ const analysisStyles = `
     flex-direction: column;
   }
 
+  .analysis-hero__actions {
+    justify-content: flex-start;
+  }
+
   .analysis-run-details-action {
     align-self: flex-start;
     min-height: 44px;
@@ -2674,6 +2733,18 @@ const paperAnalysisOverrides = `
   border-color: #0e9f6e !important;
   background: #eaf8f2 !important;
   color: #075e45 !important;
+}
+
+.analysis-danger-action {
+  border-color: #f2d7d9 !important;
+  background: #ffffff !important;
+  color: #a5122a !important;
+}
+
+.analysis-danger-action:hover:not(:disabled) {
+  border-color: #c92036 !important;
+  background: #fcecee !important;
+  color: #8f1024 !important;
 }
 
 .analysis-workbench button:focus-visible,

@@ -39,6 +39,7 @@ class Analysis(Base):
     estimated_cost: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     run_parameters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class PredictedCommentRun(Base):

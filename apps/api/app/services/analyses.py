@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.authz.policies import can_read_analysis
 from app.core.config import default_skill_source_snapshot_mode, get_settings
+from app.models.base import utc_now
 from app.models.analysis import Analysis, AnalysisDetailRun, PredictedCommentRun
 from app.models.document import Document
 from app.models.skill import Skill
@@ -158,15 +159,36 @@ def _attach_source_snapshot(
 
 def get_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) -> Analysis:
     analysis = db.get(Analysis, analysis_id)
-    if analysis is None or not can_read_analysis(actor, analysis):
+    if analysis is None or analysis.deleted_at is not None or not can_read_analysis(actor, analysis):
         raise AnalysisNotFoundError("Analysis not found")
     return analysis
 
 
 def list_document_analyses_for_actor(*, db: Session, actor: User, document_id: UUID) -> list[Analysis]:
     document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
-    statement = select(Analysis).where(Analysis.document_id == document.id).order_by(Analysis.created_at.desc())
+    statement = (
+        select(Analysis)
+        .where(Analysis.document_id == document.id, Analysis.deleted_at.is_(None))
+        .order_by(Analysis.created_at.desc())
+    )
     return list(db.execute(statement).scalars().all())
+
+
+def delete_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) -> None:
+    analysis = get_analysis_for_actor(db=db, actor=actor, analysis_id=analysis_id)
+    analysis.deleted_at = utc_now()
+    record_audit(
+        db=db,
+        actor_id=actor.id,
+        action="analysis.deleted",
+        entity_type="analysis",
+        entity_id=analysis.id,
+        metadata={
+            "document_id": str(analysis.document_id),
+            "previous_status": analysis.status,
+        },
+    )
+    db.commit()
 
 
 def read_analysis(*, db: Session, actor: User, analysis: Analysis) -> AnalysisRead:

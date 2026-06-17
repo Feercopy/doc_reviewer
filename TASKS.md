@@ -21,6 +21,14 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Add analysis deletion: implemented soft-delete for analysis runs via
+  `deleted_at`, `DELETE /analyses/{analysis_id}` with owner/admin access,
+  hidden deleted runs from user/admin analysis reads and lists, blocked
+  feedback on deleted analyses, and added a guarded Delete action on the
+  analysis result page that returns to the source document. Verified full API
+  tests, full worker tests, full frontend unit tests, production web build,
+  Compose config, local web/API container rebuild, Alembic upgrade to
+  `202606170001`, local container status, API `/health`, and web `/login`.
 - [x] Fix production document-detail workflow card height mismatch: root cause
   is the document-detail stepper using flex cross-axis centering, so shorter
   status cards such as `Ready` keep their content-height while neighboring

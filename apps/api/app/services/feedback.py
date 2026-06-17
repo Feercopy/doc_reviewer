@@ -22,7 +22,7 @@ class FeedbackForbiddenError(ValueError):
 
 def create_feedback(*, db: Session, actor: User, analysis_id: UUID, payload: FeedbackCreate) -> Feedback:
     analysis = db.get(Analysis, analysis_id)
-    if analysis is None or not can_read_analysis(actor, analysis):
+    if analysis is None or analysis.deleted_at is not None or not can_read_analysis(actor, analysis):
         raise FeedbackNotFoundError("Analysis not found")
 
     feedback = Feedback(

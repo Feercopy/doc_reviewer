@@ -396,6 +396,39 @@ def test_analysis_detail_hides_raw_output_from_non_admin(client, db_session):
     assert response.json()["raw_output"] is None
 
 
+def test_delete_analysis_hides_owned_analysis_from_detail_and_document_list(client, db_session):
+    user = create_user(db_session, "author", "secret")
+    skill = seed_baseline_skills(db_session)[0]
+    document_id = _create_completed_document(client, db_session, user)
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=user.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="need_evidence",
+        summary="Needs evidence",
+        structured_output={"verdict": "need_evidence", "summary": "Needs evidence", "findings": [], "checks": []},
+        raw_output="raw secret output",
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.commit()
+    login(client, "author", "secret")
+
+    response = client.delete(f"/analyses/{analysis.id}")
+
+    assert response.status_code == 204
+    db_session.refresh(analysis)
+    assert analysis.deleted_at is not None
+    assert client.get(f"/analyses/{analysis.id}").status_code == 404
+    list_response = client.get(f"/documents/{document_id}/analyses")
+    assert list_response.status_code == 200
+    assert list_response.json()["analyses"] == []
+
+
 def test_analysis_detail_includes_predicted_comment_run_without_raw_for_non_admin(client, db_session):
     user = create_user(db_session, "author", "secret")
     skills = seed_baseline_skills(db_session)

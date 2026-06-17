@@ -212,6 +212,10 @@ export async function createAnalysisDetails(analysisId: string): Promise<Analysi
   return apiFetch<AnalysisDetailRunRecord>(`/analyses/${analysisId}/details`, { method: "POST" });
 }
 
+export async function deleteAnalysis(analysisId: string): Promise<void> {
+  return apiFetchNoContent(`/analyses/${analysisId}`, { method: "DELETE" });
+}
+
 export async function getAnalysis(analysisId: string): Promise<AnalysisRecord> {
   return apiFetch<AnalysisRecord>(`/analyses/${analysisId}`);
 }

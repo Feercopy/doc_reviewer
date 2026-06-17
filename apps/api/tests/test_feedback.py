@@ -32,6 +32,29 @@ def test_user_can_submit_feedback_for_accessible_analysis(client, db_session):
     assert db_session.query(Feedback).one().comment == "Missed one risk."
 
 
+def test_user_cannot_submit_feedback_for_deleted_analysis(client, db_session):
+    user = create_user(db_session, "author", "secret")
+    analysis = _create_completed_analysis(client, db_session, user)
+    login(client, "author", "secret")
+    delete_response = client.delete(f"/analyses/{analysis.id}")
+
+    response = client.post(
+        f"/analyses/{analysis.id}/feedback",
+        json={
+            "usefulness": "useful",
+            "verdict_correct": True,
+            "has_false_findings": False,
+            "has_missed_findings": False,
+            "comment": "Should be hidden.",
+            "can_use_for_benchmark": False,
+        },
+    )
+
+    assert delete_response.status_code == 204
+    assert response.status_code == 404
+    assert db_session.query(Feedback).count() == 0
+
+
 def test_admin_can_list_feedback_and_mark_processed(client, db_session):
     admin = create_user(db_session, "admin", "secret", Role.ADMIN)
     user = create_user(db_session, "author", "secret")

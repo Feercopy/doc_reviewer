@@ -4,6 +4,7 @@ import {
   USER_SELECTABLE_DOCUMENT_TYPES,
   createAnalysis,
   createAnalysisDetails,
+  deleteAnalysis,
   deleteDocument,
   getParsedText,
   patchDocumentTitle,
@@ -101,6 +102,18 @@ describe("documents api", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/documents/doc-id",
+      expect.objectContaining({ method: "DELETE", credentials: "include" }),
+    );
+  });
+
+  it("deletes analyses without parsing a response body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    global.fetch = fetchMock;
+
+    await deleteAnalysis("analysis-id");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/analyses/analysis-id",
       expect.objectContaining({ method: "DELETE", credentials: "include" }),
     );
   });

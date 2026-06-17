@@ -114,6 +114,31 @@ def test_admin_analyses_support_filters_and_expose_raw_output(client, db_session
     assert payload["analyses"][0]["user_login"] == "analyst"
 
 
+def test_admin_analyses_hide_deleted_runs(client, db_session):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    user = create_user(db_session, "analyst", "secret")
+    skills = seed_baseline_skills(db_session)
+    document = _document_for_user(client, db_session, user, "gate.txt", DocumentType.GATE_2)
+    analysis = _analysis(
+        db_session,
+        document=document,
+        user_id=user.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+    )
+
+    login(client, admin.login, "secret")
+    delete_response = client.delete(f"/analyses/{analysis.id}")
+    response = client.get("/admin/analyses")
+
+    assert delete_response.status_code == 204
+    assert response.status_code == 200
+    assert response.json()["analyses"] == []
+
+
 def test_admin_etalons_and_benchmarks_list_all_statuses(client, db_session):
     admin = create_user(db_session, "admin", "secret", Role.ADMIN)
     user = create_user(db_session, "analyst", "secret")

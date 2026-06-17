@@ -30,6 +30,7 @@ def list_admin_analyses(
         .join(Document, Document.id == Analysis.document_id)
         .join(User, User.id == Analysis.user_id)
         .join(Skill, Skill.id == Analysis.skill_id)
+        .where(Analysis.deleted_at.is_(None))
     )
     if provider is not None:
         statement = statement.where(Analysis.provider == provider.value)
@@ -56,7 +57,7 @@ def get_admin_analysis(
         .join(Document, Document.id == Analysis.document_id)
         .join(User, User.id == Analysis.user_id)
         .join(Skill, Skill.id == Analysis.skill_id)
-        .where(Analysis.id == analysis_id)
+        .where(Analysis.id == analysis_id, Analysis.deleted_at.is_(None))
     ).one_or_none()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found")
