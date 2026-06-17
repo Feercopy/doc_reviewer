@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { archiveEtalon, createEtalonDraft, importPastDefense, publishEtalon, updateEtalon } from "./etalons";
+import {
+  archiveEtalon,
+  createEtalonDraft,
+  importGate2Benchmark,
+  importPastDefense,
+  publishEtalon,
+  updateEtalon,
+} from "./etalons";
 
 const originalFetch = global.fetch;
 
@@ -35,6 +42,24 @@ describe("etalons api", () => {
       expect.objectContaining({ method: "POST", body: form }),
     );
     expect(fetchMock.mock.calls[0][1].headers).toBeUndefined();
+  });
+
+  it("imports Gate2 benchmark etalons from a configured folder", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ imported_count: 1, skipped_count: 0, etalons: [] }),
+    });
+    global.fetch = fetchMock;
+
+    await importGate2Benchmark({ benchmark_dir: "/external/Gate2-challenger/benchmark", activate: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/etalons/import/gate2-benchmark",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ benchmark_dir: "/external/Gate2-challenger/benchmark", activate: true }),
+      }),
+    );
   });
 
   it("patches and changes lifecycle state", async () => {

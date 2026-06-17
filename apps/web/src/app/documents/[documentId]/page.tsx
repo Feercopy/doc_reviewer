@@ -1352,6 +1352,12 @@ const documentDetailStyles = `
   min-height: 88px;
 }
 
+@media (max-width: 1440px) {
+  .document-detail .gc-detail-columns {
+    grid-template-columns: minmax(0, 1fr) minmax(600px, 1fr);
+  }
+}
+
 @media (max-width: 1280px) {
   .document-detail .gc-document-hero {
     flex-direction: column;

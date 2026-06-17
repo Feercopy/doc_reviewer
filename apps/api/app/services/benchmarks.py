@@ -5,11 +5,12 @@ from sqlalchemy.orm import Session
 
 from app.authz.policies import can_manage_benchmarks
 from app.models.benchmark import Benchmark
+from app.models.document import Document
 from app.models.etalon import Etalon
 from app.models.skill import Skill
 from app.models.user import User
 from app.schemas.benchmarks import BenchmarkCreate
-from app.schemas.enums import EntityStatus, EtalonStatus, Provider, RunStatus, SkillType
+from app.schemas.enums import DocumentParseStatus, EntityStatus, EtalonStatus, Provider, RunStatus, SkillType
 from app.schemas.provider_settings import normalize_available_models
 from app.services.provider_keys import get_shared_provider_key
 from app.services.skills import skill_source_snapshot
@@ -59,6 +60,7 @@ def create_benchmark(*, db: Session, actor: User, payload: BenchmarkCreate) -> B
     run_parameters["evaluation_mode"] = payload.evaluation_mode
     run_parameters["skill_source_snapshot"] = skill_source_snapshot(skill)
     run_parameters["judge_skill_source_snapshot"] = skill_source_snapshot(judge_skill)
+    run_parameters["etalon_snapshots"] = _build_etalon_snapshots(db=db, etalons=etalons)
 
     benchmark = Benchmark(
         name=payload.name,
@@ -109,8 +111,32 @@ def _resolve_active_etalons(*, db: Session, etalon_ids: list[UUID]) -> list[Etal
         etalon = db.get(Etalon, etalon_id)
         if etalon is None or etalon.status != EtalonStatus.ACTIVE.value:
             raise BenchmarkPreconditionError("Benchmarks can only run over active etalons")
+        document = db.get(Document, etalon.document_id)
+        if document is None or document.parse_status != DocumentParseStatus.COMPLETED.value or not document.parsed_text:
+            raise BenchmarkPreconditionError("Benchmark etalon original document must be parsed before benchmark run")
         etalons.append(etalon)
     return etalons
+
+
+def _build_etalon_snapshots(*, db: Session, etalons: list[Etalon]) -> dict[str, dict]:
+    snapshots = {}
+    for etalon in etalons:
+        document = db.get(Document, etalon.document_id)
+        snapshots[str(etalon.id)] = {
+            "etalon_id": str(etalon.id),
+            "etalon_version": etalon.version,
+            "document_id": str(etalon.document_id),
+            "document_hash_sha256": document.file_hash_sha256 if document else None,
+            "original_filename": document.original_filename if document else None,
+            "source": etalon.source,
+            "source_metadata": etalon.source_metadata or {},
+            "expected_output": {
+                "verdict": etalon.expected_verdict,
+                "layer_1": etalon.layer_1,
+                "layer_2": etalon.layer_2,
+            },
+        }
+    return snapshots
 
 
 def _resolve_skill(*, db: Session, skill_id: UUID, skill_type: SkillType) -> Skill:

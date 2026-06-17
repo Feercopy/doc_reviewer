@@ -96,6 +96,7 @@ class EtalonSource(StrEnum):
     MANUAL = "manual"
     AI_POST_ANNOTATION = "ai_post_annotation"
     IMPORTED_DEFENSE = "imported_defense"
+    GATE2_BENCHMARK = "gate2_benchmark"
 
 
 class EtalonStatus(StrEnum):

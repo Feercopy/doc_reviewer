@@ -43,6 +43,10 @@ class Settings(BaseSettings):
         default="/external/gate-challenger",
         alias="GATE_CHALLENGER_SOURCE_PATH",
     )
+    gate2_benchmark_dir: Path = Field(
+        default=Path("/external/gate-challenger/benchmark"),
+        alias="GATE2_BENCHMARK_DIR",
+    )
     devils_advocate_source_path: str = Field(
         default="/external/devils-advocate",
         alias="DEVILS_ADVOCATE_SOURCE_PATH",

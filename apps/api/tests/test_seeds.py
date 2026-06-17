@@ -1,7 +1,10 @@
+import hashlib
+
 from app.models.user import User
 from app.models.skill_source import SkillSource
 from app.schemas.enums import DocumentType, Role, UserStatus
 from app.seeds.admin import ensure_admin_user
+from app.seeds import skills as skill_seeds
 from app.seeds.skills import seed_baseline_skills
 from app.security.passwords import verify_password
 
@@ -63,3 +66,19 @@ def test_seed_baseline_skills_creates_external_source_registry(db_session):
     assert devils_skill.skill_source_id == sources["devils-advocate"].id
     assert sources["gate-challenger"].entrypoint == "skills/gate-challenger/SKILL.md"
     assert "wiki-ic/cases" in sources["devils-advocate"].required_paths
+
+
+def test_seeded_benchmark_judge_uses_gate2_v2_prompt_when_available(db_session, tmp_path, monkeypatch):
+    benchmark_dir = tmp_path / "benchmark"
+    benchmark_dir.mkdir()
+    prompt_path = benchmark_dir / "LLM-as-a-judge для оценки v2.txt"
+    prompt_text = "Ты — строгий LLM-as-a-judge v2."
+    prompt_path.write_text(prompt_text, encoding="utf-8")
+    monkeypatch.setattr(skill_seeds, "GATE2_BENCHMARK_DIR", benchmark_dir, raising=False)
+
+    skills = seed_baseline_skills(db_session)
+
+    judge = next(skill for skill in skills if skill.name == "benchmark_judge")
+    assert judge.prompt_text == prompt_text
+    assert judge.source_metadata["prompt_source_path"] == str(prompt_path)
+    assert judge.source_metadata["prompt_sha256"] == hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()

@@ -18,6 +18,7 @@ from app.security.secrets import decrypt_secret
 from app.services.provider_keys import get_shared_provider_key
 from app.services.audit import record_audit
 from benchmark.judge_prompt import build_judge_prompt
+from benchmark.layer_outputs import extract_benchmark_layers
 from benchmark.report_builder import build_benchmark_report
 from benchmark.scoring import score_judge_output
 from providers.base import ProviderRunRequest
@@ -149,12 +150,8 @@ def _run_one_etalon(*, session: Session, benchmark: Benchmark, etalon_id: UUID, 
             schema_path=main_skill.result_schema_path,
             run_parameters=benchmark.run_parameters,
         )
-        expected_output = {
-            "verdict": etalon.expected_verdict,
-            "layer_1": etalon.layer_1,
-            "layer_2": etalon.layer_2,
-            "key_findings": etalon.key_findings,
-        }
+        actual_layer_output = extract_benchmark_layers(actual_output)
+        expected_output = _expected_output_for_etalon(benchmark=benchmark, etalon=etalon)
         judge_run_parameters = dict(benchmark.run_parameters)
         if "judge_mock_provider_result" in benchmark.run_parameters:
             judge_run_parameters["mock_provider_result"] = benchmark.run_parameters["judge_mock_provider_result"]
@@ -164,18 +161,19 @@ def _run_one_etalon(*, session: Session, benchmark: Benchmark, etalon_id: UUID, 
             skill=judge_skill,
             prompt=build_judge_prompt(
                 etalon=expected_output,
-                actual=actual_output,
+                actual=actual_layer_output,
                 judge_prompt=judge_skill.prompt_text,
             ),
             schema_path=judge_skill.result_schema_path,
             run_parameters=judge_run_parameters,
         )
-        scores = score_judge_output(expected=expected_output, actual=actual_output, judge_output=judge_output)
+        scores = score_judge_output(expected=expected_output, actual=actual_layer_output, judge_output=judge_output)
         return {
             "etalon_id": str(etalon.id),
             "document_id": str(document.id),
             "status": "completed",
-            "actual_output": actual_output,
+            "expected_output": expected_output,
+            "actual_output": actual_layer_output,
             "judge_output": judge_output,
             "scores": scores,
         }
@@ -219,6 +217,21 @@ def _load_schema(schema_path: str) -> dict:
     return json.loads((Path(__file__).resolve().parents[3] / schema_path).read_text(encoding="utf-8"))
 
 
+def _expected_output_for_etalon(*, benchmark: Benchmark, etalon: Etalon) -> dict:
+    snapshots = benchmark.run_parameters.get("etalon_snapshots") if isinstance(benchmark.run_parameters, dict) else None
+    if isinstance(snapshots, dict):
+        snapshot = snapshots.get(str(etalon.id))
+        if isinstance(snapshot, dict) and isinstance(snapshot.get("expected_output"), dict):
+            return extract_benchmark_layers(snapshot["expected_output"])
+    return extract_benchmark_layers(
+        {
+            "verdict": etalon.expected_verdict,
+            "layer_1": etalon.layer_1,
+            "layer_2": etalon.layer_2,
+        }
+    )
+
+
 def _aggregate_results(document_results: list[dict]) -> dict:
     completed = [item for item in document_results if item.get("status") == "completed"]
     if not completed:
@@ -233,22 +246,36 @@ def _aggregate_results(document_results: list[dict]) -> dict:
             "false_positives": [],
             "partial_matches": [],
         }
-    layer_1_f1 = sum(item["scores"]["layer_1"]["f1"] for item in completed) / len(completed)
-    layer_2_f1 = sum(item["scores"]["layer_2"]["f1"] for item in completed) / len(completed)
-    precision = sum(item["scores"]["precision"] for item in completed) / len(completed)
-    recall = sum(item["scores"]["recall"] for item in completed) / len(completed)
-    f1 = sum(item["scores"]["f1"] for item in completed) / len(completed)
+    if _has_v2_score_totals(completed):
+        layer_1_metrics = _aggregate_v2_layer_scores(completed, "layer_1")
+        layer_2_metrics = _aggregate_v2_layer_scores(completed, "layer_2")
+        overall_metrics = _aggregate_v2_overall_scores(completed)
+        layer_1_f1 = layer_1_metrics["f1"]
+        layer_2_f1 = layer_2_metrics["f1"]
+        precision = overall_metrics["precision"]
+        recall = overall_metrics["recall"]
+        f1 = overall_metrics["f1"]
+    else:
+        layer_1_f1 = sum(item["scores"]["layer_1"]["f1"] for item in completed) / len(completed)
+        layer_2_f1 = sum(item["scores"]["layer_2"]["f1"] for item in completed) / len(completed)
+        precision = sum(item["scores"]["precision"] for item in completed) / len(completed)
+        recall = sum(item["scores"]["recall"] for item in completed) / len(completed)
+        f1 = sum(item["scores"]["f1"] for item in completed) / len(completed)
     missed = []
     false_positives = []
     partial = []
     for item in completed:
         judge = item["judge_output"]
-        missed.extend(judge["layer_1"]["missed_findings"])
-        missed.extend(judge["layer_2"]["missed_findings"])
-        false_positives.extend(judge["layer_1"]["false_positives"])
-        false_positives.extend(judge["layer_2"]["false_positives"])
-        partial.extend(judge["layer_1"]["partial_matches"])
-        partial.extend(judge["layer_2"]["partial_matches"])
+        for layer_name in ("layer_1", "layer_2"):
+            layer_judge = judge.get(layer_name, {})
+            missed.extend(layer_judge.get("missed_issues", layer_judge.get("missed_findings", [])))
+            false_positives.extend(layer_judge.get("false_positives", []))
+            if "matched" in layer_judge:
+                partial.extend(
+                    match for match in layer_judge.get("matched", []) if 0 < _match_score(match) < 1
+                )
+            else:
+                partial.extend(layer_judge.get("partial_matches", []))
     return {
         "layer_1": {"f1": layer_1_f1},
         "layer_2": {"f1": layer_2_f1},
@@ -259,3 +286,48 @@ def _aggregate_results(document_results: list[dict]) -> dict:
         "false_positives": false_positives,
         "partial_matches": partial,
     }
+
+
+def _has_v2_score_totals(document_results: list[dict]) -> bool:
+    return all(
+        {"score_sum_total", "n_ref_total", "n_pred_total"} <= set((item.get("scores") or {}).keys())
+        for item in document_results
+    )
+
+
+def _aggregate_v2_layer_scores(document_results: list[dict], layer_name: str) -> dict:
+    score_sum = sum(_number((item["scores"].get(layer_name) or {}).get("score_sum")) for item in document_results)
+    n_ref = sum(int(_number((item["scores"].get(layer_name) or {}).get("n_ref"))) for item in document_results)
+    n_pred = sum(int(_number((item["scores"].get(layer_name) or {}).get("n_pred"))) for item in document_results)
+    return _metrics_from_counts(score_sum=score_sum, n_ref=n_ref, n_pred=n_pred)
+
+
+def _aggregate_v2_overall_scores(document_results: list[dict]) -> dict:
+    score_sum = sum(_number(item["scores"].get("score_sum_total")) for item in document_results)
+    n_ref = sum(int(_number(item["scores"].get("n_ref_total"))) for item in document_results)
+    n_pred = sum(int(_number(item["scores"].get("n_pred_total"))) for item in document_results)
+    return _metrics_from_counts(score_sum=score_sum, n_ref=n_ref, n_pred=n_pred)
+
+
+def _metrics_from_counts(*, score_sum: float, n_ref: int, n_pred: int) -> dict:
+    precision = score_sum / n_pred if n_pred else 0
+    recall = score_sum / n_ref if n_ref else 0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0
+    return {"precision": precision, "recall": recall, "f1": f1}
+
+
+def _match_score(match: dict) -> float:
+    return _number(match.get("score"))
+
+
+def _number(value: object) -> float:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip().rstrip("%"))
+        except ValueError:
+            return 0
+    return 0

@@ -15,7 +15,7 @@ def parse_file(path: Path | str) -> str:
 
     if extension in {".txt", ".md"}:
         return parse_text(document_path)
-    if extension == ".docx":
+    if extension in {".docx", ".dotx"}:
         return parse_docx(document_path)
     if extension == ".pdf":
         return parse_pdf(document_path)

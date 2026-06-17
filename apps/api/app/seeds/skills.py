@@ -14,9 +14,13 @@ from app.schemas.enums import GATE_CHALLENGER_DOCUMENT_TYPES, DocumentType, Enti
 GATE_CHALLENGER_SOURCE_PATH = Path(
     os.getenv("GATE_CHALLENGER_SOURCE_PATH", "/Users/iseremenko/Projects/Gate2-challenger")
 )
+GATE2_BENCHMARK_DIR = Path(
+    os.getenv("GATE2_BENCHMARK_DIR", str(GATE_CHALLENGER_SOURCE_PATH / "benchmark"))
+)
 DEVILS_ADVOCATE_SOURCE_PATH = Path(
     os.getenv("DEVILS_ADVOCATE_SOURCE_PATH", "/Users/iseremenko/Documents/Common GPTs/devils-advocate")
 )
+BENCHMARK_JUDGE_V2_PROMPT_PATH = "LLM-as-a-judge для оценки v2.txt"
 GATE_CHALLENGER_ENTRYPOINT = "skills/gate-challenger/SKILL.md"
 DEVILS_ADVOCATE_ENTRYPOINT = "ic-voting-prompt.md"
 GATE_CHALLENGER_SKILL_PATH = GATE_CHALLENGER_SOURCE_PATH / GATE_CHALLENGER_ENTRYPOINT
@@ -73,6 +77,19 @@ def _read_prompt(path: Path, fallback: str) -> str:
     return path.read_text() if path.exists() and path.is_file() else fallback
 
 
+def _benchmark_judge_prompt() -> tuple[str, dict]:
+    prompt_path = GATE2_BENCHMARK_DIR / BENCHMARK_JUDGE_V2_PROMPT_PATH
+    fallback = "Compare analysis output with an etalon and calculate precision, recall, and F1."
+    if not prompt_path.exists() or not prompt_path.is_file():
+        return fallback, {"fallback": True}
+    prompt_text = prompt_path.read_text(encoding="utf-8")
+    return prompt_text, {
+        "prompt_source_path": str(prompt_path),
+        "prompt_sha256": hashlib.sha256(prompt_text.encode("utf-8")).hexdigest(),
+        "judge_policy": "gate2_llm_as_judge_v2",
+    }
+
+
 def _upsert_skill(db: Session, values: dict) -> Skill:
     skill = db.execute(
         select(Skill).where(
@@ -106,6 +123,7 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
     gate_challenger_fingerprint = _fingerprint_path(GATE_CHALLENGER_SKILL_PATH)
     devils_fingerprint = _fingerprint_path(DEVILS_ADVOCATE_PATH)
     wiki_fingerprint = _fingerprint_path(DEVILS_ADVOCATE_WIKI_PATH)
+    benchmark_judge_prompt, benchmark_judge_metadata = _benchmark_judge_prompt()
     gate_challenger_document_types = [item.value for item in GATE_CHALLENGER_DOCUMENT_TYPES]
     gate_source = _upsert_skill_source(
         db,
@@ -206,8 +224,8 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "source_entrypoint": None,
             "source_revision": None,
             "source_fingerprint": None,
-            "source_metadata": {},
-            "prompt_text": "Compare analysis output with an etalon and calculate precision, recall, and F1.",
+            "source_metadata": benchmark_judge_metadata,
+            "prompt_text": benchmark_judge_prompt,
             "result_schema_path": "contracts/schemas/benchmark-judge-result.schema.json",
             "runtime_mode": "inline",
             "status": EntityStatus.ACTIVE.value,

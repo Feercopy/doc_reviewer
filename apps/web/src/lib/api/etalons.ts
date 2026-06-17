@@ -39,7 +39,8 @@ export type EtalonRecord = {
   id: string;
   document_id: string;
   author_id: string;
-  source: "manual" | "ai_post_annotation" | "imported_defense";
+  source: "manual" | "ai_post_annotation" | "imported_defense" | "gate2_benchmark";
+  source_metadata: Record<string, unknown>;
   document_type: DocumentType;
   real_defense_status: string | null;
   defense_comments: string | null;
@@ -53,6 +54,18 @@ export type EtalonRecord = {
   raw_file_visible_to_all: boolean;
   created_at: string;
   updated_at: string;
+};
+
+export type Gate2BenchmarkImportRequest = {
+  benchmark_dir?: string | null;
+  activate?: boolean;
+};
+
+export type Gate2BenchmarkImportResponse = {
+  imported_count: number;
+  skipped_count: number;
+  parse_enqueued_count: number;
+  etalons: EtalonRecord[];
 };
 
 export type EtalonUpdatePayload = Partial<{
@@ -84,6 +97,13 @@ export async function createEtalonDraft(analysisId: string): Promise<EtalonRecor
 
 export async function importPastDefense(form: FormData): Promise<EtalonRecord> {
   return apiFetch<EtalonRecord>("/documents/past-defense", { method: "POST", body: form });
+}
+
+export async function importGate2Benchmark(payload: Gate2BenchmarkImportRequest): Promise<Gate2BenchmarkImportResponse> {
+  return apiFetch<Gate2BenchmarkImportResponse>("/etalons/import/gate2-benchmark", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function updateEtalon(etalonId: string, payload: EtalonUpdatePayload): Promise<EtalonRecord> {

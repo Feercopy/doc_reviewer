@@ -27,7 +27,7 @@ from app.schemas.enums import (
 )
 from app.security.passwords import hash_password
 from app.storage.local import LocalDocumentStorage
-from jobs.run_benchmark import run_benchmark
+from jobs.run_benchmark import _aggregate_results, run_benchmark
 
 
 def test_run_benchmark_persists_scores_judge_output_and_report(tmp_path):
@@ -56,9 +56,25 @@ def test_run_benchmark_persists_scores_judge_output_and_report(tmp_path):
                     "latency_ms": 10,
                 },
                 "judge_mock_provider_result": {
-                    "structured_text": '{"layer_1":{"exact_matches":[{"expected_id":"L1-001","actual_id":"A1"}],"partial_matches":[],"missed_findings":[],"false_positives":[]},"layer_2":{"exact_matches":[],"partial_matches":[{"expected_id":"L2-001","actual_id":"A2","explanation":"Similar but incomplete"}],"missed_findings":[],"false_positives":[]},"summary":"Layer 1 matched; Layer 2 partial.","recommendations":["Tighten Layer 2 evidence."]}',
+                    "structured_text": _judge_v2_json(),
                     "raw_output": "raw judge",
                     "latency_ms": 5,
+                },
+                "etalon_snapshots": {
+                    str(etalon.id): {
+                        "expected_output": {
+                            "verdict": "need_evidence",
+                            "layer_1": [{"id": "SNAP-L1", "issue": "Snapshot Layer 1 issue."}],
+                            "layer_2": [
+                                {
+                                    "id": "SNAP-L2",
+                                    "parent_layer_1_id": "SNAP-L1",
+                                    "status": "fail",
+                                    "issue": "Snapshot Layer 2 issue.",
+                                }
+                            ],
+                        }
+                    }
                 },
             },
         )
@@ -68,15 +84,68 @@ def test_run_benchmark_persists_scores_judge_output_and_report(tmp_path):
         run_benchmark(str(benchmark.id), db=db)
 
         db.refresh(benchmark)
-        assert benchmark.status == RunStatus.COMPLETED.value
+        assert benchmark.status == RunStatus.COMPLETED.value, benchmark.error_message
         assert float(benchmark.layer_1_score) == 1
-        assert float(benchmark.layer_2_score) == 0
-        assert float(benchmark.f1) == 0.5
-        assert benchmark.partial_matches[0]["expected_id"] == "L2-001"
-        assert benchmark.judge_output["documents"][0]["etalon_id"] == str(etalon.id)
-        assert benchmark.report["overall"]["f1"] == 0.5
+        assert float(benchmark.layer_2_score) == 0.5
+        assert float(benchmark.f1) == 0.75
+        assert benchmark.partial_matches[0]["ref_id"] == "L2-001"
+        document_result = benchmark.judge_output["documents"][0]
+        assert document_result["etalon_id"] == str(etalon.id)
+        assert set(document_result["expected_output"]) == {"verdict", "layer_1", "layer_2"}
+        assert document_result["expected_output"]["layer_1"][0]["id"] == "SNAP-L1"
+        assert set(document_result["actual_output"]) == {"verdict", "layer_1", "layer_2"}
+        assert "layer_3" not in document_result["actual_output"]
+        assert "summary" not in document_result["actual_output"]
+        assert benchmark.report["overall"]["f1"] == 0.75
     finally:
         _close_session(db)
+
+
+def test_aggregate_results_uses_v2_micro_average_across_documents():
+    aggregate = _aggregate_results(
+        [
+            _completed_document_result(score_sum=1.0, n_ref=1, n_pred=1),
+            _completed_document_result(score_sum=1.0, n_ref=3, n_pred=3),
+        ]
+    )
+
+    assert aggregate["precision"] == 0.5
+    assert aggregate["recall"] == 0.5
+    assert aggregate["f1"] == 0.5
+    assert aggregate["layer_1"]["f1"] == 0.5
+
+
+def _completed_document_result(*, score_sum: float, n_ref: int, n_pred: int) -> dict:
+    precision = score_sum / n_pred if n_pred else 0
+    recall = score_sum / n_ref if n_ref else 0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0
+    return {
+        "status": "completed",
+        "scores": {
+            "layer_1": {
+                "score_sum": score_sum,
+                "n_ref": n_ref,
+                "n_pred": n_pred,
+                "f1": f1,
+            },
+            "layer_2": {
+                "score_sum": 0,
+                "n_ref": 0,
+                "n_pred": 0,
+                "f1": 0,
+            },
+            "score_sum_total": score_sum,
+            "n_ref_total": n_ref,
+            "n_pred_total": n_pred,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+        },
+        "judge_output": {
+            "layer_1": {"matched": [], "missed_issues": [], "false_positives": []},
+            "layer_2": {"matched": [], "missed_issues": [], "false_positives": []},
+        },
+    }
 
 
 def _main_analysis_json_with_benchmark_ids() -> str:
@@ -109,6 +178,74 @@ def _main_analysis_json_with_benchmark_ids() -> str:
                     "evidence": "No control group or holdout is shown.",
                 }
             ],
+            "layer_3": [{"id": "A3", "risk": "Should not be benchmarked."}],
+        }
+    )
+
+
+def _judge_v2_json() -> str:
+    return json.dumps(
+        {
+            "layer_1": {
+                "n_ref": 1,
+                "n_pred": 1,
+                "score_sum": 1.0,
+                "precision": 100.0,
+                "recall": 100.0,
+                "f1": 100.0,
+                "matched": [
+                    {
+                        "ref_id": "L1-001",
+                        "block": "traction",
+                        "expected": "Weak traction",
+                        "actual": "The document does not prove traction readiness.",
+                        "score": 1.0,
+                        "comment": "Same core blocker.",
+                    }
+                ],
+                "missed_issues": [],
+                "false_positives": [],
+                "duplicates": [],
+                "summary": "Layer 1 matched.",
+            },
+            "layer_2": {
+                "n_ref": 1,
+                "n_pred": 1,
+                "score_sum": 0.5,
+                "precision": 50.0,
+                "recall": 50.0,
+                "f1": 50.0,
+                "matched": [
+                    {
+                        "ref_id": "L2-001",
+                        "block": "metrics",
+                        "expected": "No incrementality",
+                        "actual": "The metric uplift is not separated from baseline effects.",
+                        "score": 0.5,
+                        "comment": "Same theme but incomplete.",
+                    }
+                ],
+                "missed_issues": [],
+                "false_positives": [],
+                "duplicates": [],
+                "summary": "Layer 2 partially matched.",
+            },
+            "overall": {
+                "n_ref_total": 2,
+                "n_pred_total": 2,
+                "score_sum_total": 1.5,
+                "precision": 75.0,
+                "recall": 75.0,
+                "f1": 75.0,
+            },
+            "diagnostics": {
+                "valid_extra_insights_count": 0,
+                "unsupported_or_wrong_false_positives_count": 0,
+                "duplicate_count": 0,
+                "main_reasons": ["Layer 2 is incomplete."],
+                "strengths": ["Layer 1 matched."],
+            },
+            "recommendations": ["Tighten Layer 2 evidence."],
         }
     )
 

@@ -284,6 +284,97 @@ def test_main_analysis_details_schema_accepts_lazy_layer_details_result():
     validate(instance=payload, schema=schema)
 
 
+def test_benchmark_judge_schema_accepts_v2_result():
+    schema = load_schema("benchmark-judge-result.schema.json")
+    payload = {
+        "layer_1": {
+            "n_ref": 1,
+            "n_pred": 1,
+            "score_sum": 1.0,
+            "precision": 100.0,
+            "recall": 100.0,
+            "f1": 100.0,
+            "matched": [
+                {
+                    "ref_id": "L1-001",
+                    "block": "go_to_market",
+                    "expected": "Missing evidence for repeatable acquisition.",
+                    "actual": "The document does not prove repeatable acquisition.",
+                    "score": 1.0,
+                    "comment": "Same decision-critical gap.",
+                    "mapping_note": "Direct semantic match.",
+                }
+            ],
+            "missed_issues": [],
+            "false_positives": [],
+            "duplicates": [],
+            "summary": "Layer 1 matched fully.",
+        },
+        "layer_2": {
+            "n_ref": 2,
+            "n_pred": 2,
+            "score_sum": 1.5,
+            "precision": 75.0,
+            "recall": 75.0,
+            "f1": 75.0,
+            "matched": [
+                {
+                    "ref_id": "L2-001",
+                    "block": "metrics",
+                    "expected": "CR target is planned, not measured.",
+                    "actual": "The funnel target is not proven by measured results.",
+                    "score": 0.5,
+                    "comment": "Partial evidence match.",
+                    "mapping_note": "Same metric, weaker specificity.",
+                }
+            ],
+            "missed_issues": [
+                {
+                    "ref_id": "L2-002",
+                    "block": "unit_economics",
+                    "expected": "Gross profit bridge is absent.",
+                    "reason": "No comparable actual issue.",
+                }
+            ],
+            "false_positives": [
+                {
+                    "pred_id": "L2-extra",
+                    "block": "ops",
+                    "actual": "Operational dependency is unsupported.",
+                    "type": "unsupported_or_wrong",
+                    "reason": "No evidence in source document.",
+                }
+            ],
+            "duplicates": [
+                {
+                    "pred_id": "L2-dup",
+                    "duplicates_ref_id": "L2-001",
+                    "reason": "Repeats the same funnel gap.",
+                }
+            ],
+            "summary": "Layer 2 is partially matched.",
+        },
+        "overall": {
+            "n_ref_total": 3,
+            "n_pred_total": 3,
+            "score_sum_total": 2.5,
+            "precision": 83.33,
+            "recall": 83.33,
+            "f1": 83.33,
+        },
+        "diagnostics": {
+            "valid_extra_insights_count": 0,
+            "unsupported_or_wrong_false_positives_count": 1,
+            "duplicate_count": 1,
+            "main_reasons": ["Layer 2 missed one unit economics issue."],
+            "strengths": ["Layer 1 matched the core blocker."],
+        },
+        "recommendations": ["Tighten metric-level evidence extraction."],
+    }
+
+    validate(instance=payload, schema=schema)
+
+
 def test_devils_advocate_schema_accepts_retrieval_context():
     schema = load_schema("devils-advocate-result.schema.json")
     payload = {

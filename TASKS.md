@@ -21,6 +21,32 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Fix document-detail low-resolution analysis history action clipping:
+  root cause was the two-column document detail grid letting the Analysis
+  history panel become narrower than its 560px table at compact desktop widths,
+  pushing the `Open` action into horizontal overflow. Added a 1440px responsive
+  rule that shrinks `Parsed document` first and preserves a 600px history
+  column before the existing single-column breakpoint. Verified focused
+  responsive test, full frontend tests, production web build, local web/API
+  container rebuild, and local `/login` plus `/health` smoke.
+- [x] Diagnose and restore production auth/API `502 Bad Gateway`: root cause
+  was nginx edge holding a stale resolved Docker upstream after the API
+  container was rebuilt. Edge still proxied `/api/*` to old API IP
+  `172.18.0.5`, while the current API container was `172.18.0.4` and answered
+  direct health/auth requests. Restarted `infra-edge-1` on
+  `178.250.159.250`; verified edge `/api/health` returns `200`, unauthenticated
+  auth probes return normal `401`, and bootstrap admin `login` then `/auth/me`
+  returns `200`. Follow-up: restart edge after API/web container replacement or
+  change nginx config to runtime-resolve Docker service names.
+- [~] Implement Gate2 benchmark etalon flow in branch
+  `codex/gate2-etalon-benchmark-layers`: added admin import of Gate2
+  originals and Layer 1 / Layer 2 CSV etalons into project
+  documents/etalons, source metadata and snapshots, judge v2 prompt seeding,
+  layer-only benchmark comparison, v2 micro-average scoring, `.dotx` parsing,
+  and frontend API client support. Full API tests, full worker tests, full
+  frontend unit tests, production web build, Compose config, and diff hygiene
+  checks pass locally; e2e remains not run because `E2E_ADMIN_LOGIN` /
+  `E2E_ADMIN_PASSWORD` are not set. Merge and deployment remain pending.
 - [x] Add analysis deletion: implemented soft-delete for analysis runs via
   `deleted_at`, `DELETE /analyses/{analysis_id}` with owner/admin access,
   hidden deleted runs from user/admin analysis reads and lists, blocked

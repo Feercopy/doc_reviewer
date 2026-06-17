@@ -55,6 +55,11 @@ class EtalonDraftCreate(BaseModel):
     status: EtalonStatus = EtalonStatus.DRAFT
 
 
+class Gate2BenchmarkImportRequest(BaseModel):
+    benchmark_dir: str | None = None
+    activate: bool = False
+
+
 class EtalonUpdate(BaseModel):
     expected_verdict: Verdict | None = None
     layer_1: list[EtalonLayer1Item] | None = None
@@ -79,6 +84,7 @@ class EtalonRead(BaseModel):
     layer_2: list[EtalonLayer2Item]
     key_findings: list[str]
     forbidden_false_findings: list[str]
+    source_metadata: dict
     status: EtalonStatus
     version: int
     raw_file_visible_to_all: bool
@@ -89,4 +95,13 @@ class EtalonRead(BaseModel):
 
 
 class EtalonsListResponse(BaseModel):
+    etalons: list[EtalonRead]
+
+
+class Gate2BenchmarkImportResponse(BaseModel):
+    imported_count: int
+    skipped_count: int
+    updated_count: int = 0
+    unmatched_count: int = 0
+    parse_enqueued_count: int
     etalons: list[EtalonRead]

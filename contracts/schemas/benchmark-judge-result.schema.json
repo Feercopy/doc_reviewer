@@ -3,24 +3,127 @@
   "$id": "https://gate-challenger.local/schemas/benchmark-judge-result.schema.json",
   "title": "BenchmarkJudgeResult",
   "type": "object",
-  "required": ["layer_1", "layer_2", "summary", "recommendations"],
+  "required": ["layer_1", "layer_2", "overall", "diagnostics", "recommendations"],
   "additionalProperties": false,
   "properties": {
     "layer_1": { "$ref": "#/$defs/layer_judgement" },
     "layer_2": { "$ref": "#/$defs/layer_judgement" },
-    "summary": { "type": "string" },
-    "recommendations": { "type": "array", "items": {} }
+    "overall": { "$ref": "#/$defs/overall_judgement" },
+    "diagnostics": { "$ref": "#/$defs/diagnostics" },
+    "recommendations": { "type": "array", "items": { "type": "string" } }
   },
   "$defs": {
     "layer_judgement": {
       "type": "object",
-      "required": ["exact_matches", "partial_matches", "missed_findings", "false_positives"],
+      "required": [
+        "n_ref",
+        "n_pred",
+        "score_sum",
+        "precision",
+        "recall",
+        "f1",
+        "matched",
+        "missed_issues",
+        "false_positives",
+        "duplicates",
+        "summary"
+      ],
       "additionalProperties": false,
       "properties": {
-        "exact_matches": { "type": "array", "items": {} },
-        "partial_matches": { "type": "array", "items": {} },
-        "missed_findings": { "type": "array", "items": {} },
-        "false_positives": { "type": "array", "items": {} }
+        "n_ref": { "type": "integer", "minimum": 0 },
+        "n_pred": { "type": "integer", "minimum": 0 },
+        "score_sum": { "type": "number", "minimum": 0 },
+        "precision": { "type": "number", "minimum": 0, "maximum": 100 },
+        "recall": { "type": "number", "minimum": 0, "maximum": 100 },
+        "f1": { "type": "number", "minimum": 0, "maximum": 100 },
+        "matched": { "type": "array", "items": { "$ref": "#/$defs/matched_item" } },
+        "missed_issues": { "type": "array", "items": { "$ref": "#/$defs/missed_issue" } },
+        "false_positives": { "type": "array", "items": { "$ref": "#/$defs/false_positive" } },
+        "duplicates": { "type": "array", "items": { "$ref": "#/$defs/duplicate" } },
+        "summary": { "type": "string" }
+      }
+    },
+    "matched_item": {
+      "type": "object",
+      "required": ["ref_id", "expected", "actual", "score", "comment"],
+      "additionalProperties": false,
+      "properties": {
+        "ref_id": { "type": "string" },
+        "block": { "type": "string" },
+        "item_id": { "type": "string" },
+        "expected": { "type": "string" },
+        "actual": { "type": "string" },
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "comment": { "type": "string" },
+        "mapping_note": { "type": "string" }
+      }
+    },
+    "missed_issue": {
+      "type": "object",
+      "required": ["ref_id", "expected", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "ref_id": { "type": "string" },
+        "block": { "type": "string" },
+        "item_id": { "type": "string" },
+        "expected": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    },
+    "false_positive": {
+      "type": "object",
+      "required": ["actual", "type", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "pred_id": { "type": "string" },
+        "block": { "type": "string" },
+        "actual": { "type": "string" },
+        "type": { "enum": ["valid_extra_insight", "unsupported_or_wrong"] },
+        "precision_effect": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    },
+    "duplicate": {
+      "type": "object",
+      "required": ["pred_id", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "pred_id": { "type": "string" },
+        "actual": { "type": "string" },
+        "duplicates_ref_id": { "type": "string" },
+        "precision_effect": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    },
+    "overall_judgement": {
+      "type": "object",
+      "required": ["n_ref_total", "n_pred_total", "score_sum_total", "precision", "recall", "f1"],
+      "additionalProperties": false,
+      "properties": {
+        "n_ref_total": { "type": "integer", "minimum": 0 },
+        "n_pred_total": { "type": "integer", "minimum": 0 },
+        "score_sum_total": { "type": "number", "minimum": 0 },
+        "precision": { "type": "number", "minimum": 0, "maximum": 100 },
+        "recall": { "type": "number", "minimum": 0, "maximum": 100 },
+        "f1": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "required": [
+        "valid_extra_insights_count",
+        "unsupported_or_wrong_false_positives_count",
+        "duplicate_count",
+        "main_reasons",
+        "strengths"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "valid_extra_insights_count": { "type": "integer", "minimum": 0 },
+        "unsupported_or_wrong_false_positives_count": { "type": "integer", "minimum": 0 },
+        "duplicate_count": { "type": "integer", "minimum": 0 },
+        "main_reasons": { "type": "array", "items": { "type": "string" } },
+        "strengths": { "type": "array", "items": { "type": "string" } }
       }
     }
   }

@@ -41,6 +41,17 @@ def test_parse_docx_extracts_paragraphs_and_tables(tmp_path):
     assert "Traction\tGrowing" in parsed
 
 
+def test_parse_dotx_uses_docx_parser(tmp_path):
+    path = tmp_path / "travel.dotx"
+    document = DocxDocument()
+    document.add_paragraph("Gate 2 travel benchmark original")
+    document.save(path)
+
+    parsed = parse_file(path)
+
+    assert "Gate 2 travel benchmark original" in parsed
+
+
 def test_parse_pdf_extracts_text_with_page_markers(tmp_path):
     path = tmp_path / "defense.pdf"
     path.write_bytes(_pdf_with_text_pages(["Gate 2 MVP traction", "Second page risks"]))

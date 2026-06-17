@@ -57,6 +57,11 @@ def test_admin_can_create_queued_benchmark_over_active_etalons(client, db_sessio
     assert payload["judge_skill_id"] == str(skills[3].id)
     assert payload["run_parameters"]["skill_source_snapshot"]["name"] == "gate2_challenger_main_analysis"
     assert payload["run_parameters"]["judge_skill_source_snapshot"]["name"] == "benchmark_judge"
+    snapshot = payload["run_parameters"]["etalon_snapshots"][str(active.id)]
+    assert snapshot["document_id"] == str(active.document_id)
+    assert snapshot["document_hash_sha256"]
+    assert set(snapshot["expected_output"]) == {"verdict", "layer_1", "layer_2"}
+    assert snapshot["expected_output"]["verdict"] == active.expected_verdict
     assert enqueued == [payload["id"]]
 
     benchmark = db_session.get(Benchmark, UUID(payload["id"]))
@@ -75,6 +80,35 @@ def test_benchmark_create_rejects_draft_etalons(client, db_session):
             "name": "Draft benchmark",
             "description": "Should fail",
             "etalon_ids": [str(draft.id)],
+            "skill_id": str(skills[0].id),
+            "provider": "openai_compatible",
+            "model": "gpt-test",
+            "judge_skill_id": str(skills[3].id),
+            "evaluation_mode": "layer_1_and_layer_2",
+            "run_parameters": {"mock_provider_result": {"structured_text": "{}", "raw_output": "raw", "latency_ms": 1}},
+        },
+    )
+
+    assert response.status_code == 409
+    assert db_session.query(Benchmark).count() == 0
+
+
+def test_benchmark_create_rejects_unparsed_etalon_original(client, db_session):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    skills = seed_baseline_skills(db_session)
+    active = _create_etalon(client, db_session, admin, EtalonStatus.ACTIVE)
+    document = db_session.get(Document, active.document_id)
+    document.parse_status = DocumentParseStatus.QUEUED.value
+    document.parsed_text = None
+    db_session.commit()
+    login(client, admin.login, "secret")
+
+    response = client.post(
+        "/benchmarks",
+        json={
+            "name": "Unparsed benchmark",
+            "description": "Should fail",
+            "etalon_ids": [str(active.id)],
             "skill_id": str(skills[0].id),
             "provider": "openai_compatible",
             "model": "gpt-test",

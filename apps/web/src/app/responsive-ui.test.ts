@@ -48,6 +48,14 @@ describe("responsive UI safeguards", () => {
     expect(documentDetailPage).toContain(".document-detail .gc-markdown-preview--full th,\n.document-detail .gc-markdown-preview--full td {\n  min-width: 0;");
   });
 
+  it("shrinks parsed document before hiding the analysis history open action", () => {
+    const documentDetailPage = source("src/app/documents/[documentId]/page.tsx");
+
+    expect(documentDetailPage).toContain("@media (max-width: 1440px) {\n  .document-detail .gc-detail-columns {");
+    expect(documentDetailPage).toContain("grid-template-columns: minmax(0, 1fr) minmax(600px, 1fr);");
+    expect(documentDetailPage).toContain(".document-detail .gc-table {\n  display: table;\n  min-width: 560px;");
+  });
+
   it("keeps benchmark command buttons at least 44px tall", () => {
     const benchmarksPage = source("src/app/benchmarks/page.tsx");
 

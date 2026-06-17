@@ -1,3 +1,5 @@
+from dataclasses import dataclass, field
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -9,11 +11,28 @@ from app.models.analysis import Analysis
 from app.models.document import Document
 from app.models.etalon import Etalon
 from app.models.user import User
-from app.schemas.enums import CheckStatus, DocumentType, EtalonSource, EtalonStatus, Role, RunStatus, Severity, Verdict
+from app.schemas.enums import (
+    CheckStatus,
+    DocumentParseStatus,
+    DocumentType,
+    EtalonSource,
+    EtalonStatus,
+    Role,
+    RunStatus,
+    Severity,
+    Verdict,
+)
 from app.schemas.etalons import EtalonDraftCreate, EtalonPayload, EtalonUpdate
 from app.services.analyses import get_analysis_for_actor
 from app.services.audit import record_audit
-from app.services.documents import create_document_from_upload
+from app.services.documents import create_document_from_local_file, create_document_from_upload
+from app.services.gate2_benchmark_cases import (
+    Gate2BenchmarkCase,
+    discover_gate2_benchmark_cases,
+    gate2_case_source_metadata,
+    gate2_case_to_etalon_payload,
+    parse_gate2_etalon_csv,
+)
 from app.storage.local import LocalDocumentStorage
 
 
@@ -27,6 +46,16 @@ class EtalonForbiddenError(ValueError):
 
 class EtalonPreconditionError(ValueError):
     pass
+
+
+@dataclass
+class Gate2BenchmarkImportResult:
+    imported_count: int = 0
+    skipped_count: int = 0
+    updated_count: int = 0
+    unmatched_count: int = 0
+    parse_document_ids: list[UUID] = field(default_factory=list)
+    etalons: list[Etalon] = field(default_factory=list)
 
 
 def create_etalon_draft_from_analysis(
@@ -77,6 +106,80 @@ def create_etalon_draft_from_analysis(
     db.commit()
     db.refresh(etalon)
     return etalon
+
+
+def import_gate2_benchmark_etalons(
+    *,
+    db: Session,
+    actor: User,
+    storage: LocalDocumentStorage,
+    benchmark_dir: Path,
+    activate: bool,
+) -> Gate2BenchmarkImportResult:
+    if actor.role != Role.ADMIN.value:
+        raise EtalonForbiddenError("Only admin can import Gate2 benchmark etalons")
+
+    result = Gate2BenchmarkImportResult()
+    cases = discover_gate2_benchmark_cases(benchmark_dir)
+    existing_etalons = _existing_gate2_etalons(db)
+    for case in cases:
+        parsed = parse_gate2_etalon_csv(case.etalon_path)
+        metadata = gate2_case_source_metadata(case, parsed)
+        existing = _matching_gate2_etalon(existing_etalons, metadata)
+        if existing is not None:
+            result.skipped_count += 1
+            result.etalons.append(existing)
+            continue
+
+        document = _find_existing_gate2_document(db=db, metadata=metadata)
+        if document is None:
+            document = create_document_from_local_file(
+                db=db,
+                actor=actor,
+                storage=storage,
+                source_path=case.original_path,
+                title=case.name,
+                manual_document_type=DocumentType.GATE_2,
+            )
+            result.parse_document_ids.append(document.id)
+        elif document.parse_status != DocumentParseStatus.COMPLETED.value:
+            result.parse_document_ids.append(document.id)
+
+        etalon_payload = gate2_case_to_etalon_payload(case)
+        etalon = Etalon(
+            document_id=document.id,
+            author_id=actor.id,
+            source=EtalonSource.GATE2_BENCHMARK.value,
+            document_type=DocumentType.GATE_2.value,
+            real_defense_status=None,
+            defense_comments=None,
+            expected_verdict=etalon_payload.expected_verdict.value,
+            layer_1=[item.model_dump(mode="json") for item in etalon_payload.layer_1],
+            layer_2=[item.model_dump(mode="json") for item in etalon_payload.layer_2],
+            key_findings=etalon_payload.key_findings,
+            forbidden_false_findings=etalon_payload.forbidden_false_findings,
+            source_metadata=metadata,
+            status=EtalonStatus.ACTIVE.value if activate else EtalonStatus.DRAFT.value,
+            version=1,
+            raw_file_visible_to_all=False,
+        )
+        db.add(etalon)
+        result.imported_count += 1
+        result.etalons.append(etalon)
+        existing_etalons.append(etalon)
+        record_audit(
+            db=db,
+            actor_id=actor.id,
+            action="etalon.created",
+            entity_type="etalon",
+            entity_id=etalon.id,
+            metadata={"document_id": str(document.id), "source": etalon.source, "status": etalon.status},
+        )
+
+    db.commit()
+    for etalon in result.etalons:
+        db.refresh(etalon)
+    return result
 
 
 def create_past_defense_etalon(
@@ -540,6 +643,31 @@ def _get_existing_etalon(*, db: Session, etalon_id: UUID) -> Etalon:
     if etalon is None:
         raise EtalonNotFoundError("Etalon not found")
     return etalon
+
+
+def _existing_gate2_etalons(db: Session) -> list[Etalon]:
+    statement = select(Etalon).where(Etalon.source == EtalonSource.GATE2_BENCHMARK.value)
+    return list(db.execute(statement).scalars().all())
+
+
+def _matching_gate2_etalon(etalons: list[Etalon], metadata: dict) -> Etalon | None:
+    for etalon in etalons:
+        existing_metadata = etalon.source_metadata or {}
+        if (
+            existing_metadata.get("case_name") == metadata.get("case_name")
+            and existing_metadata.get("original_sha256") == metadata.get("original_sha256")
+            and existing_metadata.get("etalon_csv_sha256") == metadata.get("etalon_csv_sha256")
+        ):
+            return etalon
+    return None
+
+
+def _find_existing_gate2_document(*, db: Session, metadata: dict) -> Document | None:
+    statement = select(Document).where(Document.file_hash_sha256 == metadata.get("original_sha256"))
+    for document in db.execute(statement).scalars().all():
+        if document.original_filename == Path(str(metadata.get("original_path", ""))).name:
+            return document
+    return None
 
 
 def _can_read_etalon(actor: User, etalon: Etalon) -> bool:

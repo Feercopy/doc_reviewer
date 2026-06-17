@@ -23,6 +23,7 @@ class Etalon(TimestampMixin, Base):
     layer_2: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     key_findings: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     forbidden_false_findings: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    source_metadata: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String, nullable=False, default=EtalonStatus.DRAFT.value)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     raw_file_visible_to_all: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
