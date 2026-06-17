@@ -33,7 +33,11 @@ Primary plan index:
   python-docx/pypdf adapters when unavailable or conversion fails; the full
   `docling` package was avoided because it pulls Torch/CUDA into the production
   worker image. Verified focused
-  parser/parse-job/schema tests, full worker tests, and full API tests.
+  parser/parse-job/schema tests, full worker tests, and full API tests. Merged
+  into `main`, pushed to origin, deployed to `178.250.159.250`, rebuilt
+  production API/worker with `docling-slim`, verified production container
+  status, API `/health`, `/login`, worker startup logs, and confirmed
+  `docling.document_converter` is importable inside the production worker.
 - [x] Add analysis deletion: implemented soft-delete for analysis runs via
   `deleted_at`, `DELETE /analyses/{analysis_id}` with owner/admin access,
   hidden deleted runs from user/admin analysis reads and lists, blocked
