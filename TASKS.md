@@ -21,7 +21,7 @@ Primary plan index:
 
 ## Current Focus
 
-- [~] Implement Gate2 benchmark etalon flow in branch
+- [x] Implement Gate2 benchmark etalon flow in branch
   `codex/gate2-etalon-benchmark-layers`: added admin import of Gate2
   originals and Layer 1 / Layer 2 CSV etalons into project
   documents/etalons, source metadata and snapshots, judge v2 prompt seeding,
@@ -29,7 +29,13 @@ Primary plan index:
   and frontend API client support. Full API tests, full worker tests, full
   frontend unit tests, production web build, Compose config, and diff hygiene
   checks pass locally; e2e remains not run because `E2E_ADMIN_LOGIN` /
-  `E2E_ADMIN_PASSWORD` are not set. Merge and deployment remain pending.
+  `E2E_ADMIN_PASSWORD` are not set. Merged into `main`, pushed to origin,
+  deployed release `cfb7441` to `178.250.159.250`, rebuilt production
+  API/worker/web, applied Alembic upgrade to `202606170002`, reseeded baseline
+  skills, recreated edge to refresh Docker upstreams, and verified production
+  container status, public `/api/health`, public `/login`, unauthenticated
+  Gate2 import returns auth failure instead of not-found, bootstrap admin
+  `login` then `/auth/me`, and fresh API/worker/edge logs with no new `502`.
 - [x] Diagnose and restore production auth/API `502 Bad Gateway`: root cause
   was nginx edge holding a stale resolved Docker upstream after the API
   container was rebuilt. Edge still proxied `/api/*` to old API IP
