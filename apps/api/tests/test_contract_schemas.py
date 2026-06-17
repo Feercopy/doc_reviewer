@@ -20,6 +20,54 @@ def role_comment_item(anchor_text: str, body: str, comment_type: str = "missing_
     }
 
 
+def test_document_parse_artifact_schema_accepts_structured_parse_output():
+    schema = load_schema("document-parse-artifact.schema.json")
+    payload = {
+        "schema_version": "document_parse_artifact.v1",
+        "source": {
+            "filename": "gate-2.md",
+            "mime_type": "text/markdown",
+            "sha256": "a" * 64,
+            "size_bytes": 42,
+        },
+        "parser": {
+            "name": "utf8_text",
+            "version": None,
+            "adapter_version": "gate_challenger_parser.v1",
+            "options": {},
+        },
+        "outputs": {
+            "plain_text": "# Gate 2\n\nMVP scope",
+            "markdown": "# Gate 2\n\nMVP scope",
+            "plain_text_sha256": "b" * 64,
+            "markdown_sha256": "b" * 64,
+        },
+        "blocks": [
+            {
+                "id": "b0001",
+                "type": "heading",
+                "text": "# Gate 2",
+                "markdown": "# Gate 2",
+                "page": None,
+                "text_span": {"start": 0, "end": 8},
+                "hash": "c" * 64,
+                "metadata": {},
+            }
+        ],
+        "quality": {
+            "char_count": 20,
+            "block_count": 1,
+            "page_count": None,
+            "table_count": 0,
+            "empty_pages": [],
+            "ocr_used": False,
+            "warnings": [],
+        },
+    }
+
+    validate(instance=payload, schema=schema)
+
+
 def test_main_analysis_schema_accepts_valid_result():
     schema = load_schema("main-analysis-result.schema.json")
     payload = {

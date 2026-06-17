@@ -2,7 +2,9 @@ from pathlib import Path
 
 from docx import Document as DocxDocument
 
-from parsers import parse_file
+from parsers import docling_parser
+from parsers import parse_file, parse_file_to_document
+from parsers.artifact import ParsedDocument, ParserInfo, ParseQuality, build_blocks_from_output
 
 
 def test_parse_txt_decodes_utf8_with_replacement(tmp_path):
@@ -23,6 +25,43 @@ def test_parse_markdown_returns_source_text(tmp_path):
     assert parsed == "# Gate 2\n\nMVP scope and risks."
 
 
+def test_parse_markdown_returns_structured_artifact_blocks(tmp_path):
+    path = tmp_path / "defense.md"
+    path.write_text("# Gate 2\n\nMVP scope and risks.", encoding="utf-8")
+
+    parsed = parse_file_to_document(path)
+
+    assert parsed.plain_text == "# Gate 2\n\nMVP scope and risks."
+    assert parsed.markdown == parsed.plain_text
+    assert parsed.parser.name == "utf8_text"
+    assert parsed.quality.block_count == 2
+    assert [block.type for block in parsed.blocks] == ["heading", "paragraph"]
+    assert parsed.blocks[0].text_span == {"start": 0, "end": 8}
+
+
+def test_parse_pdf_prefers_docling_when_available(tmp_path, monkeypatch):
+    path = tmp_path / "defense.pdf"
+    path.write_bytes(b"fake pdf bytes")
+    _, _, blocks = build_blocks_from_output([{"type": "paragraph", "text": "Docling text", "markdown": "Docling text"}])
+
+    def fake_parse_docling_document(path: Path) -> ParsedDocument:
+        return ParsedDocument(
+            plain_text="Docling text",
+            markdown="Docling text",
+            blocks=blocks,
+            parser=ParserInfo(name="docling", version="test"),
+            quality=ParseQuality(char_count=12, block_count=1),
+        )
+
+    monkeypatch.setattr(docling_parser, "is_docling_available", lambda: True)
+    monkeypatch.setattr(docling_parser, "parse_docling_document", fake_parse_docling_document)
+
+    parsed = parse_file_to_document(path)
+
+    assert parsed.parser.name == "docling"
+    assert parsed.plain_text == "Docling text"
+
+
 def test_parse_docx_extracts_paragraphs_and_tables(tmp_path):
     path = tmp_path / "defense.docx"
     document = DocxDocument()
@@ -41,6 +80,26 @@ def test_parse_docx_extracts_paragraphs_and_tables(tmp_path):
     assert "Traction\tGrowing" in parsed
 
 
+def test_parse_docx_returns_markdown_tables_and_quality(tmp_path):
+    path = tmp_path / "defense.docx"
+    document = DocxDocument()
+    document.add_heading("Gate 2 investment defense", level=1)
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Metric"
+    table.cell(0, 1).text = "Value"
+    table.cell(1, 0).text = "Traction"
+    table.cell(1, 1).text = "Growing"
+    document.save(path)
+
+    parsed = parse_file_to_document(path)
+
+    assert parsed.parser.name == "python-docx"
+    assert parsed.quality.table_count == 1
+    assert [block.type for block in parsed.blocks] == ["heading", "table"]
+    assert "| Metric | Value |" in parsed.markdown
+    assert "| Traction | Growing |" in parsed.markdown
+
+
 def test_parse_pdf_extracts_text_with_page_markers(tmp_path):
     path = tmp_path / "defense.pdf"
     path.write_bytes(_pdf_with_text_pages(["Gate 2 MVP traction", "Second page risks"]))
@@ -51,6 +110,20 @@ def test_parse_pdf_extracts_text_with_page_markers(tmp_path):
     assert "Gate 2 MVP traction" in parsed
     assert "[Page 2]" in parsed
     assert "Second page risks" in parsed
+
+
+def test_parse_pdf_returns_page_blocks_and_quality(tmp_path):
+    path = tmp_path / "defense.pdf"
+    path.write_bytes(_pdf_with_text_pages(["Gate 2 MVP traction", "Second page risks"]))
+
+    parsed = parse_file_to_document(path)
+
+    assert parsed.parser.name == "pypdf"
+    assert parsed.quality.page_count == 2
+    assert parsed.quality.empty_pages == []
+    assert [block.page for block in parsed.blocks] == [1, 2]
+    assert parsed.blocks[0].type == "page"
+    assert "<!-- page 1 -->" in parsed.markdown
 
 
 def _pdf_with_text_pages(page_texts: list[str]) -> bytes:

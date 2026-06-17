@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gate-challenger.local/schemas/document-parse-artifact.schema.json",
+  "title": "Document Parse Artifact",
+  "type": "object",
+  "required": ["schema_version", "source", "parser", "outputs", "blocks", "quality"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "document_parse_artifact.v1" },
+    "source": {
+      "type": "object",
+      "required": ["filename", "mime_type", "sha256", "size_bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "filename": { "type": "string", "minLength": 1 },
+        "mime_type": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "size_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "parser": {
+      "type": "object",
+      "required": ["name", "version", "adapter_version", "options"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": ["string", "null"] },
+        "adapter_version": { "type": "string", "minLength": 1 },
+        "options": { "type": "object" }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "required": ["plain_text", "markdown", "plain_text_sha256", "markdown_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "plain_text": { "type": "string" },
+        "markdown": { "type": "string" },
+        "plain_text_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "markdown_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "text", "markdown", "page", "text_span", "hash", "metadata"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "type": {
+            "type": "string",
+            "enum": ["paragraph", "heading", "list_item", "table", "page"]
+          },
+          "text": { "type": "string" },
+          "markdown": { "type": "string" },
+          "page": { "type": ["integer", "null"], "minimum": 1 },
+          "text_span": {
+            "type": "object",
+            "required": ["start", "end"],
+            "additionalProperties": false,
+            "properties": {
+              "start": { "type": "integer", "minimum": 0 },
+              "end": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "metadata": { "type": "object" }
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "required": ["char_count", "block_count", "page_count", "table_count", "empty_pages", "ocr_used", "warnings"],
+      "additionalProperties": false,
+      "properties": {
+        "char_count": { "type": "integer", "minimum": 0 },
+        "block_count": { "type": "integer", "minimum": 0 },
+        "page_count": { "type": ["integer", "null"], "minimum": 0 },
+        "table_count": { "type": "integer", "minimum": 0 },
+        "empty_pages": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "ocr_used": { "type": "boolean" },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

@@ -11,7 +11,7 @@ from app.schemas.enums import DocumentParseStatus
 from app.services.audit import record_audit
 from app.services.document_type_detector import detect_document_type
 from app.storage.local import LocalDocumentStorage
-from parsers import parse_file
+from parsers import parse_file_to_document
 
 
 def parse_document(
@@ -39,11 +39,21 @@ def parse_document(
 
         storage_service = storage or LocalDocumentStorage(get_settings().storage_root)
         raw_path = Path(document.storage_path)
-        parsed_text = parse_file(raw_path)
-        storage_service.save_parsed_artifact(
+        parsed_document = parse_file_to_document(raw_path)
+        parsed_text = parsed_document.plain_text
+        structured_artifact = parsed_document.to_artifact(
+            source_filename=document.original_filename,
+            source_mime_type=document.mime_type,
+            source_sha256=document.file_hash_sha256,
+            source_size_bytes=document.file_size_bytes,
+        )
+        parsed_artifacts = storage_service.save_parsed_artifacts(
             owner_id=document.owner_id,
             document_id=document.id,
             parsed_text=parsed_text,
+            parsed_markdown=parsed_document.markdown,
+            structured_artifact=structured_artifact,
+            quality_report=parsed_document.quality.to_dict(),
         )
         detection = detect_document_type(parsed_text)
 
@@ -63,6 +73,9 @@ def parse_document(
                 "owner_id": str(document.owner_id),
                 "detected_document_type": document.detected_document_type,
                 "document_type_confidence": str(document.document_type_confidence),
+                "parser": parsed_document.parser.name,
+                "parsed_artifacts": sorted(parsed_artifacts.keys()),
+                "parse_quality": parsed_document.quality.to_dict(),
             },
         )
         session.commit()

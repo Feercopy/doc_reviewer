@@ -21,6 +21,17 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Start structured document parse artifacts on branch
+  `codex/structured-parse-artifacts`: worker parsers now keep the existing
+  `parsed_text` string contract while also producing a `document_parse_artifact.v1`
+  JSON contract with source metadata, parser metadata, markdown/plain outputs,
+  block spans, and quality diagnostics. Parse jobs persist `parsed.txt`,
+  `parsed.md`, `structured.json`, and `quality.json` under the existing parsed
+  artifact directory, and audit metadata records parser/quality summary
+  without storage paths. Added Docling as the preferred `.docx`/`.pdf` worker
+  adapter when installed, with fallback to the current python-docx/pypdf
+  adapters when unavailable or conversion fails. Verified focused
+  parser/parse-job/schema tests, full worker tests, and full API tests.
 - [x] Add analysis deletion: implemented soft-delete for analysis runs via
   `deleted_at`, `DELETE /analyses/{analysis_id}` with owner/admin access,
   hidden deleted runs from user/admin analysis reads and lists, blocked

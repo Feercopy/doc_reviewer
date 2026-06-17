@@ -82,10 +82,46 @@ class LocalDocumentStorage:
         parsed_path.write_text(parsed_text, encoding="utf-8")
         return parsed_path
 
+    def save_parsed_artifacts(
+        self,
+        *,
+        owner_id: UUID,
+        document_id: UUID,
+        parsed_text: str,
+        parsed_markdown: str | None = None,
+        structured_artifact: dict | None = None,
+        quality_report: dict | None = None,
+    ) -> dict[str, Path]:
+        parsed_dir = self.parsed_artifact_dir(owner_id=owner_id, document_id=document_id)
+        parsed_dir.mkdir(parents=True, exist_ok=True)
+
+        artifacts = {
+            "parsed_text": self._ensure_under_root(parsed_dir / "parsed.txt"),
+        }
+        artifacts["parsed_text"].write_text(parsed_text, encoding="utf-8")
+
+        if parsed_markdown is not None:
+            artifacts["parsed_markdown"] = self._ensure_under_root(parsed_dir / "parsed.md")
+            artifacts["parsed_markdown"].write_text(parsed_markdown, encoding="utf-8")
+        if structured_artifact is not None:
+            artifacts["structured"] = self._ensure_under_root(parsed_dir / "structured.json")
+            artifacts["structured"].write_text(
+                json.dumps(structured_artifact, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        if quality_report is not None:
+            artifacts["quality"] = self._ensure_under_root(parsed_dir / "quality.json")
+            artifacts["quality"].write_text(
+                json.dumps(quality_report, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        return artifacts
+
     def parsed_artifact_path(self, *, owner_id: UUID, document_id: UUID) -> Path:
-        return self._ensure_under_root(
-            self.storage_root / "documents" / str(owner_id) / str(document_id) / "parsed" / "parsed.txt"
-        )
+        return self._ensure_under_root(self.parsed_artifact_dir(owner_id=owner_id, document_id=document_id) / "parsed.txt")
+
+    def parsed_artifact_dir(self, *, owner_id: UUID, document_id: UUID) -> Path:
+        return self._ensure_under_root(self.storage_root / "documents" / str(owner_id) / str(document_id) / "parsed")
 
     def save_rendered_prompt(self, *, analysis_id: UUID, prompt: str) -> Path:
         prompt_path = self._ensure_under_root(self.storage_root / "rendered-prompts" / str(analysis_id) / "prompt.txt")

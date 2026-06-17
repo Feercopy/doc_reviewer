@@ -1,6 +1,7 @@
 from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
+import json
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -44,6 +45,17 @@ def test_parse_document_success_updates_database_and_writes_artifact(tmp_path):
 
         parsed_artifact_path = tmp_path / "documents" / str(owner.id) / str(document.id) / "parsed" / "parsed.txt"
         assert parsed_artifact_path.read_text(encoding="utf-8") == document.parsed_text
+        parsed_dir = parsed_artifact_path.parent
+        assert (parsed_dir / "parsed.md").read_text(encoding="utf-8") == document.parsed_text
+        structured = json.loads((parsed_dir / "structured.json").read_text(encoding="utf-8"))
+        assert structured["schema_version"] == "document_parse_artifact.v1"
+        assert structured["source"]["filename"] == "gate-2.md"
+        assert structured["source"]["sha256"] == document.file_hash_sha256
+        assert structured["parser"]["name"] == "utf8_text"
+        assert structured["outputs"]["plain_text"] == document.parsed_text
+        assert structured["blocks"][0]["type"] == "heading"
+        quality = json.loads((parsed_dir / "quality.json").read_text(encoding="utf-8"))
+        assert quality["block_count"] == 2
     finally:
         _close_session(db)
 
