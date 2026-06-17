@@ -875,7 +875,7 @@ const documentDetailStyles = `
 .document-detail .gc-stepper {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: stretch;
   gap: 10px;
 }
 

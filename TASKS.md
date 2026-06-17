@@ -21,6 +21,15 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Fix production document-detail workflow card height mismatch: root cause
+  is the document-detail stepper using flex cross-axis centering, so shorter
+  status cards such as `Ready` keep their content-height while neighboring
+  cards wrap to two text lines. Changed `.gc-stepper` to stretch items per
+  flex row and added responsive UI coverage. Focused responsive test, full
+  frontend test suite, and production web build pass locally. Deployed to
+  `178.250.159.250`, rebuilt production web, verified container status,
+  `/api/health`, `/login`, the document route, and confirmed the built
+  `/documents/[documentId]` bundle contains `align-items: stretch`.
 - [x] Add editing for saved provider key Model and Allowlist in Settings:
   implemented local `PATCH /settings/provider-keys/{provider}` to update
   `default_model` and `available_models` without replacing encrypted key

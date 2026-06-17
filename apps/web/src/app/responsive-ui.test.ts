@@ -40,6 +40,7 @@ describe("responsive UI safeguards", () => {
     const documentDetailPage = source("src/app/documents/[documentId]/page.tsx");
 
     expect(documentDetailPage).toContain("flex: 1 1 150px;");
+    expect(documentDetailPage).toContain(".document-detail .gc-stepper {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: stretch;");
     expect(documentDetailPage).toContain(".document-detail .gc-step strong,\n.document-detail .gc-step small {");
     expect(documentDetailPage).toContain("overflow-wrap: anywhere;");
     expect(documentDetailPage).toContain("white-space: normal;");
