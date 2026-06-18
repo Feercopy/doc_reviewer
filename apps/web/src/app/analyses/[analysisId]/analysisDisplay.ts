@@ -203,6 +203,21 @@ export function devilsAdvocateRoleComments(
   });
 }
 
+export function devilsAdvocateRoleCommentsFromRun(
+  run: Pick<PredictedCommentRunRecord, "structured_output" | "raw_output"> | null | undefined,
+): DevilsAdvocateRoleComment[] {
+  const structuredComments = devilsAdvocateRoleComments(run?.structured_output);
+  if (structuredComments.length || !run?.raw_output) {
+    return structuredComments;
+  }
+
+  return devilsAdvocateRoleComments({
+    role_comments: extractRoleCommentsFromJsonLikeText(
+      providerMessageContentFromRaw(run.raw_output) || run.raw_output,
+    ),
+  });
+}
+
 export function devilsAdvocateMarkdownFromRun(
   run: Pick<PredictedCommentRunRecord, "structured_output" | "raw_output">,
 ): string | null {
@@ -283,6 +298,89 @@ function extractNativeMarkdownFromJsonLikeText(value: string | null): string | n
       extractJsonStringProperty(trimmed, "output_markdown")
     );
   }
+}
+
+function extractRoleCommentsFromJsonLikeText(value: string | null): Record<string, unknown>[] {
+  const text = asString(value);
+  if (!text) {
+    return [];
+  }
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{")) {
+    return [];
+  }
+
+  try {
+    return asRecordArray(asRecord(JSON.parse(trimmed))?.role_comments);
+  } catch {
+    return asRecordArray(extractJsonArrayProperty(trimmed, "role_comments"));
+  }
+}
+
+function extractJsonArrayProperty(text: string, key: string): unknown[] | null {
+  const match = new RegExp(`"${escapeRegExp(key)}"\\s*:\\s*\\[`).exec(text);
+  if (!match) {
+    return null;
+  }
+
+  const start = match.index + match[0].length - 1;
+  const end = findJsonValueEnd(text, start);
+  if (end === null) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(text.slice(start, end + 1));
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function findJsonValueEnd(text: string, start: number): number | null {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === "[") {
+      stack.push("]");
+      continue;
+    }
+    if (character === "{") {
+      stack.push("}");
+      continue;
+    }
+
+    const expectedCloser = stack[stack.length - 1];
+    if ((character === "]" || character === "}") && character !== expectedCloser) {
+      return null;
+    }
+    if (character === expectedCloser) {
+      stack.pop();
+      if (!stack.length) {
+        return index;
+      }
+    }
+  }
+
+  return null;
 }
 
 function extractJsonStringProperty(text: string, key: string): string | null {

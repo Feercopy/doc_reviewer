@@ -7,6 +7,7 @@ import {
   buildLayeredGateChecks,
   devilsAdvocateMarkdownFromRun,
   devilsAdvocateRoleComments,
+  devilsAdvocateRoleCommentsFromRun,
   predictedRunDisplayError,
   splitDevilsAdvocateMarkdown,
   stripAssessmentHeading,
@@ -126,6 +127,69 @@ describe("analysis display helpers", () => {
         raw_output: rawOutput,
       }),
     ).toBe("The Brutal Truth\n\nFatal flaw.\n\nActionable JTBDs\n\n1. Add proof.");
+  });
+
+  it("extracts Devil's Advocate role comments from truncated provider JSON", () => {
+    const rawOutput = JSON.stringify({
+      choices: [
+        {
+          message: {
+            content:
+              '{"run_mode":"full_ic_voting","native_markdown":"The Brutal Truth","role_comments":[' +
+              '{"voter":"MP","vote":"reject","comments":[{"anchor_text":"CR contact to payment","body":"Show control-group incrementality.","comment_type":"missing_data","severity":"critical"}]},' +
+              '{"voter":"CPO","vote":"reject","comments":[{"anchor_text":"Payment flow","body":"Split conversion by user segment.","comment_type":"weak_argument","severity":"high"}]},' +
+              '{"voter":"TechDir","vote":"approve_with_conditions","comments":[{"anchor_text":"CRM automation","body":"Clarify delivery dependency.","comment_type":"execution_risk","severity":"medium"}]},' +
+              '{"voter":"VertDir","vote":"reject","comments":[{"anchor_text":"dealer stock contraction","body":"Separate market headwind from product effect.","comment_type":"missing_counterfactual","severity":"high"}]}' +
+              '],"tough_questions":[{"question":"unfinished',
+          },
+          finish_reason: "length",
+        },
+      ],
+    });
+
+    expect(
+      devilsAdvocateRoleCommentsFromRun({
+        structured_output: null,
+        raw_output: rawOutput,
+      }),
+    ).toEqual([
+      {
+        id: "MP-0",
+        voter: "MP",
+        vote: "reject",
+        anchorText: "CR contact to payment",
+        body: "Show control-group incrementality.",
+        commentType: "missing_data",
+        severity: "critical",
+      },
+      {
+        id: "CPO-0",
+        voter: "CPO",
+        vote: "reject",
+        anchorText: "Payment flow",
+        body: "Split conversion by user segment.",
+        commentType: "weak_argument",
+        severity: "high",
+      },
+      {
+        id: "TechDir-0",
+        voter: "TechDir",
+        vote: "approve_with_conditions",
+        anchorText: "CRM automation",
+        body: "Clarify delivery dependency.",
+        commentType: "execution_risk",
+        severity: "medium",
+      },
+      {
+        id: "VertDir-0",
+        voter: "VertDir",
+        vote: "reject",
+        anchorText: "dealer stock contraction",
+        body: "Separate market headwind from product effect.",
+        commentType: "missing_counterfactual",
+        severity: "high",
+      },
+    ]);
   });
 
   it("shows a readable message for truncated Devil's Advocate JSON errors", () => {

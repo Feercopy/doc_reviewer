@@ -26,7 +26,7 @@ import {
   buildDocumentCommentAnchors,
   buildLayeredGateChecks,
   devilsAdvocateMarkdownFromRun,
-  devilsAdvocateRoleComments,
+  devilsAdvocateRoleCommentsFromRun,
   predictedRunDisplayError,
   providerMessageContentFromRaw,
   type DocumentCommentAnchor,
@@ -738,7 +738,7 @@ function DocumentCommentsPanel({
 }) {
   const anchorRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const cardRefs = useRef<Record<string, HTMLElement | null>>({});
-  const roleComments = useMemo(() => devilsAdvocateRoleComments(run?.structured_output), [run?.structured_output]);
+  const roleComments = useMemo(() => devilsAdvocateRoleCommentsFromRun(run), [run]);
   const documentComments = useMemo(
     () => buildDocumentCommentAnchors(parsedText, roleComments),
     [parsedText, roleComments],
@@ -948,7 +948,7 @@ function PredictedSkillOutputSection({ run }: { run: PredictedCommentRunRecord |
 
   const markdown = devilsAdvocateMarkdownFromRun(run);
   const sections = splitDevilsAdvocateMarkdown(markdown);
-  const roleComments = devilsAdvocateRoleComments(run.structured_output);
+  const roleComments = devilsAdvocateRoleCommentsFromRun(run);
   const displayError = predictedRunDisplayError(run);
 
   return (
