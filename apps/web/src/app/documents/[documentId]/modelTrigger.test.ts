@@ -2,31 +2,42 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-describe("document detail model trigger", () => {
-  it("keeps the model label separate from the decorative chevron", () => {
+describe("document detail analysis controls", () => {
+  it("keeps document actions at the title level", () => {
     const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
+    const titleToolbarSource = source.slice(
+      source.indexOf('className="gc-title-toolbar"'),
+      source.indexOf('<p className="gc-muted">'),
+    );
+    const analysisSetupSource = source.slice(
+      source.indexOf('aria-label="Analysis setup"'),
+      source.indexOf('<div className="gc-stepper"'),
+    );
 
-    expect(source).toContain("gc-model-trigger");
-    expect(source).toContain("gc-model-chevron");
-    expect(source).not.toContain('Model{modelDialogOpen ? "⌃" : "⌄"}');
+    expect(titleToolbarSource).toContain('aria-label="Document actions"');
+    expect(titleToolbarSource).toContain("Download raw");
+    expect(titleToolbarSource).toContain("Reparse");
+    expect(titleToolbarSource).toContain("Delete");
+    expect(analysisSetupSource).not.toContain("Download raw");
+    expect(analysisSetupSource).not.toContain("Reparse");
+    expect(analysisSetupSource).not.toContain("Delete");
   });
 
-  it("keeps model settings focused on language, model, and saving", () => {
+  it("keeps model, language, and launch in the analysis setup block", () => {
     const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
-    const modelPopoverSource = source.slice(
-      source.indexOf('aria-label="Model settings"'),
+    const analysisSetupSource = source.slice(
+      source.indexOf('aria-label="Analysis setup"'),
       source.indexOf('<div className="gc-detail-columns">'),
     );
 
-    expect(modelPopoverSource).toContain("<span>Output language</span>");
-    expect(modelPopoverSource).toContain("<span>Model</span>");
-    expect(modelPopoverSource).toContain("Save");
-    expect(modelPopoverSource).not.toContain("<span>Provider</span>");
-    expect(modelPopoverSource).not.toContain("<span>Shared key</span>");
-    expect(modelPopoverSource).not.toContain("Valid");
-    expect(modelPopoverSource).not.toContain("No shared key");
-    expect(modelPopoverSource).not.toContain("Cancel");
-    expect(modelPopoverSource).not.toContain("Apply");
+    expect(analysisSetupSource).toContain("gc-analysis-launch");
+    expect(analysisSetupSource).toContain("<span>Model</span>");
+    expect(analysisSetupSource).toContain("<span>Output language</span>");
+    expect(analysisSetupSource).toContain("▷ Start analysis");
+    expect(analysisSetupSource).toContain("changeModel");
+    expect(source).not.toContain("gc-model-trigger");
+    expect(source).not.toContain("gc-model-popover");
+    expect(source).not.toContain('aria-label="Model settings"');
   });
 
   it("uses an interactive title editor instead of a decorative pencil", () => {
