@@ -448,59 +448,6 @@ export default function DocumentDetailPage() {
                   {document.original_filename} · {formatDate(document.created_at)}
                 </p>
 
-                <section className="gc-analysis-launch" aria-label="Analysis setup">
-                  <div className="gc-analysis-launch-heading">
-                    <div>
-                      <strong>Analysis setup</strong>
-                      <span>Choose output settings before starting analysis.</span>
-                    </div>
-                  </div>
-
-                  <div className="gc-analysis-controls">
-                    <label className="gc-analysis-field gc-analysis-model-field">
-                      <span>Model</span>
-                      <select
-                        disabled={pending || !selectedProviderModel?.has_key || selectedProviderModel.available_models.length === 0}
-                        value={model}
-                        onChange={(event) => changeModel(event.target.value)}
-                      >
-                        {(selectedProviderModel?.available_models ?? []).map((item) => (
-                          <option key={item} value={item}>
-                            {item}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <div className="gc-analysis-field">
-                      <span>Output language</span>
-                      <div className="gc-language-toggle" aria-label="Output language">
-                        {outputLanguageOptions.map((language) => (
-                          <button
-                            aria-pressed={outputLanguage === language}
-                            className={`gc-language-option${outputLanguage === language ? " is-active" : ""}`}
-                            disabled={pending}
-                            key={language}
-                            type="button"
-                            onClick={() => setOutputLanguage(language)}
-                          >
-                            {language.toUpperCase()}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <button
-                      className="gc-primary gc-start-analysis"
-                      disabled={pending || document.parse_status !== "completed" || !model.trim() || !selectedProviderModel?.has_key}
-                      type="button"
-                      onClick={launchAnalysis}
-                    >
-                      {pending ? "Starting..." : "▷ Start analysis"}
-                    </button>
-                  </div>
-                </section>
-
                 <div className="gc-stepper" aria-label="Document workflow status">
                   {workflowSteps.map((step) => (
                     <div className={`gc-step is-${step.state}`} key={step.label}>
@@ -545,6 +492,47 @@ export default function DocumentDetailPage() {
               <section className="gc-panel gc-history-panel">
                 <div className="gc-panel-heading">
                   <h2>Analysis history</h2>
+                </div>
+
+                <div className="gc-analysis-toolbar" aria-label="Analysis setup">
+                  <select
+                    aria-label="Model"
+                    className="gc-analysis-model-button"
+                    disabled={pending || !selectedProviderModel?.has_key || selectedProviderModel.available_models.length === 0}
+                    title="Model"
+                    value={model}
+                    onChange={(event) => changeModel(event.target.value)}
+                  >
+                    {(selectedProviderModel?.available_models ?? []).map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="gc-language-toggle" aria-label="Output language">
+                    {outputLanguageOptions.map((language) => (
+                      <button
+                        aria-pressed={outputLanguage === language}
+                        className={`gc-language-option${outputLanguage === language ? " is-active" : ""}`}
+                        disabled={pending}
+                        key={language}
+                        type="button"
+                        onClick={() => setOutputLanguage(language)}
+                      >
+                        {language.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    className="gc-primary gc-start-analysis"
+                    disabled={pending || document.parse_status !== "completed" || !model.trim() || !selectedProviderModel?.has_key}
+                    type="button"
+                    onClick={launchAnalysis}
+                  >
+                    {pending ? "Starting..." : "▷ Start analysis"}
+                  </button>
                 </div>
 
                 {analyses.length > 0 ? (
@@ -766,71 +754,6 @@ const documentDetailStyles = `
   gap: 10px;
 }
 
-.document-detail .gc-analysis-launch {
-  display: grid;
-  gap: 12px;
-  border: 1px solid #e5eaf0;
-  border-radius: 8px;
-  background: #fbfcfd;
-  padding: 14px;
-}
-
-.document-detail .gc-analysis-launch-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.document-detail .gc-analysis-launch-heading div,
-.document-detail .gc-analysis-field {
-  display: grid;
-  min-width: 0;
-  gap: 5px;
-}
-
-.document-detail .gc-analysis-launch-heading strong,
-.document-detail .gc-analysis-field > span {
-  color: #111827;
-  font-size: 12px;
-  font-weight: 750;
-  line-height: 18px;
-}
-
-.document-detail .gc-analysis-launch-heading span {
-  color: #5b6472;
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.document-detail .gc-analysis-controls {
-  display: grid;
-  grid-template-columns: minmax(220px, 1.2fr) minmax(164px, 0.8fr) auto;
-  gap: 12px;
-  align-items: end;
-}
-
-.document-detail .gc-analysis-model-field {
-  min-width: 0;
-}
-
-.document-detail .gc-analysis-field select {
-  width: 100%;
-  min-height: 44px;
-  min-width: 0;
-  border: 1px solid #d9e0ea;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #111827;
-  padding: 0 10px;
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.document-detail .gc-start-analysis {
-  min-width: 154px;
-}
-
 .document-detail .gc-primary,
 .document-detail .gc-ghost,
 .document-detail .gc-danger,
@@ -896,7 +819,7 @@ const documentDetailStyles = `
 .document-detail .gc-title-save-button:disabled,
 .document-detail .gc-title-cancel-button:disabled,
 .document-detail .gc-language-option:disabled,
-.document-detail .gc-analysis-field select:disabled,
+.document-detail .gc-analysis-model-button:disabled,
 .document-detail .gc-copy-action:disabled {
   cursor: not-allowed;
   opacity: 0.52;
@@ -1096,7 +1019,34 @@ const documentDetailStyles = `
 }
 
 .document-detail .gc-history-panel .gc-panel-heading {
+  margin-bottom: 12px;
+}
+
+.document-detail .gc-analysis-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 16px;
+}
+
+.document-detail .gc-analysis-model-button {
+  min-height: 44px;
+  min-width: 0;
+  max-width: 260px;
+  flex: 1 1 180px;
+  border: 1px solid #d9e0ea;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 18px;
+}
+
+.document-detail .gc-start-analysis {
+  min-width: 154px;
 }
 
 .document-detail .gc-table-scroll {
@@ -1280,7 +1230,8 @@ const documentDetailStyles = `
 
 .document-detail .gc-language-toggle {
   display: grid;
-  min-height: 48px;
+  min-height: 44px;
+  flex: 0 0 104px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 2px;
   border: 1px solid #d9e0ea;
@@ -1290,7 +1241,7 @@ const documentDetailStyles = `
 }
 
 .document-detail .gc-language-option {
-  min-height: 44px;
+  min-height: 38px;
   min-width: 0;
   border: 0;
   border-radius: 4px;
@@ -1450,17 +1401,26 @@ const documentDetailStyles = `
     line-height: 29px;
   }
 
-  .document-detail .gc-document-actions,
-  .document-detail .gc-analysis-controls {
+  .document-detail .gc-document-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
   }
 
-  .document-detail .gc-document-actions .gc-danger,
-  .document-detail .gc-start-analysis,
-  .document-detail .gc-analysis-model-field {
+  .document-detail .gc-document-actions .gc-danger {
     grid-column: 1 / -1;
+  }
+
+  .document-detail .gc-analysis-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .document-detail .gc-analysis-model-button,
+  .document-detail .gc-start-analysis {
+    max-width: none;
+    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .document-detail .gc-stepper {
@@ -1481,8 +1441,13 @@ const documentDetailStyles = `
 @media (max-width: 460px) {
   .document-detail .gc-stepper,
   .document-detail .gc-document-actions,
-  .document-detail .gc-analysis-controls {
+  .document-detail .gc-analysis-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .document-detail .gc-language-toggle {
+    width: 100%;
+    flex-basis: auto;
   }
 
   .document-detail .gc-panel-heading {

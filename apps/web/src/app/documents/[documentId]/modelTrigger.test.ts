@@ -9,8 +9,8 @@ describe("document detail analysis controls", () => {
       source.indexOf('className="gc-title-toolbar"'),
       source.indexOf('<p className="gc-muted">'),
     );
-    const analysisSetupSource = source.slice(
-      source.indexOf('aria-label="Analysis setup"'),
+    const documentHeroSource = source.slice(
+      source.indexOf('className="gc-document-hero"'),
       source.indexOf('<div className="gc-stepper"'),
     );
 
@@ -18,23 +18,24 @@ describe("document detail analysis controls", () => {
     expect(titleToolbarSource).toContain("Download raw");
     expect(titleToolbarSource).toContain("Reparse");
     expect(titleToolbarSource).toContain("Delete");
-    expect(analysisSetupSource).not.toContain("Download raw");
-    expect(analysisSetupSource).not.toContain("Reparse");
-    expect(analysisSetupSource).not.toContain("Delete");
+    expect(documentHeroSource).not.toContain("gc-analysis-toolbar");
   });
 
-  it("keeps model, language, and launch in the analysis setup block", () => {
+  it("keeps model, language, and launch compactly under analysis history", () => {
     const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
-    const analysisSetupSource = source.slice(
-      source.indexOf('aria-label="Analysis setup"'),
-      source.indexOf('<div className="gc-detail-columns">'),
+    const historyPanelSource = source.slice(
+      source.indexOf('className="gc-panel gc-history-panel"'),
+      source.indexOf("{analyses.length > 0 ?"),
     );
 
-    expect(analysisSetupSource).toContain("gc-analysis-launch");
-    expect(analysisSetupSource).toContain("<span>Model</span>");
-    expect(analysisSetupSource).toContain("<span>Output language</span>");
-    expect(analysisSetupSource).toContain("▷ Start analysis");
-    expect(analysisSetupSource).toContain("changeModel");
+    expect(historyPanelSource).toContain("<h2>Analysis history</h2>");
+    expect(historyPanelSource).toContain('className="gc-analysis-toolbar"');
+    expect(historyPanelSource).toContain('aria-label="Model"');
+    expect(historyPanelSource).toContain('aria-label="Output language"');
+    expect(historyPanelSource).toContain("▷ Start analysis");
+    expect(historyPanelSource).toContain("changeModel");
+    expect(source).not.toContain("gc-analysis-launch");
+    expect(source).not.toContain("Choose output settings before starting analysis.");
     expect(source).not.toContain("gc-model-trigger");
     expect(source).not.toContain("gc-model-popover");
     expect(source).not.toContain('aria-label="Model settings"');
