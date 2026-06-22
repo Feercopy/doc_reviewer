@@ -21,6 +21,16 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Fix Devil's Advocate JSON parsing for literal control characters:
+  production analysis `74e1c7f8-7699-416c-8be0-15b8e4f5aa8a` completed the
+  main Gate Challenger run, but the linked DA prepass failed because provider
+  `choices[0].message.content` contained literal tab characters inside
+  `anchor_text` JSON strings (`Cost allocation, %\t3%\t37%...`). The worker
+  JSON validator now retries only `Invalid control character` failures with
+  permissive JSON string parsing while preserving schema validation. Verified
+  RED/GREEN regression coverage and full worker tests with
+  `.venv/bin/python -m pytest -p no:cacheprovider apps/worker/tests -q`
+  (`73 passed`, one existing passlib warning).
 - [x] Audit latest production Gate Challenger layer delivery: analysis
   `9feae0ff-ca4c-4256-aa64-a170636b2f05` is a staged Gate 3 summary run with
   `details_status=not_requested`, `7` compact Layer 1 index items, and `17`

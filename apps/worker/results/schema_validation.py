@@ -17,11 +17,20 @@ ANCHOR_COMMENT_RE = re.compile(r'^\s*[*-]\s+(?:\*|_)?["“]?(.+?)["”]?(?:\*|_)
 
 
 def parse_and_validate_json_output(*, structured_text: str, schema_path: str) -> dict:
-    payload = json.loads(_extract_json_text(structured_text))
+    payload = _loads_json_output(_extract_json_text(structured_text))
     schema = json.loads(_resolve_schema_path(schema_path).read_text(encoding="utf-8"))
     payload = _normalize_payload_for_schema(payload=payload, schema=schema, schema_path=schema_path)
     validate(instance=payload, schema=schema)
     return payload
+
+
+def _loads_json_output(json_text: str) -> Any:
+    try:
+        return json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        if "Invalid control character" not in exc.msg:
+            raise
+        return json.loads(json_text, strict=False)
 
 
 def _extract_json_text(structured_text: str) -> str:
