@@ -65,7 +65,13 @@ function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisRecord[]
     },
     {
       label: "Parsed",
-      note: parseDone ? formatDate(document.updated_at) : formatLabel(document.parse_status),
+      note: parseDone
+        ? formatDate(document.updated_at)
+        : parseFailed
+          ? "Parser failed"
+          : document.parse_status === "running"
+            ? "Parsing now"
+            : "Waiting in queue",
       state: parseDone ? "done" : parseFailed ? "blocked" : "active",
     },
     {
@@ -173,6 +179,16 @@ function compactErrorText(message: string, code: string): string {
   return code && !compact.startsWith(code) ? `${code}: ${compact}` : compact;
 }
 
+function getParseProgressText(status: DocumentRecord["parse_status"]): string {
+  if (status === "queued") {
+    return "Document is queued for parsing";
+  }
+  if (status === "running") {
+    return "Parsing document";
+  }
+  return "Preparing parsed document";
+}
+
 export default function DocumentDetailPage() {
   const params = useParams<{ documentId: string }>();
   const documentId = params.documentId;
@@ -246,6 +262,7 @@ export default function DocumentDetailPage() {
     [provider, providerModels],
   );
   const workflowSteps = useMemo(() => (document ? buildWorkflowSteps(document, analyses) : []), [analyses, document]);
+  const parseInProgress = document ? document.parse_status === "queued" || document.parse_status === "running" : false;
 
   useEffect(() => {
     if (!modelDialogOpen) {
@@ -555,6 +572,15 @@ export default function DocumentDetailPage() {
 
                 {parsedText ? (
                   <MarkdownPreview markdown={parsedText} className="gc-markdown-preview--full" />
+                ) : parseInProgress && document ? (
+                  <div className="gc-parse-loading" aria-live="polite" role="status">
+                    <span className="gc-parse-spinner" aria-hidden="true" />
+                    <div>
+                      <strong>{getParseProgressText(document.parse_status)}</strong>
+                      <p>The parsed markdown will appear here automatically when the parser finishes.</p>
+                    </div>
+                    <small>{formatLabel(document.parse_status)}</small>
+                  </div>
                 ) : (
                   <div className="gc-empty">Parsed document appears after parsing completes.</div>
                 )}
@@ -1348,8 +1374,77 @@ const documentDetailStyles = `
   text-align: center;
 }
 
+.document-detail .gc-parse-loading {
+  display: grid;
+  min-height: 180px;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid #b8d8f1;
+  border-radius: 8px;
+  background: #f6fbff;
+  color: #111827;
+  padding: 24px;
+}
+
+.document-detail .gc-parse-spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid #cfe4f5;
+  border-top-color: #1d70b8;
+  border-radius: 999px;
+  animation: gc-parse-spin 900ms linear infinite;
+}
+
+.document-detail .gc-parse-loading div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.document-detail .gc-parse-loading strong {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 760;
+  line-height: 20px;
+}
+
+.document-detail .gc-parse-loading p {
+  margin: 0;
+  color: #5b6472;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.document-detail .gc-parse-loading small {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #eaf3fb;
+  color: #1d70b8;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 14px;
+  text-transform: capitalize;
+}
+
 .document-detail .gc-empty.compact {
   min-height: 88px;
+}
+
+@keyframes gc-parse-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .document-detail .gc-parse-spinner {
+    animation: none;
+  }
 }
 
 @media (max-width: 1440px) {
@@ -1449,6 +1544,15 @@ const documentDetailStyles = `
   .document-detail .gc-panel-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .document-detail .gc-parse-loading {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .document-detail .gc-parse-loading small {
+    grid-column: 2;
+    justify-self: start;
   }
 }
 `;

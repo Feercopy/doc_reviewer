@@ -39,4 +39,14 @@ describe("document detail model trigger", () => {
     expect(source).toContain("gc-title-edit-form");
     expect(source).not.toContain("gc-title-edit-mark");
   });
+
+  it("shows an explicit parser loading state before parsed markdown is ready", () => {
+    const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
+
+    expect(source).toContain("getParseProgressText");
+    expect(source).toContain("parseInProgress");
+    expect(source).toContain('role="status"');
+    expect(source).toContain("gc-parse-spinner");
+    expect(source).toContain("The parsed markdown will appear here automatically when the parser finishes.");
+  });
 });
