@@ -14,6 +14,7 @@ import {
   type ParseStatus,
 } from "@/lib/api/documents";
 import { formatDate } from "@/lib/format";
+import { appPath } from "@/lib/routing";
 import { formatDocumentTypeLabel, getDocumentFileKind, getDocumentParsePresentation } from "./documentsDisplay";
 
 type ParseFilter = "all" | ParseStatus;
@@ -159,7 +160,7 @@ export default function DocumentsPage() {
 
     try {
       const document = await uploadDocument(form);
-      window.location.href = `/documents/${document.id}`;
+      window.location.href = appPath(`/documents/${document.id}`);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
     } finally {

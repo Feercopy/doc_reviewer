@@ -21,6 +21,16 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Render parser-produced HTML formatting in parsed document previews:
+  `MarkdownPreview` now recognizes safe parser HTML blocks and inline tags
+  (`table`, `p`, `strong`, `u`, `a`, lists) instead of showing raw tags, while
+  filtering attributes to safe links only. Verified
+  `npm --prefix apps/web run test -- markdownHtmlParser`, full frontend tests
+  (`109 passed`), and `npm --prefix apps/web run build`. Synced the changed
+  web files to `178.250.159.250`, rebuilt production web, recreated edge, and
+  verified the production bundle contains the HTML renderer plus public
+  `/doc-challanger/login`, `/doc-challanger/api/health`, and the affected
+  document route.
 - [x] Move production domain to HTTPS: public DNS for `iseremenko.ru` and
   `www.iseremenko.ru` now resolves to `178.250.159.250`, certbot issued a
   server-side Let's Encrypt certificate for both names, and production nginx
@@ -52,6 +62,21 @@ Primary plan index:
   worker renderer to `178.250.159.250`, rebuilt production `worker`, and
   verified the new container imports the tone block plus server-local and edge
   `/health`.
+- [x] Publish Gate Challenger under `iseremenko.ru/doc-challanger`: added a
+  configurable Next.js base path, route helper coverage for imperative
+  navigation, production nginx routing for `/doc-challanger` and
+  `/doc-challanger/api`, and production Compose build args for
+  `NEXT_PUBLIC_BASE_PATH=/doc-challanger`. Focused route tests, full frontend
+  tests (`106 passed`), production frontend build with `/doc-challanger`, and
+  production Compose config with dummy env pass locally. Synced the release
+  tree to `178.250.159.250`, set production public URLs to
+  `/doc-challanger/api` and `http://iseremenko.ru/doc-challanger/api`, rebuilt
+  production web, recreated edge, and verified container status, root
+  `/doc-challanger/login` redirects, edge `/doc-challanger/login`, edge
+  `/doc-challanger/api/health`, and `_next` assets under `/doc-challanger`.
+  External IP checks for `http://178.250.159.250/doc-challanger/login` and
+  `/doc-challanger/api/health` pass. Public DNS for `iseremenko.ru` still
+  returns no A/NS records on 2026-06-23; Selectel DNS setup remains required.
 - [x] Fix analysis detail permissions for document-visible analyses: direct
   `GET /analyses/{analysis_id}` now authorizes through the linked active
   document, so a non-admin user who can view the analyzed document can open

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { logout, me } from "@/lib/api/auth";
 import type { User } from "@/lib/api/types";
+import { appPath, stripAppBasePath } from "@/lib/routing";
 import { getVisibleNavItems } from "./appNavigation";
 
 export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -17,7 +18,7 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
     me()
       .then(setUser)
       .catch(() => {
-        window.location.href = "/login";
+        window.location.href = appPath("/login");
       });
   }, []);
 
@@ -25,7 +26,7 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
     setError("");
     try {
       await logout();
-      window.location.href = "/login";
+      window.location.href = appPath("/login");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Logout failed");
     }
@@ -53,7 +54,7 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
 
         <nav className="nav sidebar-nav" aria-label="Primary">
           {visibleNav.map((item) => {
-            const active = isActivePath(pathname, item.href);
+            const active = isActivePath(stripAppBasePath(pathname), item.href);
             return (
               <Link
                 aria-current={active ? "page" : undefined}

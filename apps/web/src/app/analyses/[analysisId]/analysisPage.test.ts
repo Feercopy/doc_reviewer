@@ -87,7 +87,7 @@ describe("analysis result page", () => {
     expect(pageSource).toContain("async function deleteCurrentAnalysis");
     expect(pageSource).toContain('window.confirm(`Delete analysis for "${analysisDocument?.title || "this document"}"?`)');
     expect(pageSource).toContain("await deleteAnalysis(analysis.id)");
-    expect(pageSource).toContain("window.location.href = `/documents/${analysis.document_id}`");
+    expect(pageSource).toContain("window.location.href = appPath(`/documents/${analysis.document_id}`)");
     expect(pageSource).toContain('className="analysis-danger-action"');
   });
 

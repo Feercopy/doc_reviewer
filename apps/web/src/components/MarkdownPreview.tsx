@@ -6,6 +6,17 @@ import {
   parseMarkdownParagraphLines,
   shouldInsertParagraphSpacerAfter,
 } from "./markdownParagraphParser";
+import {
+  TABLE_STRUCTURE_TAGS,
+  decodeHtmlEntities,
+  htmlBlockTagName,
+  isExternalHref,
+  parseAllowedHtmlFragment,
+  readHtmlBlock,
+  sanitizeHref,
+  type AllowedHtmlTag,
+  type HtmlNode,
+} from "./markdownHtmlParser";
 
 type MarkdownPreviewProps = {
   markdown: string;
@@ -39,6 +50,14 @@ export function MarkdownPreview({ markdown, className = "" }: MarkdownPreviewPro
         </pre>,
       );
       index += 1;
+      continue;
+    }
+
+    const htmlBlockTag = htmlBlockTagName(trimmed);
+    if (htmlBlockTag) {
+      const block = readHtmlBlock(lines, index, htmlBlockTag);
+      blocks.push(...renderAllowedHtmlNodes(parseAllowedHtmlFragment(block.html), `html-block-${index}`));
+      index = block.nextIndex;
       continue;
     }
 
@@ -207,6 +226,7 @@ function markdownTableColumnKind(header: string): "index" | "token" | "anchor" |
 function isMarkdownBlockStart(lines: string[], index: number): boolean {
   const trimmed = lines[index].trim();
   return (
+    htmlBlockTagName(trimmed) !== null ||
     /^#{1,6}\s+/.test(trimmed) ||
     trimmed.startsWith("```") ||
     /^[-*+]\s+/.test(trimmed) ||
@@ -280,32 +300,126 @@ function renderMarkdownHeading(level: number, text: string, key: string): ReactN
 
 function renderInlineMarkdown(text: string): ReactNode[] {
   const parts: ReactNode[] = [];
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/g;
+  const pattern =
+    /(\[[^\]\n]+\]\([^)]+\)|<br\s*\/?>|<(strong|b|em|i|u|a)\b[^>]*>[\s\S]*?<\/\2>|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/gi;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
+      parts.push(decodeHtmlEntities(text.slice(lastIndex, match.index)));
     }
 
     const token = match[0];
     const key = `${match.index}-${token}`;
-    if (token.startsWith("`")) {
+    const markdownLink = /^\[([^\]\n]+)\]\(([^)]+)\)$/.exec(token);
+    if (markdownLink) {
+      const href = sanitizeHref(markdownLink[2]);
+      const content = renderInlineMarkdown(markdownLink[1]);
+      parts.push(
+        href ? (
+          <a href={href} key={key} rel={isExternalHref(href) ? "noreferrer" : undefined} target={isExternalHref(href) ? "_blank" : undefined}>
+            {content}
+          </a>
+        ) : (
+          <span key={key}>{content}</span>
+        ),
+      );
+    } else if (token.startsWith("<")) {
+      parts.push(...renderAllowedHtmlNodes(parseAllowedHtmlFragment(token), `inline-html-${match.index}`));
+    } else if (token.startsWith("`")) {
       parts.push(<code key={key}>{token.slice(1, -1)}</code>);
     } else if (token.startsWith("**") || token.startsWith("__")) {
-      parts.push(<strong key={key}>{token.slice(2, -2)}</strong>);
+      parts.push(<strong key={key}>{decodeHtmlEntities(token.slice(2, -2))}</strong>);
     } else {
-      parts.push(<em key={key}>{token.slice(1, -1)}</em>);
+      parts.push(<em key={key}>{decodeHtmlEntities(token.slice(1, -1))}</em>);
     }
     lastIndex = match.index + token.length;
   }
 
   if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
+    parts.push(decodeHtmlEntities(text.slice(lastIndex)));
   }
 
   return parts;
+}
+
+function renderAllowedHtmlNodes(nodes: HtmlNode[], keyPrefix: string, parentTag?: AllowedHtmlTag): ReactNode[] {
+  return nodes
+    .map((node, index) => renderAllowedHtmlNode(node, `${keyPrefix}-${index}`, parentTag))
+    .filter((node): node is ReactNode => node !== null);
+}
+
+function renderAllowedHtmlNode(node: HtmlNode, key: string, parentTag?: AllowedHtmlTag): ReactNode | null {
+  if (node.type === "text") {
+    if (parentTag && TABLE_STRUCTURE_TAGS.has(parentTag) && !node.text.trim()) {
+      return null;
+    }
+    return decodeHtmlEntities(node.text);
+  }
+
+  const children = renderAllowedHtmlNodes(node.children, key, node.tag);
+
+  switch (node.tag) {
+    case "table":
+      return (
+        <div className="gc-md-table-scroll" key={key}>
+          <table className="gc-md-table">{children}</table>
+        </div>
+      );
+    case "thead":
+      return <thead key={key}>{children}</thead>;
+    case "tbody":
+      return <tbody key={key}>{children}</tbody>;
+    case "tr":
+      return <tr key={key}>{children}</tr>;
+    case "th":
+      return <th key={key}>{children}</th>;
+    case "td":
+      return <td key={key}>{children}</td>;
+    case "p":
+      return (
+        <p className="gc-md-html-paragraph" key={key}>
+          {children}
+        </p>
+      );
+    case "ul":
+      return (
+        <ul className="gc-md-list" key={key}>
+          {children}
+        </ul>
+      );
+    case "ol":
+      return (
+        <ol className="gc-md-list" key={key}>
+          {children}
+        </ol>
+      );
+    case "li":
+      return <li key={key}>{children}</li>;
+    case "strong":
+    case "b":
+      return <strong key={key}>{children}</strong>;
+    case "em":
+    case "i":
+      return <em key={key}>{children}</em>;
+    case "u":
+      return <u key={key}>{children}</u>;
+    case "br":
+      return <br key={key} />;
+    case "a": {
+      const href = sanitizeHref(node.attrs.href);
+      return href ? (
+        <a href={href} key={key} rel={isExternalHref(href) ? "noreferrer" : undefined} target={isExternalHref(href) ? "_blank" : undefined}>
+          {children}
+        </a>
+      ) : (
+        <span key={key}>{children}</span>
+      );
+    }
+    default:
+      return children.length ? <span key={key}>{children}</span> : null;
+  }
 }
 
 const markdownPreviewStyles = `
@@ -466,6 +580,14 @@ const markdownPreviewStyles = `
   border-bottom: 0;
 }
 
+.gc-md-html-paragraph {
+  margin: 0 0 10px;
+}
+
+.gc-md-html-paragraph:last-child {
+  margin-bottom: 0;
+}
+
 .gc-md-table .gc-md-col--index {
   width: 48px;
   min-width: 48px;
@@ -505,5 +627,16 @@ const markdownPreviewStyles = `
 
 .gc-markdown-preview em {
   color: #5b6472;
+}
+
+.gc-markdown-preview u {
+  text-underline-offset: 2px;
+}
+
+.gc-markdown-preview a {
+  color: #075e45;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 `;

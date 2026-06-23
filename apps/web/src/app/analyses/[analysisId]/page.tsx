@@ -20,6 +20,7 @@ import {
 } from "@/lib/api/documents";
 import { submitFeedback } from "@/lib/api/feedback";
 import { formatDate, formatLabel } from "@/lib/format";
+import { appPath } from "@/lib/routing";
 import {
   analysisGateDetailsOutput,
   analysisShortSummary,
@@ -231,7 +232,7 @@ export default function AnalysisDetailPage() {
     setError("");
     try {
       await deleteAnalysis(analysis.id);
-      window.location.href = `/documents/${analysis.document_id}`;
+      window.location.href = appPath(`/documents/${analysis.document_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete analysis");
       setIsDeletingAnalysis(false);

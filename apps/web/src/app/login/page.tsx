@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 
 import { login, me } from "@/lib/api/auth";
+import { appPath } from "@/lib/routing";
 
 export default function LoginPage() {
   const [loginName, setLoginName] = useState("");
@@ -13,7 +14,7 @@ export default function LoginPage() {
   useEffect(() => {
     me()
       .then(() => {
-        window.location.href = "/documents";
+        window.location.href = appPath("/documents");
       })
       .catch(() => {});
   }, []);
@@ -24,7 +25,7 @@ export default function LoginPage() {
     setPending(true);
     try {
       await login(loginName, password);
-      window.location.href = "/documents";
+      window.location.href = appPath("/documents");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {

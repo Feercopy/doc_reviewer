@@ -27,6 +27,7 @@ import {
   type RunStatus,
 } from "@/lib/api/documents";
 import { formatDate, formatLabel } from "@/lib/format";
+import { appPath } from "@/lib/routing";
 
 type WorkflowStep = {
   label: string;
@@ -352,7 +353,7 @@ export default function DocumentDetailPage() {
     setError("");
     try {
       await deleteDocument(document.id);
-      window.location.href = "/documents";
+      window.location.href = appPath("/documents");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete document");
       setPending(false);
@@ -371,7 +372,7 @@ export default function DocumentDetailPage() {
           output_language: outputLanguage,
         },
       });
-      window.location.href = `/analyses/${analysis.id}`;
+      window.location.href = appPath(`/analyses/${analysis.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to launch analysis");
     } finally {
