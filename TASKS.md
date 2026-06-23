@@ -21,6 +21,13 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Move production domain to HTTPS: public DNS for `iseremenko.ru` and
+  `www.iseremenko.ru` now resolves to `178.250.159.250`, certbot issued a
+  server-side Let's Encrypt certificate for both names, and production nginx
+  now serves `/doc-challanger` over `https://iseremenko.ru` with `www` and HTTP
+  canonical redirects. Production Compose exposes `443` and mounts
+  `/etc/letsencrypt` for edge TLS termination; API production public URL/CORS
+  settings were updated to include the HTTPS origin.
 - [x] Fix production login Private Network Access preflight: Chrome sent
   `Access-Control-Request-Private-Network: true` for
   `/doc-challanger/api/auth/login`, and FastAPI CORS returned
