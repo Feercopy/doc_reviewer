@@ -1,0 +1,453 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from uuid import uuid4
+
+import pytest
+from jsonschema import ValidationError
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.db.base import Base
+from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisCheckStep
+from app.schemas.enums import Provider, RunStatus
+from app.storage.local import LocalDocumentStorage
+from ic_review.context import ICReviewContext
+from ic_review.renderer import ROLE_ORDER, render_role_prompt, render_synthesis_prompt
+from ic_review.role_runner import run_role_step, _role_run_parameters
+
+
+@dataclass(frozen=True)
+class SnapshotStub:
+    files: dict[str, str]
+
+    def read_text(self, relative_path: str) -> str | None:
+        return self.files.get(relative_path)
+
+
+def _snapshot() -> SnapshotStub:
+    files = {
+        ".claude/commands/invest-analysis.md": "Synthesize the IC investment analysis.",
+    }
+    for role in ROLE_ORDER:
+        files[f".claude/agents/{role}.md"] = f"Original instructions for {role}."
+    return SnapshotStub(files)
+
+
+def _context(*, workbook: bool = False) -> ICReviewContext:
+    return ICReviewContext(
+        document_title="Gate 3: Courier Expansion",
+        document_type="gate_3",
+        parsed_document_text="The document claims break-even by month six.",
+        main_analysis_verdict="need_evidence",
+        main_analysis_summary="Unit economics proof is incomplete.",
+        main_analysis_structured_output={"verdict": "need_evidence", "summary": "Needs proof."},
+        main_analysis_detail_output={"layer_2": [{"id": "L2-1", "status": "fail"}]},
+        workbook_extraction_summary={"sheet_count": 2, "sheets": [{"name": "P&L"}]} if workbook else None,
+        formula_auditor_summary={"critical_formula_issues_count": 1} if workbook else None,
+        output_language="ru",
+    )
+
+
+def test_all_eight_role_prompt_names_can_be_loaded_from_snapshot():
+    snapshot = _snapshot()
+
+    prompts = [
+        render_role_prompt(role=role, context=_context(), source_snapshot=snapshot)
+        for role in ROLE_ORDER
+    ]
+
+    assert list(ROLE_ORDER) == [
+        "ic-financial-auditor",
+        "ic-product-analyst",
+        "ic-market-analyst",
+        "ic-web-researcher",
+        "ic-benchmark-valuation",
+        "ic-team-legal",
+        "ic-tech-dd",
+        "ic-risk-scenario",
+    ]
+    for role, prompt in zip(ROLE_ORDER, prompts, strict=True):
+        assert f"Original instructions for {role}." in prompt
+
+
+def test_role_prompt_includes_main_analysis_verdict_and_compact_schema_name():
+    prompt = render_role_prompt(
+        role="ic-product-analyst",
+        context=_context(),
+        source_snapshot=_snapshot(),
+    )
+
+    assert "need_evidence" in prompt
+    assert "ic-agentic-role-result.schema.json" in prompt
+    assert "Return only JSON" in prompt
+
+
+def test_role_prompt_includes_workbook_context_only_when_workbook_exists():
+    prompt_without_workbook = render_role_prompt(
+        role="ic-financial-auditor",
+        context=_context(workbook=False),
+        source_snapshot=_snapshot(),
+    )
+    prompt_with_workbook = render_role_prompt(
+        role="ic-financial-auditor",
+        context=_context(workbook=True),
+        source_snapshot=_snapshot(),
+    )
+
+    assert "Workbook Context" not in prompt_without_workbook
+    assert "Workbook Context" in prompt_with_workbook
+    assert "critical_formula_issues_count" in prompt_with_workbook
+
+
+def test_synthesis_prompt_includes_all_eight_role_outputs_and_compact_schema_name():
+    role_outputs = {
+        role: {
+            "role": role,
+            "section_keys": ["section_4"],
+            "summary": f"Summary for {role}",
+            "findings": [],
+            "data_gaps": [],
+            "numbers_used": [],
+        }
+        for role in ROLE_ORDER
+    }
+
+    prompt = render_synthesis_prompt(
+        context=_context(),
+        role_outputs=role_outputs,
+        source_snapshot=_snapshot(),
+    )
+
+    for role in ROLE_ORDER:
+        assert role in prompt
+        assert f"Summary for {role}" in prompt
+    assert "ic-agentic-review-result.schema.json" in prompt
+    assert "legacy-compatible JSON" in prompt
+    assert "compact_result" in prompt
+    assert "legacy_report_json" in prompt
+    assert "text debug artifact" in prompt
+    assert "Russian" in prompt
+
+
+def test_synthesis_prompt_requires_all_eight_role_outputs():
+    role_outputs = {
+        role: _role_result(role)
+        for role in ROLE_ORDER
+        if role != "ic-risk-scenario"
+    }
+
+    with pytest.raises(ValueError, match="missing_role_outputs:ic-risk-scenario"):
+        render_synthesis_prompt(
+            context=_context(),
+            role_outputs=role_outputs,
+            source_snapshot=_snapshot(),
+        )
+
+
+def test_render_role_prompt_rejects_unknown_role():
+    with pytest.raises(ValueError, match="unsupported_ic_role"):
+        render_role_prompt(role="not-a-role", context=_context(), source_snapshot=_snapshot())
+
+
+def test_run_role_step_persists_prompt_raw_structured_and_metadata(tmp_path):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        role_result = _role_result("ic-product-analyst")
+        check_run = _check_run(
+            analysis_id=analysis.id,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": json.dumps(role_result),
+                    "raw_output": "raw role output",
+                    "input_tokens": 12,
+                    "output_tokens": 34,
+                    "latency_ms": 56,
+                }
+            },
+        )
+        db.add_all([analysis, check_run])
+        db.commit()
+
+        structured = run_role_step(
+            session=db,
+            check_run=check_run,
+            analysis=analysis,
+            role="ic-product-analyst",
+            context=_context(),
+            source_snapshot=_snapshot(),
+            storage=LocalDocumentStorage(tmp_path / "storage"),
+        )
+
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        prompt_path = tmp_path / "storage" / "ic-review" / str(analysis.id) / str(check_run.id) / "prompts" / "ic-product-analyst.txt"
+        assert structured == role_result
+        assert step.status == RunStatus.COMPLETED.value
+        assert step.raw_output == "raw role output"
+        assert step.structured_output == role_result
+        assert step.input_tokens == 12
+        assert step.output_tokens == 34
+        assert step.latency_ms == 56
+        assert step.prompt_fingerprint
+        assert step.prompt_artifact_path == str(prompt_path)
+        assert prompt_path.read_text(encoding="utf-8")
+    finally:
+        db.close()
+
+
+def test_role_run_parameters_add_provider_timeouts_and_preserve_overrides():
+    defaulted = _role_run_parameters(
+        base_parameters={},
+        role="ic-product-analyst",
+        overrides=None,
+    )
+    overridden = _role_run_parameters(
+        base_parameters={"timeout_seconds": 120, "connect_timeout_seconds": 15, "max_retries": 1},
+        role="ic-product-analyst",
+        overrides={"timeout_seconds": 240},
+    )
+
+    assert defaulted["timeout_seconds"] == 600
+    assert defaulted["connect_timeout_seconds"] == 30
+    assert defaulted["max_retries"] == 3
+    assert defaulted["ic_review_role"] == "ic-product-analyst"
+    assert overridden["timeout_seconds"] == 240
+    assert overridden["connect_timeout_seconds"] == 15
+    assert overridden["max_retries"] == 1
+
+
+def test_run_role_step_marks_prompt_render_failure_failed(tmp_path):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        check_run = _check_run(analysis_id=analysis.id, run_parameters={})
+        db.add_all([analysis, check_run])
+        db.commit()
+
+        with pytest.raises(ValueError, match="unsupported_ic_role"):
+            run_role_step(
+                session=db,
+                check_run=check_run,
+                analysis=analysis,
+                role="not-a-role",
+                context=_context(),
+                source_snapshot=_snapshot(),
+                storage=LocalDocumentStorage(tmp_path / "storage"),
+            )
+
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        db.refresh(check_run)
+        assert step.status == RunStatus.FAILED.value
+        assert "unsupported_ic_role" in step.error_message
+        assert step.raw_output is None
+        assert step.completed_at is not None
+        assert check_run.status == RunStatus.FAILED.value
+        assert check_run.current_stage == "failed:not-a-role"
+        assert "unsupported_ic_role" in check_run.error_message
+        assert check_run.completed_at is not None
+    finally:
+        db.close()
+
+
+def test_run_role_step_role_mock_overrides_global_mock(tmp_path):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        role_result = _role_result("ic-product-analyst")
+        check_run = _check_run(
+            analysis_id=analysis.id,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": "global mock should not be used",
+                    "raw_output": "global raw",
+                    "latency_ms": 1,
+                },
+                "role_mock_provider_results": {
+                    "ic-product-analyst": {
+                        "structured_text": json.dumps(role_result),
+                        "raw_output": "role raw",
+                        "latency_ms": 2,
+                    }
+                },
+            },
+        )
+        db.add_all([analysis, check_run])
+        db.commit()
+
+        structured = run_role_step(
+            session=db,
+            check_run=check_run,
+            analysis=analysis,
+            role="ic-product-analyst",
+            context=_context(),
+            source_snapshot=_snapshot(),
+            storage=LocalDocumentStorage(tmp_path / "storage"),
+        )
+
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        assert structured == role_result
+        assert step.status == RunStatus.COMPLETED.value
+        assert step.raw_output == "role raw"
+        assert step.latency_ms == 2
+    finally:
+        db.close()
+
+
+def test_run_role_step_marks_run_failed_and_preserves_structured_text_when_schema_validation_fails(tmp_path):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        check_run = _check_run(
+            analysis_id=analysis.id,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": "not json from provider",
+                    "raw_output": "",
+                    "input_tokens": 5,
+                    "output_tokens": 7,
+                    "latency_ms": 11,
+                }
+            },
+        )
+        db.add_all([analysis, check_run])
+        db.commit()
+
+        with pytest.raises(json.JSONDecodeError):
+            run_role_step(
+                session=db,
+                check_run=check_run,
+                analysis=analysis,
+                role="ic-product-analyst",
+                context=_context(),
+                source_snapshot=_snapshot(),
+                storage=LocalDocumentStorage(tmp_path / "storage"),
+            )
+
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        db.refresh(check_run)
+        assert step.status == RunStatus.FAILED.value
+        assert step.raw_output == "not json from provider"
+        assert step.input_tokens == 5
+        assert step.output_tokens == 7
+        assert step.latency_ms == 11
+        assert "Expecting value" in step.error_message
+        assert step.completed_at is not None
+        assert check_run.status == RunStatus.FAILED.value
+        assert check_run.current_stage == "failed:ic-product-analyst"
+        assert "Expecting value" in check_run.error_message
+        assert check_run.completed_at is not None
+    finally:
+        db.close()
+
+
+def test_run_role_step_schema_validation_error_does_not_leak_provider_instance(tmp_path):
+    db = _create_session()
+    secret_evidence = "SECRET_DOCUMENT_EVIDENCE_SHOULD_NOT_RENDER"
+    try:
+        analysis = _analysis()
+        invalid_role_result = {
+            **_role_result("ic-product-analyst"),
+            "role": secret_evidence,
+        }
+        check_run = _check_run(
+            analysis_id=analysis.id,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": json.dumps(invalid_role_result),
+                    "raw_output": json.dumps(invalid_role_result),
+                    "input_tokens": 5,
+                    "output_tokens": 7,
+                    "latency_ms": 11,
+                }
+            },
+        )
+        db.add_all([analysis, check_run])
+        db.commit()
+
+        with pytest.raises(ValidationError):
+            run_role_step(
+                session=db,
+                check_run=check_run,
+                analysis=analysis,
+                role="ic-product-analyst",
+                context=_context(),
+                source_snapshot=_snapshot(),
+                storage=LocalDocumentStorage(tmp_path / "storage"),
+            )
+
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        db.refresh(check_run)
+        assert step.status == RunStatus.FAILED.value
+        assert step.error_message == "schema_validation_failed:enum"
+        assert secret_evidence not in step.error_message
+        assert check_run.status == RunStatus.FAILED.value
+        assert check_run.error_message == "schema_validation_failed:enum"
+        assert secret_evidence not in check_run.error_message
+        assert secret_evidence in (step.raw_output or "")
+    finally:
+        db.close()
+
+
+def _create_session():
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine)()
+
+
+def _analysis() -> Analysis:
+    return Analysis(
+        id=uuid4(),
+        document_id=uuid4(),
+        user_id=uuid4(),
+        skill_id=uuid4(),
+        skill_version="baseline",
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="need_evidence",
+        summary="Needs proof.",
+        structured_output={"verdict": "need_evidence"},
+        run_parameters={},
+    )
+
+
+def _check_run(*, analysis_id, run_parameters: dict) -> AnalysisCheckRun:
+    return AnalysisCheckRun(
+        id=uuid4(),
+        analysis_id=analysis_id,
+        skill_id=uuid4(),
+        skill_version="baseline",
+        check_type="ic_agentic_review",
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.RUNNING.value,
+        current_stage="role:ic-product-analyst",
+        run_parameters=run_parameters,
+        artifacts=[],
+        uploaded_workbook_metadata={},
+    )
+
+
+def _role_result(role: str) -> dict:
+    return {
+        "role": role,
+        "section_keys": ["section_5"],
+        "summary": "Product evidence is incomplete.",
+        "findings": [
+            {
+                "title": "Missing cohort proof",
+                "severity": "data_gap",
+                "evidence": "Main analysis asks for cohort retention.",
+                "recommendation": "Provide cohort table.",
+            }
+        ],
+        "data_gaps": ["Retention cohort by segment"],
+        "numbers_used": [{"label": "Retention", "value": "unknown", "source": "Gate Challenger"}],
+    }

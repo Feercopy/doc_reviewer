@@ -46,6 +46,21 @@ def test_detects_first_stream_review_from_stage_signals():
     assert "1st Stream Review" in result.explanation
 
 
+def test_detects_unqualified_stream_review_as_first_review_from_supporting_signals():
+    text = """
+    Stream review package
+
+    The document summarizes planned traction, roadmap, and success criteria
+    for the next SR.
+    """
+
+    result = detect_document_type(text)
+
+    assert result.document_type == DocumentType.STREAM_REVIEW_1
+    assert result.confidence >= 0.45
+    assert "Stream review" in result.explanation
+
+
 def test_detects_later_stream_review_from_stage_signals():
     text = """
     Stream review 2+ package
@@ -60,6 +75,22 @@ def test_detects_later_stream_review_from_stage_signals():
     assert result.document_type == DocumentType.STREAM_REVIEW_2_PLUS
     assert result.confidence >= 0.45
     assert "Stream review 2+" in result.explanation
+
+
+def test_detects_unqualified_stream_review_as_later_review_from_supporting_signals():
+    text = """
+    Stream review package
+
+    The team compares plan / fact results since the previous SR, backlog
+    updates, traction model changes, resource assumptions, and next SR
+    commitments.
+    """
+
+    result = detect_document_type(text)
+
+    assert result.document_type == DocumentType.STREAM_REVIEW_2_PLUS
+    assert result.confidence >= 0.45
+    assert "Stream review" in result.explanation
 
 
 def test_gate_1_is_not_a_supported_gate_challenger_document_type():

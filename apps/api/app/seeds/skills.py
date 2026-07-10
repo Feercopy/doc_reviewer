@@ -20,11 +20,16 @@ GATE2_BENCHMARK_DIR = Path(
 DEVILS_ADVOCATE_SOURCE_PATH = Path(
     os.getenv("DEVILS_ADVOCATE_SOURCE_PATH", "/Users/iseremenko/Documents/Common GPTs/devils-advocate")
 )
+IC_AGENTIC_REVIEW_SOURCE_PATH = Path(
+    os.getenv("IC_AGENTIC_REVIEW_SOURCE_PATH", "/Users/iseremenko/Documents/IC-Agentic-Review")
+)
 BENCHMARK_JUDGE_V2_PROMPT_PATH = "LLM-as-a-judge для оценки v2.txt"
 GATE_CHALLENGER_ENTRYPOINT = "skills/gate-challenger/SKILL.md"
 DEVILS_ADVOCATE_ENTRYPOINT = "ic-voting-prompt.md"
+IC_AGENTIC_REVIEW_ENTRYPOINT = ".claude/commands/invest-analysis.md"
 GATE_CHALLENGER_SKILL_PATH = GATE_CHALLENGER_SOURCE_PATH / GATE_CHALLENGER_ENTRYPOINT
 DEVILS_ADVOCATE_PATH = DEVILS_ADVOCATE_SOURCE_PATH / DEVILS_ADVOCATE_ENTRYPOINT
+IC_AGENTIC_REVIEW_PATH = IC_AGENTIC_REVIEW_SOURCE_PATH / IC_AGENTIC_REVIEW_ENTRYPOINT
 DEVILS_ADVOCATE_WIKI_PATH = DEVILS_ADVOCATE_SOURCE_PATH / "wiki-ic"
 GATE_CHALLENGER_REQUIRED_PATHS = [
     GATE_CHALLENGER_ENTRYPOINT,
@@ -42,6 +47,32 @@ DEVILS_ADVOCATE_REQUIRED_PATHS = [
     "wiki-ic/domains",
     "wiki-ic/personas",
     "wiki-ic/eval",
+]
+IC_AGENTIC_REVIEW_REQUIRED_PATHS = [
+    "CLAUDE.md",
+    IC_AGENTIC_REVIEW_ENTRYPOINT,
+    ".claude/agents/ic-financial-auditor.md",
+    ".claude/agents/ic-product-analyst.md",
+    ".claude/agents/ic-market-analyst.md",
+    ".claude/agents/ic-web-researcher.md",
+    ".claude/agents/ic-benchmark-valuation.md",
+    ".claude/agents/ic-team-legal.md",
+    ".claude/agents/ic-tech-dd.md",
+    ".claude/agents/ic-risk-scenario.md",
+    ".claude/agents/_common_rules.md",
+    "scripts/invest/config.py",
+    "scripts/invest/formula_auditor.py",
+    "scripts/invest/json_postprocess.py",
+    "scripts/invest/marker_parser.py",
+    "scripts/invest/metrics_lookup.py",
+    "scripts/invest/pdf_generator.py",
+    "scripts/invest/excel_audit.py",
+    "scripts/invest/validate_report.py",
+    "scripts/invest/run_pipeline.py",
+    "data/metrics_dictionary.json",
+    "data/internal_codes",
+    "fonts/DejaVuSans.ttf",
+    "fonts/DejaVuSans-Bold.ttf",
 ]
 
 
@@ -122,6 +153,7 @@ def _upsert_skill_source(db: Session, values: dict) -> SkillSource:
 def seed_baseline_skills(db: Session) -> list[Skill]:
     gate_challenger_fingerprint = _fingerprint_path(GATE_CHALLENGER_SKILL_PATH)
     devils_fingerprint = _fingerprint_path(DEVILS_ADVOCATE_PATH)
+    ic_agentic_review_fingerprint = _fingerprint_path(IC_AGENTIC_REVIEW_PATH)
     wiki_fingerprint = _fingerprint_path(DEVILS_ADVOCATE_WIKI_PATH)
     benchmark_judge_prompt, benchmark_judge_metadata = _benchmark_judge_prompt()
     gate_challenger_document_types = [item.value for item in GATE_CHALLENGER_DOCUMENT_TYPES]
@@ -151,6 +183,21 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "default_ref": "main",
             "entrypoint": DEVILS_ADVOCATE_ENTRYPOINT,
             "required_paths": DEVILS_ADVOCATE_REQUIRED_PATHS,
+            "update_policy": "require_latest",
+            "status": EntityStatus.ACTIVE.value,
+        },
+    )
+    ic_agentic_review_source = _upsert_skill_source(
+        db,
+        {
+            "slug": "ic-agentic-review",
+            "display_name": "IC Agentic Review",
+            "source_kind": "local_git_repo",
+            "local_path": str(IC_AGENTIC_REVIEW_SOURCE_PATH),
+            "repo_url": None,
+            "default_ref": "main",
+            "entrypoint": IC_AGENTIC_REVIEW_ENTRYPOINT,
+            "required_paths": IC_AGENTIC_REVIEW_REQUIRED_PATHS,
             "update_policy": "require_latest",
             "status": EntityStatus.ACTIVE.value,
         },
@@ -193,6 +240,27 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "source_metadata": {"wiki_path": str(DEVILS_ADVOCATE_WIKI_PATH), "wiki_fingerprint": wiki_fingerprint},
             "prompt_text": _read_prompt(DEVILS_ADVOCATE_PATH, "Devil's Advocate pre-defense baseline prompt."),
             "result_schema_path": "contracts/schemas/devils-advocate-result.schema.json",
+            "runtime_mode": "snapshot_required",
+            "status": EntityStatus.ACTIVE.value,
+        },
+        {
+            "name": "ic_agentic_review",
+            "description": "IC Agentic Review analysis check skill snapshot source.",
+            "version": "baseline",
+            "skill_type": SkillType.ANALYSIS_CHECK.value,
+            "supported_document_types": gate_challenger_document_types,
+            "source_type": SkillSourceType.LOCAL_SKILL_REPO.value,
+            "skill_source_id": ic_agentic_review_source.id,
+            "source_uri": str(IC_AGENTIC_REVIEW_PATH),
+            "source_entrypoint": IC_AGENTIC_REVIEW_ENTRYPOINT,
+            "source_revision": _git_revision(IC_AGENTIC_REVIEW_PATH),
+            "source_fingerprint": ic_agentic_review_fingerprint,
+            "source_metadata": {},
+            "prompt_text": _read_prompt(
+                IC_AGENTIC_REVIEW_PATH,
+                "IC Agentic Review baseline analysis check prompt.",
+            ),
+            "result_schema_path": "contracts/schemas/ic-agentic-review-result.schema.json",
             "runtime_mode": "snapshot_required",
             "status": EntityStatus.ACTIVE.value,
         },

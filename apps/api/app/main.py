@@ -16,6 +16,7 @@ from app.routers import (
     documents,
     etalons,
     feedback,
+    ic_review,
     provider_settings,
     skills,
 )
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
     api.include_router(skills.router)
     api.include_router(skills.admin_router)
     api.include_router(analyses.router)
+    api.include_router(ic_review.router)
     api.include_router(etalons.router)
     api.include_router(benchmarks.router)
     api.include_router(feedback.router)

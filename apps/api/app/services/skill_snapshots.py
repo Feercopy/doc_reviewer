@@ -14,6 +14,7 @@ def create_skill_source_snapshot(
     source: SkillSource,
     analysis_id: UUID | None,
     predicted_comment_run_id: UUID | None,
+    analysis_check_run_id: UUID | None,
     snapshot_mode: str,
 ) -> SkillSourceSnapshot:
     health = check_git_freshness(source, snapshot_mode=snapshot_mode)
@@ -41,6 +42,7 @@ def create_skill_source_snapshot(
         skill_source_id=source.id,
         analysis_id=analysis_id,
         predicted_comment_run_id=predicted_comment_run_id,
+        analysis_check_run_id=analysis_check_run_id,
         source_slug=source.slug,
         source_kind=source.source_kind,
         source_path=str(health.source_path),

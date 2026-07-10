@@ -21,6 +21,311 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Configure local Docker Compose proxy env for
+  `206.223.244.175:1080`: copied the production `OUTBOUND_PROXY_URL` credentials
+  from `/opt/gate-challenger/current/infra/.env` into gitignored local `.env`
+  and `infra/.env` without printing the secret. Recreated local `api` and
+  `worker` without rebuild so the new env is present, re-applied the worker
+  timeout hotfix files after recreation, and restarted worker. Root-caused the
+  first local proxy failure to Dante ACLs on `206.223.244.175`: only
+  `178.250.159.250/32` was allowed, while local container traffic arrived as
+  `37.113.208.129`. Added `37.113.208.129/32` to both `client pass` and
+  `socks pass` in `/etc/danted.conf` with backup
+  `/etc/danted.conf.bak-local-20260710120738`, restarted `danted`, and verified
+  worker egress through the proxy to `https://openrouter.ai/api/v1/models`
+  returns `200 application/json`. Worker also sees IC review timeout defaults
+  `600/30/3`.
+- [x] Fix local IC review `a_p_i_timeout_error` on run
+  `c53534ed-2709-4901-850d-0a5bb2b85ce8`: root cause was an
+  OpenAI-compatible provider timeout on role `ic-product-analyst`, not legacy
+  postprocess/PDF generation. The previous role completed with a larger prompt
+  (`82.8s`, `34.8k` input tokens), while `ic-product-analyst` failed after
+  `16.3s` with no raw provider output, matching SDK/proxy connect timeout
+  behavior. The OpenAI-compatible adapter now passes `timeout_seconds`,
+  `connect_timeout_seconds`, and `max_retries` into the OpenAI SDK and proxy
+  HTTP client, and IC review role/synthesis calls default to `600s` total,
+  `30s` connect timeout, and `3` retries while preserving explicit overrides.
+  Verified
+  `.venv/bin/python -m pytest apps/worker/tests/test_provider_adapters.py
+  apps/worker/tests/test_ic_review_renderer.py
+  apps/worker/tests/test_run_ic_agentic_review_job.py -q` (`47 passed`) and
+  `.venv/bin/python -m pytest apps/worker/tests/test_run_ic_agentic_review_job.py
+  apps/worker/tests/test_ic_review_script_runner.py
+  apps/worker/tests/test_ic_review_renderer.py
+  apps/worker/tests/test_provider_adapters.py -q` (`58 passed`). Local Docker
+  image rebuild is temporarily blocked by `mirror.gcr.io` metadata connection
+  refusal; copied the changed worker files into the running `infra-worker-1`
+  container and restarted it, then verified inside the container that role and
+  synthesis defaults are `600/30/3`. A direct worker egress probe to
+  `https://openrouter.ai/api/v1/models` currently returns `ConnectTimeout` with
+  no local `OUTBOUND_PROXY_URL` configured, so new runs may still fail if local
+  network access to OpenRouter remains unavailable.
+- [x] Remove legacy PDF generation from IC review deterministic artifacts:
+  worker now saves `artifacts/legacy_report.txt` as a text debug artifact
+  derived from `postprocessed_legacy_report.json`, runs `validate_report.py`
+  with JSON-only input when no workbook is provided and JSON+Excel when a
+  workbook is provided, and persists artifact kind `legacy_report_text` instead
+  of `legacy_report_pdf`. Verified
+  `.venv/bin/python -m pytest apps/worker/tests/test_ic_review_script_runner.py
+  apps/worker/tests/test_run_ic_agentic_review_job.py
+  apps/worker/tests/test_ic_review_renderer.py -q` (`43 passed`),
+  `.venv/bin/python -m pytest apps/worker/tests/test_run_ic_agentic_review_job.py
+  apps/worker/tests/test_ic_review_script_runner.py
+  apps/worker/tests/test_ic_review_renderer.py
+  apps/worker/tests/test_provider_adapters.py -q` (`55 passed`),
+  `.venv/bin/python -m pytest apps/api/tests/test_contract_schemas.py
+  apps/api/tests/test_ic_review_api.py -q` (`40 passed`), and
+  `npm --prefix apps/web run test -- analysisPage icReviewDisplay` (`24
+  passed`). Safe local replay on normalized stored legacy JSON with the real
+  IC source scripts produced `json_postprocess=0`, `validate_report=0`,
+  `0` validation failures, a `legacy_report.txt` artifact, and no
+  `legacy_report.pdf`.
+- [x] Fix local IC review deterministic validation failure on run
+  `cb6c52c9-e949-43f3-8427-f33f2b2aca43`: root cause was not provider output
+  generation but legacy-script compatibility after synthesis. The compact
+  result was valid, while the legacy payload had `scenarios` as a list and
+  empty sections; the original `json_postprocess.py` / `validate_report.py`
+  expect `scenarios` as an object. The worker now converts
+  legacy scenarios to script-compatible objects, fills empty legacy sections
+  from the compact result for internal artifact generation, while keeping raw
+  synthesis output unchanged. Verified
+  `.venv/bin/python -m pytest apps/worker/tests/test_run_ic_agentic_review_job.py
+  apps/worker/tests/test_ic_review_script_runner.py
+  apps/worker/tests/test_ic_review_renderer.py
+  apps/worker/tests/test_provider_adapters.py -q` (`56 passed`), rebuilt the
+  local worker container, and safely replay-ran the deterministic script
+  pipeline on the stored synthesis raw without model/document re-send
+  (`json_postprocess` and `validate_report` exit `0`; validation has `0`
+  failures).
+- [x] Fix local IC review synthesis wrapper validation on run
+  `f5636d12-ed1d-49e2-acaf-90e8db44c4c8`: root cause was a valid provider
+  synthesis that returned compact output plus a legacy report shell, but the
+  compact `role_summaries[].summary` exceeded the UI schema `maxLength` and the
+  legacy `sections` object was empty. The worker now normalizes legacy sections
+  before deterministic scripts and trims compact-result strings according to
+  schema `maxLength` before local validation, while preserving the original raw
+  synthesis output separately. Verified
+  `.venv/bin/python -m pytest apps/worker/tests/test_run_ic_agentic_review_job.py
+  apps/worker/tests/test_provider_adapters.py
+  apps/worker/tests/test_ic_review_renderer.py -q` (`43 passed`), rebuilt the
+  local worker container, and safely replay-validated the stored synthesis raw
+  without printing document/model text (`8` role summaries, max summary length
+  `500`, `10` legacy sections).
+- [x] Fix local IC review synthesis `bad_request_error` on run
+  `cf34574c-db6f-47b0-9770-6a2be56a16bd`: root cause was the OpenAI-compatible
+  provider rejecting Anthropic/OpenRouter `response_format` JSON Schema for the
+  synthesis wrapper. The compact result schema used numeric `minimum`/`maximum`
+  bounds, and the nested compact schema kept `$ref` values that provider-side
+  validation resolved against a wrapper root without `$defs`. Extended provider
+  schema normalization to strip unsupported numeric bounds while preserving
+  local contract validation, hoisted compact-result `$defs` to the synthesis
+  wrapper root, rebuilt the local worker, and verified a minimal provider probe
+  with the same model/schema succeeds without document text. Also fixed the IC
+  review failed banner separator so UI no longer renders
+  `IC review failedbad_request_error`, and rebuilt the local web container.
+  Verified
+  `.venv/bin/python -m pytest apps/worker/tests/test_provider_adapters.py
+  apps/worker/tests/test_run_ic_agentic_review_job.py
+  apps/worker/tests/test_ic_review_renderer.py -q` (`41 passed`) and
+  `npm --prefix apps/web run test -- analysisPage` (`19 passed`).
+- [x] Fix Stream Review auto-detection regression found on local document
+  `e1bcfea7-e0c2-4ab8-9364-d7049354e843`: root cause was an overly strict
+  detector that ignored unnumbered `Stream review` titles unless they matched
+  exact `1st Stream Review` / `Stream review 2+` phrases. Added weak generic
+  Stream Review signals that still require stage-supporting evidence, verified
+  `.venv/bin/python -m pytest apps/api/tests/test_document_type_detector.py -q`
+  (`7 passed`, existing warning), rebuilt local API/worker containers, and
+  reparsed the document; it now stores `stream_review_1`, confidence `0.45`,
+  with parse status `completed`.
+- [x] Implement Task 10 Analysis Page IC Review Tab: added manual `IC review`
+  analysis tab between document comments and full output, configured
+  provider/model and output-language controls, optional client-validated
+  `.xlsx` upload, completed-analysis launch gate, active-run polling via
+  embedded `ic_review_run`, current-stage display, compact completed-result
+  rendering without raw/admin artifacts, failed-run relaunch support, file-input
+  reset after launch/invalid upload, and pure display helper coverage. Verified
+  `npm --prefix apps/web run test -- analysisPage icReviewDisplay`
+  (`24 passed`) and
+  `npm --prefix apps/web run test -- analysisPage analysisDisplay documents
+  icReviewDisplay` (`73 passed`).
+- [x] Implement Task 11 IC Agentic Review verification/regression suite:
+  reviewed acceptance risks, fixed worker error-message sanitization so
+  `jsonschema.ValidationError` / unknown provider exceptions cannot persist
+  rejected provider instances into user-visible IC review errors while raw
+  outputs remain preserved separately, and added regression coverage for role
+  and full worker-job schema failures. Verified
+  `.venv/bin/python -m pytest apps/api/tests/test_ic_review_api.py
+  apps/api/tests/test_seeds.py apps/api/tests/test_skill_sources.py
+  apps/api/tests/test_contract_schemas.py -q` (`60 passed`, existing warnings),
+  `.venv/bin/python -m pytest apps/worker/tests/test_ic_review_errors.py
+  apps/worker/tests/test_ic_review_renderer.py
+  apps/worker/tests/test_ic_review_script_runner.py
+  apps/worker/tests/test_run_ic_agentic_review_job.py -q` (`42 passed`),
+  `npm --prefix apps/web run test -- analysisPage icReviewDisplay documents`
+  (`54 passed`), broader API regression
+  `.venv/bin/python -m pytest apps/api/tests/test_analyses_api.py
+  apps/api/tests/test_documents_upload.py -q` (`32 passed`, existing warnings),
+  broader worker regression
+  `.venv/bin/python -m pytest apps/worker/tests/test_run_analysis_job.py
+  apps/worker/tests/test_run_predicted_comments_job.py -q` (`15 passed`,
+  existing warning), full frontend `npm --prefix apps/web run test`
+  (`120 passed`), `docker compose -f infra/docker-compose.yml config`, and
+  `docker compose -f infra/docker-compose.yml up -d --build web` after starting
+  Colima (rebuilt/restarted local `infra-api` and `infra-web`; Docker `npm ci`
+  reported 2 moderate audit warnings).
+- [x] Implement Task 9 Frontend API Client for IC Agentic Review: added
+  frontend shared IC review run/step/result types, embedded
+  `AnalysisRecord.ic_review_run`, FormData-based launch client with optional
+  `.xlsx` file omission when absent, and read/list/latest endpoint helpers.
+  Verified `npm --prefix apps/web run test -- documents` (`30 passed`).
+- [x] Implement Task 8 API read model embedding for IC Agentic Review: main
+  `AnalysisRead` now includes the latest `ic_agentic_review` check run via the
+  existing sanitized/admin-aware IC review serializer, so normal users see
+  status, compact structured output, and source trace without raw/path fields,
+  while admins see raw outputs and artifact path metadata. Review fixes made
+  legacy output and role-step structured outputs admin-only, recursively strip
+  path-like run parameter keys for non-admins, and added stable latest-run
+  ordering. Verified
+  `.venv/bin/python -m pytest apps/api/tests/test_ic_review_api.py -q`
+  (`19 passed`, existing warnings).
+- [x] Implement Task 7 IC Agentic Review worker job: added
+  `run_ic_agentic_review` orchestration for queued/running/completed/failed and
+  pre-cancelled runs, source snapshot workspace preparation, optional workbook
+  snapshot plus formula audit, eight ordered role calls with raw-output
+  preservation, synthesis prompt/raw/compact+legacy persistence, legacy JSON
+  artifact writing, deterministic script pipeline artifact/log capture,
+  validation report parsing, and failed-run preservation after role/provider
+  errors. Added focused mocked worker coverage for no-workbook, workbook,
+  synthesis prompt/artifact persistence, role raw outputs, script artifacts, and
+  provider failure after role 3. Verified
+  `.venv/bin/python -m pytest apps/worker/tests/test_run_ic_agentic_review_job.py
+  -q` (`3 passed`).
+  Review fixes added atomic queued-only claiming/idempotency, cancelled
+  finalization, parent-analysis completion gate in the worker, workbook
+  upload-dir boundary checks, DB-owned source snapshot lookup with storage-root
+  validation, local synthesis wrapper schema validation, legacy JSON shape/type
+  validation before script persistence, bounded subprocess environment for
+  deterministic scripts, latest completed detail-run context, single formula
+  audit reuse, explicit failed spreadsheet audit persistence including workbook
+  extraction failures, deterministic script stage transitions, and regression
+  coverage. Verified
+  `.venv/bin/python -m pytest apps/worker/tests/test_run_ic_agentic_review_job.py
+  apps/worker/tests/test_ic_review_script_runner.py
+  apps/worker/tests/test_ic_review_renderer.py -q` (`37 passed`).
+- [x] Implement Task 6 prompt rendering and role execution for IC Agentic
+  Review: added serializable review context construction, fixed eight-role
+  prompt order, snapshot-backed role and synthesis prompt renderers, guarded
+  prompt artifact persistence under `ic-review/{analysis_id}/{run_id}/prompts`,
+  synthesis wrapper output for compact + legacy JSON, and direct
+  provider-backed role step execution with raw-output preservation and schema
+  validation, including parent-run failure marking and usage metadata on failed
+  role validation. Verified
+  `.venv/bin/python -m pytest apps/worker/tests/test_ic_review_renderer.py -q`
+  (`10 passed`) plus `py_compile`; Task 5+6 worker tests pass together
+  (`19 passed`).
+- [x] Implement Task 5 worker workbook parser and deterministic IC review
+  script runner: added bounded `.xlsx` snapshot extraction, snapshot-to-run
+  workspace preparation with path traversal checks, DB-owned run-dir boundaries
+  for script inputs/logs/artifacts, no-shell streaming subprocess runner with
+  finite timeout and process-group cleanup, bounded stdout/stderr capture,
+  validation reports that include stderr and exit metadata on failure,
+  workbook/no-workbook script orchestration, worker
+  `ic_review*` package discovery, and external runtime dependencies in
+  `apps/worker/pyproject.toml`. Verified
+  `.venv/bin/python -m pytest apps/worker/tests/test_ic_review_script_runner.py
+  -q` (`9 passed`), including real `openpyxl` workbook extraction coverage.
+- [x] Implement Task 4 API launch/read/workbook upload for IC Agentic Review:
+  added manual IC review run endpoints, completed-analysis gate, provider/model
+  allowlist validation, `.xlsx`-only workbook storage under
+  `ic-review/{analysis_id}/{run_id}/uploads`, skill source snapshots linked to
+  `analysis_check_run_id`, sanitized non-admin read models, and DB-owned
+  artifact download lookup. Review fixes added admin-by-default artifact
+  download visibility, IC-review run path-prefix enforcement, OpenXML `.xlsx`
+  sanity validation, source-snapshot failure upload cleanup, and enqueue-failure
+  marking. Verified
+  `.venv/bin/python -m pytest apps/api/tests/test_ic_review_api.py -q`
+  (`15 passed`, existing warnings) and
+  `.venv/bin/python -m pytest apps/api/tests/test_seeds.py
+  apps/api/tests/test_skill_sources.py -q` (`20 passed`, existing warnings).
+- [x] Implement Task 3 seed for IC Agentic Review skill source: added
+  `IC_AGENTIC_REVIEW_SOURCE_PATH`, active `ic-agentic-review` local repo source
+  with the required prompt/script/font/data manifest paths, and baseline
+  `ic_agentic_review` `analysis_check` skill linked to the source. Added seed
+  and temporary-source manifest coverage for the IC entrypoint, all eight agent
+  prompts, deterministic scripts, schema path, and Gate Challenger document
+  types. Verified
+  `.venv/bin/python -m pytest apps/api/tests/test_seeds.py
+  apps/api/tests/test_skill_sources.py -q` (`20 passed`, existing warnings).
+- [x] Implement Task 2 database foundation for IC Agentic Review checks:
+  added `analysis_check_runs` and `analysis_check_steps`, added
+  `analysis_check` skill type, extended skill source snapshots to support
+  `analysis_check_run_id` with exactly-one-owner enforcement, and added focused
+  model persistence coverage. Verified
+  `.venv/bin/python -m pytest apps/api/tests/test_ic_review_api.py
+  apps/api/tests/test_skill_sources.py -q` (`15 passed`), applied the new
+  Alembic migration from previous head `202606180001` to `202607090001`, and
+  verified downgrade deletes IC-review-owned snapshots before restoring the old
+  two-owner snapshot schema. A fresh full SQLite Alembic upgrade remains
+  blocked earlier at existing migration `202606080002`.
+- [x] Draft implementation plan for the intermediate IC Agentic Review
+  integration requested on 2026-07-09:
+  `docs/superpowers/plans/2026-06-05-gate-challenger-service/12-ic-agentic-review-check.md`.
+  Scope: manual `IC review` analysis tab, completed-analysis gate, optional
+  `.xlsx` upload/audit on that tab, single worker flow using the original IC
+  role prompts without subagents, saved role raw outputs, synthesis prompt,
+  script logs, validation report, and compact UI-native result.
+- [x] Assess `/Users/iseremenko/Documents/IC-Agentic-Review` integration as an
+  optional user-requested analysis check. Conclusion: feasible, but should be
+  integrated as a separate reproducible auxiliary run with its own schema,
+  source snapshot, raw/structured outputs, artifacts, and non-blocking failure
+  semantics. Full parity requires package/material support for `.xlsx` inputs
+  and a worker-native replacement for the Claude Code multi-agent/desktop
+  pipeline; a text-only MVP can run from existing parsed document text with
+  reduced financial-audit coverage.
+- [x] Audit and refresh Gate Challenger / Devil's Advocate skill sources:
+  fetched local upstream refs for
+  `/Users/iseremenko/Projects/Gate2-challenger` and
+  `/Users/iseremenko/Documents/Common GPTs/devils-advocate`; both local
+  checkouts are at `origin/main` (`a738279` for Gate Challenger, `18925f0`
+  for Devil's Advocate). Gate Challenger is clean; Devil's Advocate has local
+  uncommitted changes, including `ic-voting-prompt.md`, scripts, and
+  `wiki-ic/ops/log.md`. Focused verification passed:
+  `.venv/bin/python -m pytest apps/api/tests/test_seeds.py
+  apps/api/tests/test_skill_sources.py apps/worker/tests/test_skill_renderers.py
+  -q` (`27 passed`). Production read-only audit found the app uses
+  `snapshot_required` skills and non-stub prompts, but production
+  `/opt/gate-challenger/external/gate-challenger/skills/gate-challenger/SKILL.md`
+  is older than the local latest source (`eba956...` vs `35e9a4...`), and DA
+  required-source manifest also differs from local. After explicit approval,
+  created production backup
+  `/opt/gate-challenger/backups/skill-source-sync-20260707231535`, verified DA
+  required runtime files already matched local canonical source, and updated
+  only production Gate `SKILL.md` (no broad `--delete`, no references/DA
+  overwrite). Refreshed only production
+  `gate2_challenger_main_analysis` DB `prompt_text` and `source_fingerprint`;
+  final production service manifests match local (`gate-challenger`
+  `87b81d...`, `devils-advocate` `b02cd1...`). Verified production containers
+  remained up and server-local plus edge `/health` returned `ok`; reran focused
+  local tests (`27 passed`, same existing warnings).
+- [x] Route production provider egress through Kazakhstan SOCKS5 proxy:
+  installed and configured Dante on `206.223.244.175:1080` with username
+  authentication and Dante allow rules for production host `178.250.159.250`.
+  Updated production `/opt/gate-challenger/current/infra/.env`
+  `OUTBOUND_PROXY_URL` with a root-only backup
+  `.env.bak.proxy-20260707224839`, recreated production `api` and `worker`,
+  and recreated `edge` to refresh Docker upstreams. Verified from production
+  worker that proxied egress resolves to `206.223.244.175`, OpenRouter
+  `/api/v1/models` returns `200 application/json` through the proxy, and both
+  server-local plus public `/doc-challanger/api/health` return `ok`.
+- [x] Reparse production DOCX document
+  `dc35942a-eebe-422d-8412-b8eb2df9ee03` after the OOXML parser deployment.
+  Triggered reparse through the production API on `178.250.159.250`; worker job
+  `ea32f002-5739-4bc3-8c5c-43144f5462b7` completed in about 1 second.
+  Verified `parse_status=completed`, `parse_error=None`,
+  `detected_document_type=gate_3`, `document_type_confidence=0.85`,
+  `parsed_text_len=69852`, markdown headings/tables/ordered lists present,
+  `parser_name=ooxml-docx`, `parser_source=zipfile.ElementTree`, `210` blocks,
+  and `27` parsed tables. No document text was printed during verification.
 - [x] Port DOCX structured markdown extraction from Doc_challanger into the
   worker parser: `.docx` / `.dotx` now use a deterministic OOXML zip parser
   that preserves heading styles, numbered lists, table markdown, escaped pipes,
@@ -36,6 +341,13 @@ Primary plan index:
   production `worker`, and verified production container status, worker logs,
   worker parser import, server-local `/health`, and edge
   `/doc-challanger/api/health`.
+- [x] Import 2026-06-25 project handoff into
+  `docs/handoffs/2026-06-25-gate-challenger-service.md`: preserved production
+  paths, deployment notes, recent commit history, audit findings, and external
+  skill-repo context. Reconciled the imported stale dirty-state warning against
+  the current clean `main` / `origin/main` at `c46f4b8`, where the
+  `Document comments` markdown renderer has already been completed and
+  released.
 - [x] Render DOCX-derived markdown inside analysis `Document comments`: the
   analysis document/comment view now preserves headings, lists, markdown
   tables, escaped pipes, and `<br>` line breaks while keeping Devil's Advocate
@@ -1101,3 +1413,34 @@ Exit criteria:
   `http://127.0.0.1:3000`. Backend contract pytest could not run in the host or
   runtime api container because pytest/dev dependencies are not installed
   there.
+- 2026-07-10: Debugged a local document parsing stall after rebuilding the
+  frontend/API stack. The web and API containers were healthy, but the worker
+  service was not running, leaving the uploaded document queued in Redis. Started
+  and rebuilt the worker container; the queued `.docx` parse completed, the
+  document moved to `parse_status=completed`, Redis document queue drained to
+  zero, and local web/API checks returned HTTP 200 on `127.0.0.1`.
+- 2026-07-10: Fixed local `ERR_SOCKET_NOT_CONNECTED` failures on
+  `http://localhost:3000` after tracing them to broken IPv6 localhost forwarding
+  in the Docker/Colima port binding. Updated local Compose to publish API/web on
+  `127.0.0.1` and to use `http://127.0.0.1:8000` as the public API base URL.
+  Recreated API/web containers and verified both `localhost` and `127.0.0.1`
+  return HTTP 200 for the document page and API docs.
+- 2026-07-10: Fixed local Start Analysis precondition
+  `No active main analysis skill is available`. Root cause was an empty local
+  `skills` table after reinitializing local users/documents. Added local Compose
+  IC Agentic Review source mount/env so baseline seeding has all external
+  sources, recreated API/worker containers, ran `app.seeds.skills`, and verified
+  six active baseline skills including `gate2_challenger_main_analysis`.
+- 2026-07-10: Fixed local Start Analysis `Failed to fetch` caused by API 500
+  during skill source snapshot creation. The local database was still at
+  Alembic `202606180001` while the code expected `202607090001`, so
+  `skill_source_snapshots.analysis_check_run_id` was missing. Ran
+  `alembic upgrade head` in the API container and verified snapshot creation for
+  `gate-challenger` succeeds in a rollback smoke test.
+- 2026-07-10: Root-caused missing Devil's Advocate output on analysis
+  `4878a5fa-fbf6-4049-97cb-a889b9939896` to document typing, not DA runtime.
+  The uploaded document was `detected_document_type=unknown` with no manual
+  override, so the DA prepass skipped the `devils_advocate_predefense` skill
+  and no `predicted_comment_run` was created. Fixed the document detail launch
+  payload to prefer `manual_document_type` over `detected_document_type` and
+  verified the focused frontend tests pass.

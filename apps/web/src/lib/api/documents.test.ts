@@ -11,6 +11,12 @@ import {
   patchDocumentType,
   uploadDocument,
 } from "./documents";
+import {
+  createIcReviewRun,
+  getIcReviewRun,
+  getLatestIcReviewRun,
+  listIcReviewRuns,
+} from "./ic-review";
 
 const originalFetch = global.fetch;
 
@@ -153,6 +159,78 @@ describe("documents api", () => {
         method: "POST",
         credentials: "include",
       }),
+    );
+  });
+
+  it("launches IC review with multipart provider, model, output language, and file", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "run-id" }) });
+    global.fetch = fetchMock;
+    const financialModel = new File(["xlsx"], "model.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    await createIcReviewRun("analysis-id", {
+      provider: "openai_compatible",
+      model: "gpt-test",
+      output_language: "en",
+      financial_model: financialModel,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/analyses/analysis-id/ic-review-runs",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+      }),
+    );
+    const init = fetchMock.mock.calls[0][1];
+    const body = init.body as FormData;
+    expect(init.headers).toBeUndefined();
+    expect(body.get("provider")).toBe("openai_compatible");
+    expect(body.get("model")).toBe("gpt-test");
+    expect(body.get("output_language")).toBe("en");
+    expect(body.get("financial_model")).toBe(financialModel);
+  });
+
+  it("launches IC review without appending absent financial model", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "run-id" }) });
+    global.fetch = fetchMock;
+
+    await createIcReviewRun("analysis-id", {
+      provider: "anthropic_compatible",
+      model: "claude-test",
+      output_language: "ru",
+    });
+
+    const body = fetchMock.mock.calls[0][1].body as FormData;
+    expect(body.get("provider")).toBe("anthropic_compatible");
+    expect(body.get("model")).toBe("claude-test");
+    expect(body.get("output_language")).toBe("ru");
+    expect(body.has("financial_model")).toBe(false);
+  });
+
+  it("reads IC review runs through run, list, and latest endpoints", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "run-id" }) });
+    global.fetch = fetchMock;
+
+    await getIcReviewRun("run-id");
+    await listIcReviewRuns("analysis-id");
+    await getLatestIcReviewRun("analysis-id");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8000/ic-review-runs/run-id",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8000/analyses/analysis-id/ic-review-runs",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://localhost:8000/analyses/analysis-id/ic-review-runs/latest",
+      expect.objectContaining({ credentials: "include" }),
     );
   });
 });

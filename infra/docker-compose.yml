@@ -41,12 +41,13 @@ services:
       DATABASE_URL: postgresql+psycopg://gate:gate@postgres:5432/gate
       REDIS_URL: redis://redis:6379/0
       STORAGE_ROOT: /var/lib/gate-challenger/storage
-      PUBLIC_API_BASE_URL: http://localhost:8000
+      PUBLIC_API_BASE_URL: http://127.0.0.1:8000
       HERMES_ENABLED: "false"
       HERMES_MODE: http
       HERMES_HTTP_URL: http://127.0.0.1:8787
       GATE_CHALLENGER_SOURCE_PATH: /external/gate-challenger
       DEVILS_ADVOCATE_SOURCE_PATH: /external/devils-advocate
+      IC_AGENTIC_REVIEW_SOURCE_PATH: /external/ic-agentic-review
       OUTBOUND_PROXY_URL: ${OUTBOUND_PROXY_URL:-}
       ALL_PROXY: ${OUTBOUND_PROXY_URL:-}
       HTTP_PROXY: ${OUTBOUND_PROXY_URL:-}
@@ -57,11 +58,12 @@ services:
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
       no_proxy: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - storage_data:/var/lib/gate-challenger/storage
       - "${GATE_CHALLENGER_HOST_PATH:-/Users/iseremenko/Projects/Gate2-challenger}:/external/gate-challenger:ro"
       - "${DEVILS_ADVOCATE_HOST_PATH:-/Users/iseremenko/Documents/Common GPTs/devils-advocate}:/external/devils-advocate:ro"
+      - "${IC_AGENTIC_REVIEW_HOST_PATH:-/Users/iseremenko/Documents/IC-Agentic-Review}:/external/ic-agentic-review:ro"
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,6 +91,7 @@ services:
       HERMES_HTTP_URL: http://127.0.0.1:8787
       GATE_CHALLENGER_SOURCE_PATH: /external/gate-challenger
       DEVILS_ADVOCATE_SOURCE_PATH: /external/devils-advocate
+      IC_AGENTIC_REVIEW_SOURCE_PATH: /external/ic-agentic-review
       OUTBOUND_PROXY_URL: ${OUTBOUND_PROXY_URL:-}
       ALL_PROXY: ${OUTBOUND_PROXY_URL:-}
       HTTP_PROXY: ${OUTBOUND_PROXY_URL:-}
@@ -102,6 +105,7 @@ services:
       - storage_data:/var/lib/gate-challenger/storage
       - "${GATE_CHALLENGER_HOST_PATH:-/Users/iseremenko/Projects/Gate2-challenger}:/external/gate-challenger:ro"
       - "${DEVILS_ADVOCATE_HOST_PATH:-/Users/iseremenko/Documents/Common GPTs/devils-advocate}:/external/devils-advocate:ro"
+      - "${IC_AGENTIC_REVIEW_HOST_PATH:-/Users/iseremenko/Documents/IC-Agentic-Review}:/external/ic-agentic-review:ro"
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,9 +118,9 @@ services:
       args:
         NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-mirror.gcr.io/library/node:22-alpine}
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8000
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - api
 

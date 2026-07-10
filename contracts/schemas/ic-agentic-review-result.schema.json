@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gate-challenger.local/schemas/ic-agentic-review-result.schema.json",
+  "title": "IcAgenticReviewResult",
+  "type": "object",
+  "required": [
+    "run_mode",
+    "verdict",
+    "executive_brief",
+    "confidence",
+    "top_findings",
+    "key_numbers",
+    "spreadsheet_audit",
+    "critical_risks",
+    "data_gaps",
+    "required_actions",
+    "questions_for_team",
+    "role_summaries",
+    "validation",
+    "artifacts"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "run_mode": { "type": "string", "const": "ic_agentic_review_compact" },
+    "verdict": { "type": "string", "enum": ["GO", "CONDITIONAL", "NO-GO", "FREEZE", "UNKNOWN"] },
+    "executive_brief": { "type": "string", "minLength": 400, "maxLength": 1200 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "top_findings": {
+      "type": "array",
+      "maxItems": 7,
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "key_numbers": {
+      "type": "array",
+      "maxItems": 12,
+      "items": { "$ref": "#/$defs/key_number" }
+    },
+    "spreadsheet_audit": { "$ref": "#/$defs/spreadsheet_audit" },
+    "critical_risks": {
+      "type": "array",
+      "maxItems": 7,
+      "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+    },
+    "data_gaps": {
+      "type": "array",
+      "maxItems": 7,
+      "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+    },
+    "required_actions": {
+      "type": "array",
+      "maxItems": 7,
+      "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+    },
+    "questions_for_team": {
+      "type": "array",
+      "maxItems": 7,
+      "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+    },
+    "role_summaries": {
+      "type": "array",
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/role_summary" }
+    },
+    "validation": { "$ref": "#/$defs/validation" },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 12,
+      "items": { "$ref": "#/$defs/artifact" }
+    }
+  },
+  "$defs": {
+    "ic_role": {
+      "type": "string",
+      "enum": [
+        "ic-financial-auditor",
+        "ic-product-analyst",
+        "ic-market-analyst",
+        "ic-web-researcher",
+        "ic-benchmark-valuation",
+        "ic-team-legal",
+        "ic-tech-dd",
+        "ic-risk-scenario"
+      ]
+    },
+    "finding": {
+      "type": "object",
+      "required": ["title", "severity", "summary", "evidence", "recommendation"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "severity": { "type": "string", "enum": ["blocker", "critical", "high", "medium", "info", "data_gap"] },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "evidence": { "type": "string", "minLength": 1, "maxLength": 700 },
+        "recommendation": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "key_number": {
+      "type": "object",
+      "required": ["label", "value", "unit", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "value": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "unit": { "type": "string", "maxLength": 40 },
+        "source": { "type": "string", "minLength": 1, "maxLength": 240 }
+      }
+    },
+    "spreadsheet_audit": {
+      "type": "object",
+      "required": ["status", "summary", "formula_issues_count", "critical_formula_issues_count", "source_filename"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["not_provided", "completed", "failed"] },
+        "summary": { "type": "string", "maxLength": 700 },
+        "formula_issues_count": { "type": "integer", "minimum": 0 },
+        "critical_formula_issues_count": { "type": "integer", "minimum": 0 },
+        "source_filename": {
+          "anyOf": [
+            { "type": "string", "minLength": 1, "maxLength": 255 },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "role_summary": {
+      "type": "object",
+      "required": ["role", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "role": { "$ref": "#/$defs/ic_role" },
+        "summary": { "type": "string", "minLength": 120, "maxLength": 500 }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": ["status", "summary", "warnings_count", "failures_count"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "warn", "fail", "not_run"] },
+        "summary": { "type": "string", "maxLength": 700 },
+        "warnings_count": { "type": "integer", "minimum": 0 },
+        "failures_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["kind", "filename", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["formula_audit", "legacy_report_json", "legacy_report_text", "legacy_audit_xlsx", "validation_report", "script_log", "other"]
+        },
+        "filename": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "summary": { "type": "string", "maxLength": 500 }
+      }
+    }
+  }
+}

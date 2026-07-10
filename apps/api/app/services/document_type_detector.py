@@ -16,6 +16,7 @@ class _DetectionRule:
     document_type: DocumentType
     exact_phrases: tuple[str, ...]
     supporting_keywords: tuple[str, ...]
+    weak_phrases: tuple[str, ...] = ()
 
 
 _RULES = (
@@ -46,6 +47,7 @@ _RULES = (
             "IC readiness",
             "next SR",
         ),
+        weak_phrases=("Stream review",),
     ),
     _DetectionRule(
         document_type=DocumentType.STREAM_REVIEW_2_PLUS,
@@ -59,6 +61,7 @@ _RULES = (
             "next SR commitments",
             "traffic-light",
         ),
+        weak_phrases=("Stream review",),
     ),
     _DetectionRule(
         document_type=DocumentType.GATE_3,
@@ -108,12 +111,21 @@ def detect_document_type(text: str) -> DocumentTypeDetection:
 def _score_rule(rule: _DetectionRule, normalized_text: str) -> tuple[Decimal, DocumentType, list[str]]:
     score = Decimal("0.0")
     matches: list[str] = []
+    exact_match = False
 
     for phrase in rule.exact_phrases:
         if phrase.casefold() in normalized_text:
             score += Decimal("0.35")
             matches.append(phrase)
+            exact_match = True
             break
+
+    if not exact_match:
+        for phrase in rule.weak_phrases:
+            if phrase.casefold() in normalized_text:
+                score += Decimal("0.25")
+                matches.append(phrase)
+                break
 
     keyword_score = Decimal("0.0")
     for keyword in rule.supporting_keywords:

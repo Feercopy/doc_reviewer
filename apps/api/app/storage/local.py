@@ -5,6 +5,7 @@ from uuid import UUID
 import hashlib
 import json
 import re
+import shutil
 import unicodedata
 
 
@@ -75,6 +76,61 @@ class LocalDocumentStorage:
             size_bytes=size_bytes,
             safe_original_filename=safe_original_filename,
         )
+
+    def save_ic_review_workbook(
+        self,
+        *,
+        analysis_id: UUID,
+        run_id: UUID,
+        original_filename: str | None,
+        source: BinaryIO,
+        max_size_bytes: int,
+    ) -> StoredFile:
+        safe_original_filename = safe_filename(original_filename)
+        upload_dir = self._ensure_under_root(
+            self.storage_root / "ic-review" / str(analysis_id) / str(run_id) / "uploads"
+        )
+        upload_dir.mkdir(parents=True, exist_ok=True)
+
+        temp_path = self._ensure_under_root(upload_dir / f".{run_id}.uploading")
+        digest = hashlib.sha256()
+        size_bytes = 0
+
+        try:
+            with temp_path.open("wb") as target:
+                while chunk := source.read(CHUNK_SIZE_BYTES):
+                    size_bytes += len(chunk)
+                    if size_bytes > max_size_bytes:
+                        raise StoredFileTooLargeError("File exceeds maximum upload size")
+                    digest.update(chunk)
+                    target.write(chunk)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
+
+        sha256 = digest.hexdigest()
+        final_path = self._ensure_under_root(upload_dir / f"{sha256}-{safe_original_filename}")
+        temp_path.replace(final_path)
+        return StoredFile(
+            path=final_path,
+            sha256=sha256,
+            size_bytes=size_bytes,
+            safe_original_filename=safe_original_filename,
+        )
+
+    def stored_path(self, path: str) -> Path:
+        resolved = Path(path).expanduser().resolve()
+        if not resolved.is_relative_to(self.storage_root):
+            raise ValueError("Storage path escapes STORAGE_ROOT")
+        return resolved
+
+    def ic_review_run_dir(self, *, analysis_id: UUID, run_id: UUID) -> Path:
+        return self._ensure_under_root(self.storage_root / "ic-review" / str(analysis_id) / str(run_id))
+
+    def delete_ic_review_run_dir(self, *, analysis_id: UUID, run_id: UUID) -> None:
+        run_dir = self.ic_review_run_dir(analysis_id=analysis_id, run_id=run_id)
+        if run_dir.exists():
+            shutil.rmtree(run_dir)
 
     def save_parsed_artifact(self, *, owner_id: UUID, document_id: UUID, parsed_text: str) -> Path:
         parsed_path = self.parsed_artifact_path(owner_id=owner_id, document_id=document_id)

@@ -1,7 +1,7 @@
 from app.models.base import Base
 
 # Import models so Alembic and metadata.create_all see the full schema.
-from app.models.analysis import Analysis, AnalysisDetailRun, PredictedCommentRun  # noqa: F401
+from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisCheckStep, AnalysisDetailRun, PredictedCommentRun  # noqa: F401
 from app.models.audit_log import AuditLog  # noqa: F401
 from app.models.benchmark import Benchmark  # noqa: F401
 from app.models.document import Document  # noqa: F401

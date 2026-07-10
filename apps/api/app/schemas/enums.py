@@ -45,6 +45,7 @@ class EntityStatus(StrEnum):
 class SkillType(StrEnum):
     MAIN_ANALYSIS = "main_analysis"
     PREDICTED_COMMENTS = "predicted_comments"
+    ANALYSIS_CHECK = "analysis_check"
     BENCHMARK_JUDGE = "benchmark_judge"
     PARSER_HELPER = "parser_helper"
     DOCUMENT_CLASSIFIER = "document_classifier"

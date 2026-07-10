@@ -13,6 +13,11 @@ dependencies = [
   "openai",
   "anthropic",
   "httpx[socks]",
+  "reportlab",
+  "openpyxl",
+  "scipy",
+  "numpy",
+  "PyPDF2",
 ]
 
 [project.optional-dependencies]
@@ -26,4 +31,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["jobs*", "parsers*", "providers*", "results*", "skills*"]
+include = ["jobs*", "parsers*", "providers*", "results*", "skills*", "ic_review*"]

@@ -505,16 +505,27 @@ def test_run_analysis_propagates_snapshot_mode_to_predicted_comments(tmp_path, m
         db.commit()
 
         captured_snapshot_modes = []
+        captured_analysis_check_run_ids = []
 
-        def fake_create_skill_source_snapshot(**kwargs):
-            captured_snapshot_modes.append(kwargs["snapshot_mode"])
+        def fake_create_skill_source_snapshot(
+            *,
+            db,
+            storage,
+            source,
+            analysis_id,
+            predicted_comment_run_id,
+            analysis_check_run_id,
+            snapshot_mode,
+        ):
+            captured_snapshot_modes.append(snapshot_mode)
+            captured_analysis_check_run_ids.append(analysis_check_run_id)
             return SimpleNamespace(
                 id=uuid4(),
                 source_slug="devils-advocate",
                 resolved_revision=None,
                 source_fingerprint="devils-snapshot-fingerprint",
                 artifact_path=str(tmp_path / "skill-snapshot"),
-                snapshot_mode=kwargs["snapshot_mode"],
+                snapshot_mode=snapshot_mode,
                 is_dirty=False,
             )
 
@@ -559,6 +570,7 @@ def test_run_analysis_propagates_snapshot_mode_to_predicted_comments(tmp_path, m
         predicted_run = db.query(PredictedCommentRun).filter(PredictedCommentRun.analysis_id == analysis.id).one()
         assert enqueued_run_ids == []
         assert captured_snapshot_modes == ["development_current"]
+        assert captured_analysis_check_run_ids == [None]
         assert predicted_run.run_parameters["snapshot_mode"] == "development_current"
         assert predicted_run.run_parameters["output_language"] == "en"
         assert predicted_run.run_parameters["max_output_tokens"] == 20000

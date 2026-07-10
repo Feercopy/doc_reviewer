@@ -1,4 +1,4 @@
-from app.models.analysis import Analysis, AnalysisDetailRun, PredictedCommentRun
+from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisCheckStep, AnalysisDetailRun, PredictedCommentRun
 from app.models.audit_log import AuditLog
 from app.models.benchmark import Benchmark
 from app.models.document import Document
@@ -11,6 +11,8 @@ from app.models.user import User
 
 __all__ = [
     "Analysis",
+    "AnalysisCheckRun",
+    "AnalysisCheckStep",
     "AnalysisDetailRun",
     "AuditLog",
     "Benchmark",

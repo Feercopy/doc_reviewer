@@ -367,7 +367,7 @@ export default function DocumentDetailPage() {
       const analysis = await createAnalysis(documentId, {
         provider,
         model: model.trim(),
-        document_type_override: document?.detected_document_type,
+        document_type_override: document?.manual_document_type ?? document?.detected_document_type,
         run_parameters: {
           output_language: outputLanguage,
         },

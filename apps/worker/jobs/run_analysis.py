@@ -409,6 +409,7 @@ def _attach_predicted_comment_snapshots(
         source=source,
         analysis_id=None,
         predicted_comment_run_id=predicted_run.id,
+        analysis_check_run_id=None,
         snapshot_mode=snapshot_mode,
     )
     retrieval_snapshot = create_devils_retrieval_snapshot(

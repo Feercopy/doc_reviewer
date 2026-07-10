@@ -28,8 +28,9 @@ class SkillSourceSnapshot(Base):
     __tablename__ = "skill_source_snapshots"
     __table_args__ = (
         CheckConstraint(
-            "(analysis_id IS NOT NULL AND predicted_comment_run_id IS NULL) "
-            "OR (analysis_id IS NULL AND predicted_comment_run_id IS NOT NULL)",
+            "((CASE WHEN analysis_id IS NOT NULL THEN 1 ELSE 0 END) + "
+            "(CASE WHEN predicted_comment_run_id IS NOT NULL THEN 1 ELSE 0 END) + "
+            "(CASE WHEN analysis_check_run_id IS NOT NULL THEN 1 ELSE 0 END)) = 1",
             name="ck_skill_source_snapshots_one_owner",
         ),
     )
@@ -40,6 +41,11 @@ class SkillSourceSnapshot(Base):
     predicted_comment_run_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("predicted_comment_runs.id"),
+        nullable=True,
+    )
+    analysis_check_run_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("analysis_check_runs.id"),
         nullable=True,
     )
     source_slug: Mapped[str] = mapped_column(String, nullable=False)

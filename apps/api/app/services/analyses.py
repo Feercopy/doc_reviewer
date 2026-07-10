@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.authz.policies import can_delete_analysis, can_read_analysis
 from app.core.config import default_skill_source_snapshot_mode, get_settings
 from app.models.base import utc_now
-from app.models.analysis import Analysis, AnalysisDetailRun, PredictedCommentRun
+from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisDetailRun, PredictedCommentRun
 from app.models.document import Document
 from app.models.skill import Skill
 from app.models.skill_source import SkillSource
@@ -135,6 +135,7 @@ def _attach_source_snapshot(
             source=source,
             analysis_id=analysis.id,
             predicted_comment_run_id=None,
+            analysis_check_run_id=None,
             snapshot_mode=snapshot_mode,
         )
     except SourceUnavailableError as exc:
@@ -204,6 +205,7 @@ def read_analysis(*, db: Session, actor: User, analysis: Analysis) -> AnalysisRe
     skill = db.get(Skill, analysis.skill_id)
     predicted_run = _latest_predicted_comment_run(db=db, analysis_id=analysis.id)
     detail_run = latest_analysis_detail_run(db=db, analysis_id=analysis.id)
+    ic_review_run = _latest_ic_review_run_read(db=db, actor=actor, analysis_id=analysis.id)
     return AnalysisRead(
         id=analysis.id,
         document_id=analysis.document_id,
@@ -232,6 +234,7 @@ def read_analysis(*, db: Session, actor: User, analysis: Analysis) -> AnalysisRe
             _read_predicted_comment_run(db=db, actor=actor, predicted_run=predicted_run) if predicted_run else None
         ),
         detail_run=_read_analysis_detail_run(actor=actor, detail_run=detail_run) if detail_run else None,
+        ic_review_run=ic_review_run,
     )
 
 
@@ -335,6 +338,18 @@ def _latest_predicted_comment_run(*, db: Session, analysis_id: UUID) -> Predicte
         .order_by(PredictedCommentRun.created_at.desc())
     )
     return db.execute(statement).scalars().first()
+
+
+def _latest_ic_review_run_read(*, db: Session, actor: User, analysis_id: UUID):
+    from app.services.ic_review import IC_REVIEW_CHECK_TYPE, read_ic_review_run
+
+    statement = (
+        select(AnalysisCheckRun)
+        .where(AnalysisCheckRun.analysis_id == analysis_id, AnalysisCheckRun.check_type == IC_REVIEW_CHECK_TYPE)
+        .order_by(AnalysisCheckRun.created_at.desc(), AnalysisCheckRun.id.desc())
+    )
+    run = db.execute(statement).scalars().first()
+    return read_ic_review_run(db=db, actor=actor, run=run) if run else None
 
 
 def _read_predicted_comment_run(

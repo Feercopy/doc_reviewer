@@ -39,7 +39,7 @@ describe("analysis result page", () => {
     expect(layer2Source).not.toContain("evidenceDisplayLabel");
   });
 
-  it("adds document comments as a focused tab before Full Output", () => {
+  it("adds document comments and IC review as focused tabs before Full Output", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const tabsSource = pageSource.slice(
       pageSource.indexOf("const analysisTabs"),
@@ -47,10 +47,14 @@ describe("analysis result page", () => {
     );
 
     expect(tabsSource).toContain('{ id: "documentComments", label: "Document comments" }');
+    expect(tabsSource).toContain('{ id: "icReview", label: "IC review" }');
     expect(tabsSource.indexOf("Gate Challenger")).toBeLessThan(tabsSource.indexOf("Document comments"));
-    expect(tabsSource.indexOf("Document comments")).toBeLessThan(tabsSource.indexOf("Full Output"));
+    expect(tabsSource.indexOf("Document comments")).toBeLessThan(tabsSource.indexOf("IC review"));
+    expect(tabsSource.indexOf("IC review")).toBeLessThan(tabsSource.indexOf("Full Output"));
     expect(tabsSource).not.toContain('id: "devilsAdvocate"');
     expect(pageSource).toContain("function DocumentCommentsPanel");
+    expect(pageSource).toContain("function IcReviewPanel");
+    expect(pageSource).toContain('activeTab === "icReview"');
     expect(pageSource).not.toContain("Show in document");
     expect(pageSource).not.toContain("Copy anchor");
     expect(pageSource).not.toContain("All severity");
@@ -154,13 +158,58 @@ describe("analysis result page", () => {
 
   it("polls analysis detail while the main or predicted-comment run is still active", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const waitingSource = pageSource.slice(
+      pageSource.indexOf("function AnalysisWaitingPanel"),
+      pageSource.indexOf("function RunDetailsDialog"),
+    );
+    const activeStatusSource = pageSource.slice(
+      pageSource.indexOf("function activeAnalysisRefreshStatus"),
+      pageSource.indexOf("function isActiveRunStatus"),
+    );
 
     expect(pageSource).toContain("const ANALYSIS_POLL_INTERVAL_MS");
     expect(pageSource).toContain("function isAnalysisRefreshPending");
     expect(pageSource).toContain("analysis.predicted_comment_run?.status");
     expect(pageSource).toContain("analysis.detail_run?.status");
+    expect(pageSource).toContain("analysis.ic_review_run?.status");
+    expect(waitingSource).toContain("activeAnalysisRefreshStatus(analysis)");
+    expect(activeStatusSource).toContain("analysis.predicted_comment_run?.status");
+    expect(activeStatusSource).toContain("analysis.detail_run?.status");
+    expect(activeStatusSource).toContain("analysis.ic_review_run?.status");
     expect(pageSource).toContain("window.setInterval(refreshAnalysis, ANALYSIS_POLL_INTERVAL_MS)");
     expect(pageSource).toContain("window.clearInterval(intervalId)");
+  });
+
+  it("wires IC review launch to configured provider models and optional xlsx upload", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+
+    expect(pageSource).toContain("listProviderModels");
+    expect(pageSource).toContain("getProviderDefaultModel");
+    expect(pageSource).toContain("type ProviderModelOptions");
+    expect(pageSource).toContain("createIcReviewRun");
+    expect(pageSource).toContain("financial_model: icReviewWorkbook");
+    expect(pageSource).toContain("icReviewWorkbookInputKey");
+    expect(pageSource).toContain("key={workbookInputKey}");
+    expect(pageSource).toContain('accept=".xlsx');
+    expect(pageSource).toContain("Only .xlsx financial model files are supported.");
+  });
+
+  it("keeps IC review tab compact, relaunchable after failure, and free of raw artifacts", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const icPanelSource = pageSource.slice(
+      pageSource.indexOf("function IcReviewPanel"),
+      pageSource.indexOf("function PredictedSkillOutputSection"),
+    );
+
+    expect(icPanelSource).toContain('run.status === "failed"');
+    expect(icPanelSource).toContain("IC review failed:");
+    expect(icPanelSource).toContain("run.error_message");
+    expect(icPanelSource).toContain('const setupControlsDisabled = analysis.status !== "completed" || isLaunching || runIsActive');
+    expect(icPanelSource).toContain("const launchDisabled = launchAvailability.disabled || runIsActive");
+    expect(icPanelSource).not.toContain("raw_output");
+    expect(icPanelSource).not.toContain("legacy_output");
+    expect(icPanelSource).not.toContain("JsonBlock");
+    expect(icPanelSource).not.toContain("analysis-details");
   });
 
   it("renders a waiting loader for queued and running analysis states", () => {

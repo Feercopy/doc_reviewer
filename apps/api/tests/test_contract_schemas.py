@@ -20,6 +20,174 @@ def role_comment_item(anchor_text: str, body: str, comment_type: str = "missing_
     }
 
 
+def ic_review_minimal_payload() -> dict:
+    return {
+        "run_mode": "ic_agentic_review_compact",
+        "verdict": "UNKNOWN",
+        "executive_brief": "TBD after IC role synthesis. " * 16,
+        "confidence": 0.0,
+        "top_findings": [],
+        "key_numbers": [],
+        "spreadsheet_audit": {
+            "status": "not_provided",
+            "summary": "",
+            "formula_issues_count": 0,
+            "critical_formula_issues_count": 0,
+            "source_filename": None,
+        },
+        "critical_risks": [],
+        "data_gaps": [],
+        "required_actions": [],
+        "questions_for_team": [],
+        "role_summaries": [],
+        "validation": {
+            "status": "not_run",
+            "summary": "",
+            "warnings_count": 0,
+            "failures_count": 0,
+        },
+        "artifacts": [],
+    }
+
+
+def ic_review_full_payload() -> dict:
+    payload = ic_review_minimal_payload()
+    payload.update(
+        {
+            "verdict": "CONDITIONAL",
+            "executive_brief": "The IC should not approve full scale yet. " * 14,
+            "confidence": 0.74,
+            "top_findings": [
+                {
+                    "title": "Financial model does not prove payback",
+                    "severity": "critical",
+                    "summary": "Unit economics depend on a conversion uplift that is not supported by cohort evidence.",
+                    "evidence": "Workbook sheet PnL assumes 18% conversion uplift without a measured baseline.",
+                    "recommendation": "Require a measured cohort bridge before budget approval.",
+                },
+                {
+                    "title": "Market sizing overstates reachable demand",
+                    "severity": "high",
+                    "summary": "The proposal uses total category demand instead of serviceable demand for the launch segment.",
+                    "evidence": "Document section 3 uses national TAM while launch scope is two cities.",
+                    "recommendation": "Rebuild sizing from reachable active sellers and observed attach rates.",
+                },
+                {
+                    "title": "Legal dependency is not owned",
+                    "severity": "medium",
+                    "summary": "A required policy change is mentioned but has no owner, milestone, or fallback path.",
+                    "evidence": "Risk table lists policy approval as external dependency.",
+                    "recommendation": "Add owner, approval date, and no-go fallback before launch.",
+                },
+            ],
+            "key_numbers": [
+                {
+                    "label": "Requested budget",
+                    "value": "12000000",
+                    "unit": "RUB",
+                    "source": "Document section 5",
+                }
+            ],
+            "spreadsheet_audit": {
+                "status": "completed",
+                "summary": "Workbook was parsed and formula checks completed with one critical issue.",
+                "formula_issues_count": 4,
+                "critical_formula_issues_count": 1,
+                "source_filename": "model.xlsx",
+            },
+            "critical_risks": [
+                "Conversion uplift is assumed, not measured.",
+                "Sales capacity plan lacks ramp constraints.",
+                "Legal approval can delay launch past the claimed payback window.",
+            ],
+            "data_gaps": [
+                "No cohort payback by acquisition channel.",
+                "No sensitivity table for price discount depth.",
+                "No owner for compliance dependency.",
+            ],
+            "required_actions": [
+                "Add measured baseline and uplift proof.",
+                "Rebuild market sizing for launch geography.",
+                "Add signed legal dependency owner and deadline.",
+            ],
+            "questions_for_team": [
+                "What measured cohort proves the conversion uplift?",
+                "Which sellers are included in serviceable launch demand?",
+                "What is the fallback if legal approval slips by one quarter?",
+            ],
+            "role_summaries": [
+                {
+                    "role": "ic-financial-auditor",
+                    "summary": "The financial audit found that payback depends on uplift assumptions that are not backed by source evidence or sensitivity analysis.",
+                },
+                {
+                    "role": "ic-product-analyst",
+                    "summary": "The product review found a plausible customer problem, but activation proof and launch readiness metrics are still incomplete.",
+                },
+                {
+                    "role": "ic-risk-scenario",
+                    "summary": "The risk scenario review identified legal timing and funnel sensitivity as the primary approval conditions for the committee.",
+                },
+                {
+                    "role": "ic-market-analyst",
+                    "summary": "The market analyst found that serviceable demand needs a narrower launch-segment calculation before the committee can trust the upside case.",
+                },
+                {
+                    "role": "ic-web-researcher",
+                    "summary": "The web researcher summary is constrained to provided materials in this MVP and highlights missing external validation as a decision caveat.",
+                },
+                {
+                    "role": "ic-benchmark-valuation",
+                    "summary": "The benchmark valuation review found that comparable cases are directionally useful but not strong enough to support the requested valuation uplift.",
+                },
+                {
+                    "role": "ic-team-legal",
+                    "summary": "The team and legal review found unresolved policy ownership and launch dependency risks that should become explicit approval conditions.",
+                },
+                {
+                    "role": "ic-tech-dd",
+                    "summary": "The technical due diligence review found no fatal architecture blocker, but launch readiness still depends on operational monitoring and rollback proof.",
+                },
+            ],
+            "validation": {
+                "status": "warn",
+                "summary": "Structured result validates, but source evidence coverage is incomplete.",
+                "warnings_count": 2,
+                "failures_count": 0,
+            },
+            "artifacts": [
+                {
+                    "kind": "validation_report",
+                    "filename": "validation_report.txt",
+                    "summary": "Validation completed with warnings.",
+                }
+            ],
+        }
+    )
+    return payload
+
+
+def assert_schema_rejects(payload: dict, schema: dict, message: str) -> None:
+    try:
+        validate(instance=payload, schema=schema)
+    except ValidationError:
+        return
+
+    raise AssertionError(message)
+
+
+IC_AGENTIC_ROLES = [
+    "ic-financial-auditor",
+    "ic-product-analyst",
+    "ic-market-analyst",
+    "ic-web-researcher",
+    "ic-benchmark-valuation",
+    "ic-team-legal",
+    "ic-tech-dd",
+    "ic-risk-scenario",
+]
+
+
 def test_document_parse_artifact_schema_accepts_structured_parse_output():
     schema = load_schema("document-parse-artifact.schema.json")
     payload = {
@@ -629,3 +797,130 @@ def test_devils_advocate_schema_rejects_empty_role_comment_items():
         return
 
     raise AssertionError("schema accepted role comments without comment rows")
+
+
+def test_ic_agentic_review_schema_accepts_minimal_compact_result():
+    schema = load_schema("ic-agentic-review-result.schema.json")
+
+    validate(instance=ic_review_minimal_payload(), schema=schema)
+
+
+def test_ic_agentic_review_schema_accepts_full_compact_result():
+    schema = load_schema("ic-agentic-review-result.schema.json")
+
+    validate(instance=ic_review_full_payload(), schema=schema)
+
+
+def test_ic_agentic_role_schema_accepts_each_original_role_result():
+    schema = load_schema("ic-agentic-role-result.schema.json")
+
+    for role in IC_AGENTIC_ROLES:
+        payload = {
+            "role": role,
+            "section_keys": ["section_4"],
+            "summary": "Role-level finding summary.",
+            "findings": [
+                {
+                    "title": "Finding title",
+                    "severity": "critical",
+                    "evidence": "Document or workbook-grounded evidence.",
+                    "recommendation": "Specific remediation.",
+                }
+            ],
+            "data_gaps": [],
+            "numbers_used": [],
+        }
+
+        validate(instance=payload, schema=schema)
+
+
+def test_ic_agentic_review_schema_rejects_unsupported_verdict():
+    schema = load_schema("ic-agentic-review-result.schema.json")
+    payload = ic_review_minimal_payload()
+    payload["verdict"] = "REWORK"
+
+    assert_schema_rejects(payload, schema, "schema accepted an unsupported IC review verdict")
+
+
+def test_ic_agentic_review_schema_rejects_missing_spreadsheet_audit_status():
+    schema = load_schema("ic-agentic-review-result.schema.json")
+    payload = ic_review_minimal_payload()
+    del payload["spreadsheet_audit"]["status"]
+
+    assert_schema_rejects(payload, schema, "schema accepted spreadsheet_audit without status")
+
+
+def test_ic_agentic_review_schema_rejects_more_than_seven_top_findings():
+    schema = load_schema("ic-agentic-review-result.schema.json")
+    payload = ic_review_full_payload()
+    payload["top_findings"] = payload["top_findings"] + [
+        {
+            "title": f"Extra finding {index}",
+            "severity": "info",
+            "summary": "Additional UI row that should exceed the compact display bound.",
+            "evidence": "Synthetic evidence for bounds testing.",
+            "recommendation": "Trim compact findings before persistence.",
+        }
+        for index in range(5)
+    ]
+
+    assert_schema_rejects(payload, schema, "schema accepted more than 7 top_findings")
+
+
+def test_ic_agentic_review_schema_rejects_extra_nested_finding_field():
+    schema = load_schema("ic-agentic-review-result.schema.json")
+    payload = ic_review_full_payload()
+    payload["top_findings"][0]["owner"] = "finance"
+
+    assert_schema_rejects(payload, schema, "schema accepted unexpected nested field in top_findings")
+
+
+def test_ic_agentic_role_schema_rejects_extra_nested_finding_field():
+    schema = load_schema("ic-agentic-role-result.schema.json")
+    payload = {
+        "role": "ic-financial-auditor",
+        "section_keys": ["section_4"],
+        "summary": "Role-level finding summary.",
+        "findings": [
+            {
+                "title": "Finding title",
+                "severity": "critical",
+                "evidence": "Document or workbook-grounded evidence.",
+                "recommendation": "Specific remediation.",
+                "owner": "finance",
+            }
+        ],
+        "data_gaps": [],
+        "numbers_used": [],
+    }
+
+    assert_schema_rejects(payload, schema, "schema accepted unexpected nested field in role finding")
+
+
+def test_ic_agentic_role_schema_rejects_unbounded_arrays():
+    schema = load_schema("ic-agentic-role-result.schema.json")
+    finding = {
+        "title": "Finding title",
+        "severity": "critical",
+        "evidence": "Document or workbook-grounded evidence.",
+        "recommendation": "Specific remediation.",
+    }
+    number_used = {"label": "Budget", "value": "12000000", "source": "Document section 5"}
+
+    for field, value in [
+        ("section_keys", [f"section_{index}" for index in range(21)]),
+        ("findings", [finding for _ in range(21)]),
+        ("data_gaps", [f"Missing data gap {index}" for index in range(21)]),
+        ("numbers_used", [number_used for _ in range(31)]),
+    ]:
+        payload = {
+            "role": "ic-financial-auditor",
+            "section_keys": ["section_4"],
+            "summary": "Role-level finding summary.",
+            "findings": [finding],
+            "data_gaps": [],
+            "numbers_used": [],
+        }
+        payload[field] = value
+
+        assert_schema_rejects(payload, schema, f"schema accepted too many {field}")

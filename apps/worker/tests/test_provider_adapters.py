@@ -38,6 +38,42 @@ def test_openai_compatible_adapter_normalizes_chat_completion():
     assert result.output_tokens == 22
 
 
+def test_openai_compatible_adapter_passes_timeout_options_to_client_factory():
+    captured_client = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"summary":"ok"}'))],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=2),
+                model_dump_json=lambda: '{"raw":true}',
+            )
+
+    class FakeClient:
+        chat = SimpleNamespace(completions=FakeCompletions())
+
+    def fake_client_factory(**kwargs):
+        captured_client.update(kwargs)
+        return FakeClient()
+
+    request = _request(
+        Provider.OPENAI_COMPATIBLE,
+        api_key="sk-test",
+        base_url="https://openrouter.ai/api/v1",
+        run_parameters={
+            "timeout_seconds": 600,
+            "connect_timeout_seconds": 30,
+            "max_retries": 4,
+        },
+    )
+
+    OpenAICompatibleAdapter(client_factory=fake_client_factory).run(request)
+
+    assert captured_client["timeout_seconds"] == 600
+    assert captured_client["connect_timeout_seconds"] == 30
+    assert captured_client["max_retries"] == 4
+
+
 def test_openai_compatible_adapter_uses_non_strict_schema_for_optional_contract_fields():
     captured = {}
 
@@ -116,6 +152,52 @@ def test_openai_compatible_adapter_removes_provider_unsupported_array_min_items(
     assert schema_with_strict_arrays["properties"]["required_many"]["maxItems"] == 5
 
 
+def test_openai_compatible_adapter_removes_provider_unsupported_numeric_bounds():
+    captured = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"summary":"ok"}'))],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=2),
+                model_dump_json=lambda: '{"raw":true}',
+            )
+
+    class FakeClient:
+        chat = SimpleNamespace(completions=FakeCompletions())
+
+    schema_with_numeric_bounds = {
+        "type": "object",
+        "properties": {
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "count": {"type": "integer", "minimum": 0},
+            "nested": {
+                "type": "object",
+                "properties": {
+                    "ratio": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+                },
+            },
+        },
+    }
+    request = _request(
+        Provider.OPENAI_COMPATIBLE,
+        api_key="sk-test",
+        base_url="https://openrouter.ai/api/v1",
+        response_schema=schema_with_numeric_bounds,
+    )
+
+    OpenAICompatibleAdapter(client_factory=lambda **_: FakeClient()).run(request)
+
+    provider_schema = captured["response_format"]["json_schema"]["schema"]
+    assert "minimum" not in provider_schema["properties"]["confidence"]
+    assert "maximum" not in provider_schema["properties"]["confidence"]
+    assert "minimum" not in provider_schema["properties"]["count"]
+    assert "exclusiveMinimum" not in provider_schema["properties"]["nested"]["properties"]["ratio"]
+    assert "exclusiveMaximum" not in provider_schema["properties"]["nested"]["properties"]["ratio"]
+    assert schema_with_numeric_bounds["properties"]["confidence"]["minimum"] == 0
+
+
 def test_openai_compatible_adapter_normalizes_responses_api_result():
     captured = {}
 
@@ -175,12 +257,22 @@ def test_openai_compatible_adapter_builds_proxy_http_client(monkeypatch):
     monkeypatch.setattr("openai.DefaultHttpxClient", FakeHttpClient)
     monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
 
-    OpenAICompatibleAdapter._default_client_factory(api_key="sk-test", base_url="https://openai.test/v1")
+    OpenAICompatibleAdapter._default_client_factory(
+        api_key="sk-test",
+        base_url="https://openai.test/v1",
+        timeout_seconds=600,
+        connect_timeout_seconds=30,
+        max_retries=4,
+    )
 
     assert captured["base_url"] == "https://openai.test/v1"
+    assert captured["timeout"].read == 600
+    assert captured["timeout"].connect == 30
+    assert captured["max_retries"] == 4
     assert captured["http_client"].kwargs == {
         "proxy": "socks5h://proxy.test:44435",
         "trust_env": False,
+        "timeout": captured["timeout"],
     }
     get_settings.cache_clear()
 
@@ -366,6 +458,7 @@ def _request(
     api_key: str | None,
     base_url: str | None = None,
     response_schema: dict | None = None,
+    run_parameters: dict | None = None,
 ) -> ProviderRunRequest:
     return ProviderRunRequest(
         provider=provider,
@@ -374,5 +467,5 @@ def _request(
         base_url=base_url,
         prompt="Prompt",
         response_schema=response_schema or {"type": "object"},
-        run_parameters={},
+        run_parameters=run_parameters or {},
     )

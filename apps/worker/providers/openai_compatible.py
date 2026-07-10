@@ -3,6 +3,8 @@ from collections.abc import Callable
 from copy import deepcopy
 from typing import Any
 
+import httpx
+
 from providers.base import AnalysisProviderResult, ProviderAdapter, ProviderResponseRequest, ProviderRunRequest
 from providers.proxy import outbound_proxy_kwargs
 
@@ -15,7 +17,13 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         if not request.api_key:
             raise RuntimeError("provider_key_missing")
 
-        client = self._client_factory(api_key=request.api_key, base_url=request.base_url)
+        client = self._client_factory(
+            api_key=request.api_key,
+            base_url=request.base_url,
+            timeout_seconds=_positive_float(request.run_parameters.get("timeout_seconds")),
+            connect_timeout_seconds=_positive_float(request.run_parameters.get("connect_timeout_seconds")),
+            max_retries=_positive_int(request.run_parameters.get("max_retries")),
+        )
         response_format = request.run_parameters.get("response_format") or {
             "type": "json_schema",
             "json_schema": {
@@ -54,7 +62,13 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         if not request.api_key:
             raise RuntimeError("provider_key_missing")
 
-        client = self._client_factory(api_key=request.api_key, base_url=request.base_url)
+        client = self._client_factory(
+            api_key=request.api_key,
+            base_url=request.base_url,
+            timeout_seconds=_positive_float(request.run_parameters.get("timeout_seconds")),
+            connect_timeout_seconds=_positive_float(request.run_parameters.get("connect_timeout_seconds")),
+            max_retries=_positive_int(request.run_parameters.get("max_retries")),
+        )
         text_format = request.run_parameters.get("text_format") or {
             "format": {
                 "type": "json_schema",
@@ -93,15 +107,30 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         )
 
     @staticmethod
-    def _default_client_factory(*, api_key: str, base_url: str | None) -> object:
+    def _default_client_factory(
+        *,
+        api_key: str,
+        base_url: str | None,
+        timeout_seconds: float | None = None,
+        connect_timeout_seconds: float | None = None,
+        max_retries: int | None = None,
+    ) -> object:
         from openai import DefaultHttpxClient, OpenAI
 
         kwargs: dict[str, object] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
+        timeout = _httpx_timeout(timeout_seconds=timeout_seconds, connect_timeout_seconds=connect_timeout_seconds)
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        if max_retries is not None:
+            kwargs["max_retries"] = max_retries
         proxy_kwargs = outbound_proxy_kwargs(base_url)
         if proxy_kwargs:
-            kwargs["http_client"] = DefaultHttpxClient(**proxy_kwargs)
+            http_client_kwargs = dict(proxy_kwargs)
+            if timeout is not None:
+                http_client_kwargs["timeout"] = timeout
+            kwargs["http_client"] = DefaultHttpxClient(**http_client_kwargs)
         return OpenAI(**kwargs)
 
 
@@ -141,20 +170,52 @@ def _usage_value(usage: object | None, *names: str) -> int | None:
     return None
 
 
+def _positive_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _positive_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _httpx_timeout(*, timeout_seconds: float | None, connect_timeout_seconds: float | None) -> httpx.Timeout | None:
+    if timeout_seconds is None:
+        return None
+    connect_timeout = connect_timeout_seconds if connect_timeout_seconds is not None else min(timeout_seconds, 30.0)
+    return httpx.Timeout(timeout_seconds, connect=connect_timeout)
+
+
 def _provider_compatible_schema(schema: dict[str, Any]) -> dict[str, Any]:
     compatible = deepcopy(schema)
-    _remove_unsupported_array_constraints(compatible)
+    _remove_provider_unsupported_constraints(compatible)
     return compatible
 
 
-def _remove_unsupported_array_constraints(node: Any) -> None:
+def _remove_provider_unsupported_constraints(node: Any) -> None:
     if isinstance(node, dict):
         if node.get("type") == "array" and isinstance(node.get("minItems"), int) and node["minItems"] > 1:
             node.pop("minItems", None)
         if node.get("type") == "array":
             node.pop("maxItems", None)
+        if node.get("type") in {"number", "integer"}:
+            node.pop("minimum", None)
+            node.pop("maximum", None)
+            node.pop("exclusiveMinimum", None)
+            node.pop("exclusiveMaximum", None)
         for value in node.values():
-            _remove_unsupported_array_constraints(value)
+            _remove_provider_unsupported_constraints(value)
     elif isinstance(node, list):
         for item in node:
-            _remove_unsupported_array_constraints(item)
+            _remove_provider_unsupported_constraints(item)
