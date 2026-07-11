@@ -34,7 +34,14 @@ Primary plan index:
   `.venv/bin/python -m pytest apps/worker/tests/test_skill_renderers.py -q`
   (`14 passed`) and
   `.venv/bin/python -m pytest apps/worker/tests/test_skill_renderers.py apps/worker/tests/test_run_analysis_job.py -q`
-  (`22 passed`, existing `passlib/argon2` deprecation warning).
+  (`22 passed`, existing `passlib/argon2` deprecation warning). Released code
+  commit `a361855` to production: pushed `main`, created backup
+  `/opt/gate-challenger/backups/release-a361855-20260711190435`, synced the
+  release tree, updated the production Gate Challenger source export from clean
+  external skill head `d7323d6`, rebuilt/recreated `worker`, and verified
+  container status, direct API health, public `/doc-challanger/api/health`,
+  public `/doc-challanger/login`, production worker renderer behavior, source
+  export strategic-spine content, and fresh worker logs.
 - [x] Fix production IC Agentic Review source path: root cause was
   `infra/docker-compose.prod.yml` missing `IC_AGENTIC_REVIEW_SOURCE_PATH` and
   the `/external/ic-agentic-review` readonly mount, so production skill seeds
