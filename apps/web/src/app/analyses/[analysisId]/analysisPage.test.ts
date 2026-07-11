@@ -169,13 +169,15 @@ describe("analysis result page", () => {
 
     expect(pageSource).toContain("const ANALYSIS_POLL_INTERVAL_MS");
     expect(pageSource).toContain("function isAnalysisRefreshPending");
+    expect(pageSource).toContain("function shouldShowAnalysisWaitingPanel");
     expect(pageSource).toContain("analysis.predicted_comment_run?.status");
     expect(pageSource).toContain("analysis.detail_run?.status");
     expect(pageSource).toContain("analysis.ic_review_run?.status");
+    expect(pageSource).toContain("shouldShowAnalysisWaitingPanel(analysis)");
     expect(waitingSource).toContain("activeAnalysisRefreshStatus(analysis)");
     expect(activeStatusSource).toContain("analysis.predicted_comment_run?.status");
     expect(activeStatusSource).toContain("analysis.detail_run?.status");
-    expect(activeStatusSource).toContain("analysis.ic_review_run?.status");
+    expect(activeStatusSource).not.toContain("analysis.ic_review_run?.status");
     expect(pageSource).toContain("window.setInterval(refreshAnalysis, ANALYSIS_POLL_INTERVAL_MS)");
     expect(pageSource).toContain("window.clearInterval(intervalId)");
   });
@@ -191,6 +193,9 @@ describe("analysis result page", () => {
     expect(pageSource).toContain("icReviewWorkbookInputKey");
     expect(pageSource).toContain("key={workbookInputKey}");
     expect(pageSource).toContain('accept=".xlsx');
+    expect(pageSource).toContain("analysis-ic-workbook-upload");
+    expect(pageSource).toContain("Upload financial model");
+    expect(pageSource).toContain("Optional .xlsx for formula and table checks");
     expect(pageSource).toContain("Only .xlsx financial model files are supported.");
   });
 
@@ -206,6 +211,16 @@ describe("analysis result page", () => {
     expect(icPanelSource).toContain("run.error_message");
     expect(icPanelSource).toContain('const setupControlsDisabled = analysis.status !== "completed" || isLaunching || runIsActive');
     expect(icPanelSource).toContain("const launchDisabled = launchAvailability.disabled || runIsActive");
+    expect(icPanelSource).toContain("{!runIsActive ? (");
+    expect(icPanelSource).toContain('className="analysis-ic-launch"');
+    expect(icPanelSource).not.toContain('className="analysis-secondary-action analysis-ic-launch"');
+    expect(icPanelSource).not.toContain("<span>Provider</span>");
+    expect(icPanelSource).not.toContain('aria-label="IC review provider"');
+    expect(icPanelSource).not.toContain("onChangeProvider");
+    expect(icPanelSource).not.toContain("analysis-token-list");
+    expect(icPanelSource).not.toContain("<strong>Provider</strong>");
+    expect(icPanelSource).not.toContain("<strong>Model</strong>");
+    expect(icPanelSource).not.toContain("<strong>Created</strong>");
     expect(icPanelSource).not.toContain("raw_output");
     expect(icPanelSource).not.toContain("legacy_output");
     expect(icPanelSource).not.toContain("JsonBlock");
@@ -260,5 +275,7 @@ describe("analysis result page", () => {
     expect(pageSource).toContain(".analysis-tab {\n  min-height: 44px;");
     expect(pageSource).toContain("width: 44px;\n  height: 44px;\n  min-height: 44px;");
     expect(pageSource).toContain(".analysis-feedback-submit {\n  width: 100%;\n  min-height: 44px;");
+    expect(pageSource).toContain(".analysis-ic-workbook-upload {\n  position: relative;\n  display: flex;");
+    expect(pageSource).toContain("min-height: 56px;");
   });
 });

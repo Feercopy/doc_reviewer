@@ -21,6 +21,41 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Adjust document detail narrow-screen layout: when the document detail
+  columns collapse, the `Analysis history` panel now renders above the parsed
+  document text via responsive grid item ordering. Verified
+  `npm --prefix apps/web run test -- responsive-ui modelTrigger documents` (`39
+  passed`), `npm --prefix apps/web run build`, and rebuilt/restarted the local
+  `web` container.
+- [x] Simplify IC review analysis-tab UI: hid the launch controls while an
+  IC review run is queued/running, removed duplicate provider/model/created
+  run chips, moved active-run progress into one compact status row inside the
+  tab, stopped showing the page-level "Finishing analysis" banner for IC-only
+  background runs while preserving polling, and changed the launch button back
+  to the page's normal primary button styling. Follow-up polish styled the
+  native `.xlsx` file-selector button to match the same compact control system,
+  then removed the visible Provider selector and promoted financial-model
+  upload into a wider, more discoverable `.xlsx` control while preserving the
+  automatic provider/model launch parameters.
+  Verified
+  `npm --prefix apps/web run test -- analysisPage icReviewDisplay` (`24
+  passed`), `npm --prefix apps/web run build`, and rebuilt/restarted the local
+  `web` container.
+- [x] Reduce IC Agentic Review token cost with deterministic context packing:
+  added an `ic_review_context_pack_v1` worker layer that replaces repeated full
+  document/main-analysis payloads in role and synthesis prompts with a bounded
+  evidence index, role-specific evidence slices, compact main-analysis/detail
+  context, and optional workbook/formula context. The worker now saves
+  `structured/context_pack.json` plus a fingerprint for reproducibility and
+  passes the same pack to all 8 roles and synthesis, while raw provider outputs,
+  synthesis prompt/raw, postprocess log, validation report, and deterministic
+  artifacts remain preserved. Verified
+  `.venv/bin/python -m pytest apps/worker/tests/test_ic_review_renderer.py
+  apps/worker/tests/test_run_ic_agentic_review_job.py
+  apps/worker/tests/test_ic_review_script_runner.py
+  apps/worker/tests/test_provider_adapters.py -q` (`61 passed`). Rebuilt and
+  restarted the local `worker` container with Docker Compose and verified the
+  container imports `ic_review.context_pack`.
 - [x] Configure local Docker Compose proxy env for
   `206.223.244.175:1080`: copied the production `OUTBOUND_PROXY_URL` credentials
   from `/opt/gate-challenger/current/infra/.env` into gitignored local `.env`

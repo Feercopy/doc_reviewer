@@ -1380,6 +1380,14 @@ const documentDetailStyles = `
   .document-detail .gc-history-panel {
     min-height: 0;
   }
+
+  .document-detail .gc-history-panel {
+    order: 1;
+  }
+
+  .document-detail .gc-text-panel {
+    order: 2;
+  }
 }
 
 @media (max-width: 720px) {

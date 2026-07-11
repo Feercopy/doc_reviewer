@@ -74,12 +74,6 @@ const analysisTabs: Array<{ id: AnalysisTab; label: string }> = [
   { id: "fullOutput", label: "Full Output" },
 ];
 
-const providerLabels: Record<Provider, string> = {
-  openai_compatible: "OpenAI compatible",
-  anthropic_compatible: "Anthropic compatible",
-  hermes: "Hermes",
-};
-
 const outputLanguageOptions: readonly OutputLanguage[] = ["ru", "en"];
 
 const feedbackRatings = [
@@ -456,7 +450,7 @@ export default function AnalysisDetailPage() {
 
             {analysis.error_message ? <section className="analysis-alert">{analysis.error_message}</section> : null}
 
-            {isAnalysisRefreshPending(analysis) ? (
+            {shouldShowAnalysisWaitingPanel(analysis) ? (
               <AnalysisWaitingPanel analysis={analysis} isRefreshing={isRefreshingAnalysis} />
             ) : null}
 
@@ -488,7 +482,6 @@ export default function AnalysisDetailPage() {
                 {activeTab === "icReview" ? (
                   <IcReviewPanel
                     analysis={analysis}
-                    configuredProviderModels={configuredProviderModels}
                     providerModels={providerModels}
                     provider={icReviewProvider}
                     model={icReviewModel}
@@ -498,11 +491,6 @@ export default function AnalysisDetailPage() {
                     workbookInputKey={icReviewWorkbookInputKey}
                     workbookError={icReviewWorkbookError}
                     isLaunching={isLaunchingIcReview}
-                    onChangeProvider={(nextProvider) => {
-                      setIcReviewProvider(nextProvider);
-                      setIcReviewModelEdited(false);
-                      setIcReviewModel(getProviderDefaultModel(providerModels, nextProvider));
-                    }}
                     onChangeModel={changeIcReviewModel}
                     onChangeOutputLanguage={setIcReviewOutputLanguage}
                     onChangeWorkbook={changeIcReviewWorkbook}
@@ -1435,7 +1423,6 @@ function LabeledText({ label, value }: { label: string; value: string | null }) 
 
 function IcReviewPanel({
   analysis,
-  configuredProviderModels,
   providerModels,
   provider,
   model,
@@ -1445,14 +1432,12 @@ function IcReviewPanel({
   workbookInputKey,
   workbookError,
   isLaunching,
-  onChangeProvider,
   onChangeModel,
   onChangeOutputLanguage,
   onChangeWorkbook,
   onLaunch,
 }: {
   analysis: AnalysisRecord;
-  configuredProviderModels: ProviderModelOptions[];
   providerModels: ProviderModelOptions[];
   provider: Provider;
   model: string;
@@ -1462,7 +1447,6 @@ function IcReviewPanel({
   workbookInputKey: number;
   workbookError: string;
   isLaunching: boolean;
-  onChangeProvider: (provider: Provider) => void;
   onChangeModel: (model: string) => void;
   onChangeOutputLanguage: (language: OutputLanguage) => void;
   onChangeWorkbook: (file: File | null) => void;
@@ -1479,7 +1463,7 @@ function IcReviewPanel({
   });
   const setupControlsDisabled = analysis.status !== "completed" || isLaunching || runIsActive;
   const launchDisabled = launchAvailability.disabled || runIsActive;
-  const controlsReason = runIsActive ? "IC review is already running. This panel will refresh automatically." : launchAvailability.reason;
+  const controlsReason = launchAvailability.reason;
   const compactDisplay =
     run?.status === "completed" && isIcReviewCompactResult(run.structured_output)
       ? buildIcReviewCompactDisplay(run.structured_output)
@@ -1490,91 +1474,89 @@ function IcReviewPanel({
       <div className="analysis-section-heading">
         <div>
           <h2>IC review</h2>
-          <p>{IC_REVIEW_EMPTY_STATE}</p>
+          {!run ? <p>{IC_REVIEW_EMPTY_STATE}</p> : null}
         </div>
-        {run ? <StatusBadge status={run.status} /> : null}
       </div>
 
-      <div className="analysis-ic-review-form" aria-label="IC review launch controls">
-        <label className="analysis-ic-field">
-          <span>Provider</span>
-          <select
-            aria-label="IC review provider"
-            disabled={setupControlsDisabled}
-            value={provider}
-            onChange={(event) => onChangeProvider(event.target.value as Provider)}
-          >
-            {configuredProviderModels.length ? (
-              configuredProviderModels.map((item) => (
-                <option key={item.provider} value={item.provider}>
-                  {providerLabels[item.provider] ?? formatLabel(item.provider)}
-                </option>
-              ))
-            ) : (
-              <option value={provider}>No configured providers</option>
-            )}
-          </select>
-        </label>
-
-        <label className="analysis-ic-field">
-          <span>Model</span>
-          <select
-            aria-label="IC review model"
-            disabled={setupControlsDisabled || !selectedProviderModel?.has_key || selectedProviderModel.available_models.length === 0}
-            value={model}
-            onChange={(event) => onChangeModel(event.target.value)}
-          >
-            {selectedProviderModel?.available_models.length ? (
-              selectedProviderModel.available_models.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))
-            ) : (
-              <option value="">No models configured</option>
-            )}
-          </select>
-        </label>
-
-        <div className="analysis-ic-field">
-          <span>Output language</span>
-          <div className="analysis-ic-language-toggle" aria-label="IC review output language">
-            {outputLanguageOptions.map((language) => (
-              <button
-                aria-pressed={outputLanguage === language}
-                className={outputLanguage === language ? "analysis-ic-language analysis-ic-language--active" : "analysis-ic-language"}
-                disabled={setupControlsDisabled}
-                key={language}
-                type="button"
-                onClick={() => onChangeOutputLanguage(language)}
+      {!runIsActive ? (
+        <>
+          <div className="analysis-ic-review-form" aria-label="IC review launch controls">
+            <label className="analysis-ic-field">
+              <span>Model</span>
+              <select
+                aria-label="IC review model"
+                disabled={setupControlsDisabled || !selectedProviderModel?.has_key || selectedProviderModel.available_models.length === 0}
+                value={model}
+                onChange={(event) => onChangeModel(event.target.value)}
               >
-                {language.toUpperCase()}
-              </button>
-            ))}
+                {selectedProviderModel?.available_models.length ? (
+                  selectedProviderModel.available_models.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No models configured</option>
+                )}
+              </select>
+            </label>
+
+            <div className="analysis-ic-field">
+              <span>Output language</span>
+              <div className="analysis-ic-language-toggle" aria-label="IC review output language">
+                {outputLanguageOptions.map((language) => (
+                  <button
+                    aria-pressed={outputLanguage === language}
+                    className={outputLanguage === language ? "analysis-ic-language analysis-ic-language--active" : "analysis-ic-language"}
+                    disabled={setupControlsDisabled}
+                    key={language}
+                    type="button"
+                    onClick={() => onChangeOutputLanguage(language)}
+                  >
+                    {language.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <label className="analysis-ic-field analysis-ic-workbook-field">
+              <span>Financial model</span>
+              <span
+                className={
+                  setupControlsDisabled
+                    ? "analysis-ic-workbook-upload analysis-ic-workbook-upload--disabled"
+                    : "analysis-ic-workbook-upload"
+                }
+              >
+                <input
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  aria-label="IC review financial model"
+                  className="analysis-ic-workbook-input"
+                  disabled={setupControlsDisabled}
+                  key={workbookInputKey}
+                  type="file"
+                  onChange={(event) => onChangeWorkbook(event.target.files?.[0] ?? null)}
+                />
+                <span className="analysis-ic-workbook-badge" aria-hidden="true">
+                  XLSX
+                </span>
+                <span className="analysis-ic-workbook-copy">
+                  <strong>{workbook ? workbook.name : "Upload financial model"}</strong>
+                  <small>{workbook ? "Ready for spreadsheet checks" : "Optional .xlsx for formula and table checks"}</small>
+                </span>
+              </span>
+            </label>
+
+            <button className="analysis-ic-launch" disabled={launchDisabled} type="button" onClick={onLaunch}>
+              {isLaunching ? "Launching..." : "Launch IC review"}
+            </button>
           </div>
-        </div>
 
-        <label className="analysis-ic-field">
-          <span>Financial model</span>
-          <input
-            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            aria-label="IC review financial model"
-            disabled={setupControlsDisabled}
-            key={workbookInputKey}
-            type="file"
-            onChange={(event) => onChangeWorkbook(event.target.files?.[0] ?? null)}
-          />
-        </label>
-
-        <button className="analysis-secondary-action analysis-ic-launch" disabled={launchDisabled} type="button" onClick={onLaunch}>
-          {isLaunching ? "Launching..." : "Launch IC review"}
-        </button>
-      </div>
-
-      {workbook ? <p className="analysis-muted">Selected workbook: {workbook.name}</p> : null}
-      {workbookError ? <div className="analysis-alert">{workbookError}</div> : null}
-      {controlsReason ? <div className="analysis-empty">{controlsReason}</div> : null}
-      {!run ? <div className="analysis-empty">No IC review has been launched for this analysis yet.</div> : null}
+          {workbookError ? <div className="analysis-alert">{workbookError}</div> : null}
+          {controlsReason ? <div className="analysis-empty">{controlsReason}</div> : null}
+          {!run && !controlsReason ? <div className="analysis-empty">No IC review has been launched for this analysis yet.</div> : null}
+        </>
+      ) : null}
       {run ? <IcReviewRunSummary run={run} compactDisplay={compactDisplay} /> : null}
     </section>
   );
@@ -1590,25 +1572,13 @@ function IcReviewRunSummary({
   const runIsActive = isActiveRunStatus(run.status);
   return (
     <div className="analysis-ic-run stack">
-      <div className="analysis-token-list">
-        <span className="analysis-token">
-          <strong>Provider</strong>
-          {formatLabel(run.provider)}
-        </span>
-        <span className="analysis-token">
-          <strong>Model</strong>
-          {run.model}
-        </span>
-        <span className="analysis-token">
-          <strong>Created</strong>
-          {formatDate(run.created_at)}
-        </span>
-      </div>
-
       {runIsActive ? (
-        <div className="analysis-detail-loader" aria-live="polite">
+        <div className="analysis-ic-run-status" aria-live="polite">
           <span className="analysis-waiting__spinner" aria-hidden="true" />
-          <span>Current stage: {getIcReviewRunStageText(run)}</span>
+          <div>
+            <strong>IC review is running</strong>
+            <span>{getIcReviewRunStageText(run)}</span>
+          </div>
         </div>
       ) : null}
 
@@ -2203,23 +2173,31 @@ function isAnalysisRefreshPending(analysis: AnalysisRecord | null): boolean {
   );
 }
 
+function shouldShowAnalysisWaitingPanel(analysis: AnalysisRecord | null): boolean {
+  return Boolean(
+    analysis &&
+      (isActiveRunStatus(analysis.status) ||
+        isActiveRunStatus(analysis.predicted_comment_run?.status) ||
+        isActiveRunStatus(analysis.detail_run?.status)),
+  );
+}
+
 function activeAnalysisRefreshStatus(analysis: AnalysisRecord): AnalysisRecord["status"] {
   if (isActiveRunStatus(analysis.status)) {
     return analysis.status;
   }
-  if (isActiveRunStatus(analysis.predicted_comment_run?.status)) {
-    return analysis.predicted_comment_run.status;
+  const predictedStatus = analysis.predicted_comment_run?.status;
+  if (isActiveRunStatus(predictedStatus)) {
+    return predictedStatus;
   }
-  if (isActiveRunStatus(analysis.detail_run?.status)) {
-    return analysis.detail_run.status;
-  }
-  if (isActiveRunStatus(analysis.ic_review_run?.status)) {
-    return analysis.ic_review_run.status;
+  const detailStatus = analysis.detail_run?.status;
+  if (isActiveRunStatus(detailStatus)) {
+    return detailStatus;
   }
   return analysis.status;
 }
 
-function isActiveRunStatus(status: AnalysisRecord["status"] | null | undefined): boolean {
+function isActiveRunStatus(status: AnalysisRecord["status"] | null | undefined): status is AnalysisRecord["status"] {
   return status === "queued" || status === "running";
 }
 
@@ -2823,7 +2801,11 @@ const analysisStyles = `
 
 .analysis-ic-review-form {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns:
+    minmax(240px, 1fr)
+    minmax(220px, 0.8fr)
+    minmax(320px, 1.35fr)
+    minmax(220px, 0.9fr);
   gap: 12px;
   align-items: end;
 }
@@ -2851,7 +2833,99 @@ const analysisStyles = `
 }
 
 .analysis-ic-field input[type="file"] {
-  padding: 10px;
+  padding: 0;
+}
+
+.analysis-ic-workbook-field {
+  min-width: 0;
+}
+
+.analysis-ic-workbook-upload {
+  position: relative;
+  display: flex;
+  min-height: 56px;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(94, 234, 212, 0.26);
+  border-radius: 8px;
+  background: rgba(20, 184, 166, 0.1);
+  padding: 9px 12px;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.analysis-ic-workbook-upload:hover {
+  border-color: rgba(94, 234, 212, 0.5);
+  background: rgba(20, 184, 166, 0.16);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.08);
+}
+
+.analysis-ic-workbook-upload:focus-within {
+  outline: 2px solid rgba(94, 234, 212, 0.58);
+  outline-offset: 2px;
+}
+
+.analysis-ic-workbook-upload--disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.analysis-ic-workbook-upload--disabled:hover {
+  border-color: rgba(94, 234, 212, 0.26);
+  background: rgba(20, 184, 166, 0.1);
+  box-shadow: none;
+}
+
+.analysis-ic-workbook-input {
+  position: absolute;
+  width: 1px !important;
+  height: 1px !important;
+  min-height: 1px !important;
+  overflow: hidden;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.analysis-ic-workbook-badge {
+  display: inline-grid;
+  min-width: 52px;
+  height: 34px;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(13, 148, 136, 0.18);
+  color: #99f6e4;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.analysis-ic-workbook-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.analysis-ic-workbook-copy strong {
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analysis-ic-workbook-copy small {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .analysis-ic-language-toggle {
@@ -2876,11 +2950,70 @@ const analysisStyles = `
 
 .analysis-ic-launch {
   width: 100%;
+  min-height: 56px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+@media (max-width: 1100px) {
+  .analysis-ic-review-form {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+
+  .analysis-ic-workbook-field {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 640px) {
+  .analysis-ic-review-form {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-ic-workbook-field {
+    grid-column: auto;
+  }
 }
 
 .analysis-ic-run,
 .analysis-ic-result {
   min-width: 0;
+}
+
+.analysis-ic-run-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(94, 234, 212, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 118, 110, 0.08);
+  padding: 12px;
+}
+
+.analysis-ic-run-status .analysis-waiting__spinner {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
+}
+
+.analysis-ic-run-status div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.analysis-ic-run-status strong {
+  color: #e2e8f0;
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.analysis-ic-run-status span {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 17px;
+  overflow-wrap: anywhere;
 }
 
 .analysis-ic-verdict,
@@ -3676,6 +3809,36 @@ const paperAnalysisOverrides = `
   color: #5b6472;
 }
 
+.analysis-ic-workbook-upload {
+  border-color: #bcebd8;
+  background: #f2fbf7;
+}
+
+.analysis-ic-workbook-upload:hover {
+  border-color: #0e9f6e;
+  background: #eaf8f2;
+  box-shadow: 0 0 0 3px rgba(14, 159, 110, 0.08);
+}
+
+.analysis-ic-workbook-upload--disabled:hover {
+  border-color: #bcebd8;
+  background: #f2fbf7;
+  box-shadow: none;
+}
+
+.analysis-ic-workbook-badge {
+  background: #d9f1e8;
+  color: #075e45;
+}
+
+.analysis-ic-workbook-copy strong {
+  color: #111827;
+}
+
+.analysis-ic-workbook-copy small {
+  color: #5b6472;
+}
+
 .analysis-ic-language {
   border-color: #d6dee8 !important;
   background: #f7f9fb !important;
@@ -3687,6 +3850,19 @@ const paperAnalysisOverrides = `
   border-color: #73c8a6 !important;
   background: #eaf8f2 !important;
   color: #075e45 !important;
+}
+
+.analysis-ic-run-status {
+  border-color: #bcebd8;
+  background: #f2fbf7;
+}
+
+.analysis-ic-run-status strong {
+  color: #111827;
+}
+
+.analysis-ic-run-status span {
+  color: #5b6472;
 }
 
 .analysis-ic-summary-grid .analysis-metric {

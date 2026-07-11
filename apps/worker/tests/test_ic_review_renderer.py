@@ -15,6 +15,7 @@ from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisCheckStep
 from app.schemas.enums import Provider, RunStatus
 from app.storage.local import LocalDocumentStorage
 from ic_review.context import ICReviewContext
+from ic_review.context_pack import build_ic_review_context_pack
 from ic_review.renderer import ROLE_ORDER, render_role_prompt, render_synthesis_prompt
 from ic_review.role_runner import run_role_step, _role_run_parameters
 
@@ -100,6 +101,73 @@ def test_role_prompt_includes_workbook_context_only_when_workbook_exists():
     assert "Workbook Context" not in prompt_without_workbook
     assert "Workbook Context" in prompt_with_workbook
     assert "critical_formula_issues_count" in prompt_with_workbook
+
+
+def test_context_pack_keeps_traceable_evidence_without_repeating_full_document():
+    filler = "Generic rollout background without investment evidence. " * 180
+    financial_evidence = "Section 4: CAC payback is 19 months, gross margin is 31%, and burn rises in the downside case."
+    tech_evidence = "Section 8: API reliability has no SLA, integration monitoring is manual, and data lineage is missing."
+    context = ICReviewContext(
+        document_title="Gate 3: Courier Expansion",
+        document_type="gate_3",
+        parsed_document_text="\n\n".join([filler, financial_evidence, filler, tech_evidence, filler]),
+        main_analysis_verdict="need_evidence",
+        main_analysis_summary="Unit economics proof is incomplete.",
+        main_analysis_structured_output={"verdict": "need_evidence", "top_findings": [{"title": "CAC payback"}]},
+        main_analysis_detail_output={"layer_2": [{"id": "L2-1", "status": "fail", "evidence": financial_evidence}]},
+        workbook_extraction_summary={"sheet_count": 1, "sheets": [{"name": "P&L", "max_row": 40}]},
+        formula_auditor_summary={"critical_formula_issues_count": 1, "issues": [{"cell": "P&L!B12"}]},
+        output_language="ru",
+    )
+
+    pack = build_ic_review_context_pack(context)
+    financial_context = pack.for_role("ic-financial-auditor")
+    tech_context = pack.for_role("ic-tech-dd")
+    packed_text = json.dumps(financial_context, ensure_ascii=False)
+
+    assert pack.source_stats["parsed_document_chars"] == len(context.parsed_document_text)
+    assert len(packed_text) < len(context.parsed_document_text) * 0.65
+    assert "CAC payback is 19 months" in packed_text
+    assert "evidence_id" in packed_text
+    assert "critical_formula_issues_count" in packed_text
+    assert "API reliability has no SLA" in json.dumps(tech_context, ensure_ascii=False)
+    assert context.parsed_document_text not in packed_text
+
+
+def test_role_and_synthesis_prompts_use_context_pack_instead_of_full_document_text():
+    long_tail = "FULL_RAW_DOCUMENT_SENTINEL " * 220
+    evidence = "Revenue retention is not proven by cohorts, but CAC payback is stated as 19 months."
+    context = ICReviewContext(
+        document_title="Gate 3: Courier Expansion",
+        document_type="gate_3",
+        parsed_document_text=f"{evidence}\n\n{long_tail}",
+        main_analysis_verdict="need_evidence",
+        main_analysis_summary="Unit economics proof is incomplete.",
+        main_analysis_structured_output={"verdict": "need_evidence"},
+        main_analysis_detail_output=None,
+        output_language="ru",
+    )
+    role_outputs = {role: _role_result(role) for role in ROLE_ORDER}
+    pack = build_ic_review_context_pack(context)
+
+    role_prompt = render_role_prompt(
+        role="ic-financial-auditor",
+        context=context,
+        context_pack=pack,
+        source_snapshot=_snapshot(),
+    )
+    synthesis_prompt = render_synthesis_prompt(
+        context=context,
+        context_pack=pack,
+        role_outputs=role_outputs,
+        source_snapshot=_snapshot(),
+    )
+
+    assert "## Context Pack" in role_prompt
+    assert "Revenue retention is not proven" in role_prompt
+    assert "FULL_RAW_DOCUMENT_SENTINEL" not in role_prompt
+    assert "FULL_RAW_DOCUMENT_SENTINEL" not in synthesis_prompt
+    assert "parsed_document_text" not in synthesis_prompt
 
 
 def test_synthesis_prompt_includes_all_eight_role_outputs_and_compact_schema_name():

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from ic_review.context import ICReviewContext
+from ic_review.context_pack import ICReviewContextPack, build_ic_review_context_pack
 
 
 ROLE_ORDER = (
@@ -32,6 +33,7 @@ def render_role_prompt(
     *,
     role: str,
     context: ICReviewContext,
+    context_pack: ICReviewContextPack | None = None,
     source_snapshot: SnapshotTextReader,
     role_schema: dict[str, Any] | None = None,
 ) -> str:
@@ -40,39 +42,19 @@ def render_role_prompt(
 
     role_prompt = _read_required_snapshot_text(source_snapshot, f".claude/agents/{role}.md")
     schema = role_schema or _load_schema(ROLE_SCHEMA_PATH)
+    pack = context_pack or build_ic_review_context_pack(context)
     sections = [
         "# IC Agentic Review Role Step",
         "## Original Role Instructions",
         role_prompt,
-        "## Document Context",
-        _json_block(
-            {
-                "document_title": context.document_title,
-                "document_type": context.document_type,
-                "parsed_document_text": context.parsed_document_text,
-                "output_language": context.output_language,
-            }
-        ),
-        "## Main Gate Challenger Result Context",
-        _json_block(
-            {
-                "verdict": context.main_analysis_verdict,
-                "summary": context.main_analysis_summary,
-                "structured_output": context.main_analysis_structured_output,
-                "detail_output": context.main_analysis_detail_output,
-            }
-        ),
+        "## Context Pack",
+        _json_block(pack.for_role(role)),
     ]
-    if context.workbook_extraction_summary is not None or context.formula_auditor_summary is not None:
+    if pack.workbook_context is not None:
         sections.extend(
             [
                 "## Workbook Context",
-                _json_block(
-                    {
-                        "workbook_extraction_summary": context.workbook_extraction_summary,
-                        "formula_auditor_summary": context.formula_auditor_summary,
-                    }
-                ),
+                _json_block(pack.workbook_context),
             ]
         )
     sections.extend(
@@ -91,6 +73,7 @@ def render_role_prompt(
 def render_synthesis_prompt(
     *,
     context: ICReviewContext,
+    context_pack: ICReviewContextPack | None = None,
     role_outputs: dict[str, dict[str, Any]],
     source_snapshot: SnapshotTextReader,
     review_schema: dict[str, Any] | None = None,
@@ -101,12 +84,13 @@ def render_synthesis_prompt(
     if missing_roles:
         raise ValueError(f"missing_role_outputs:{','.join(missing_roles)}")
     ordered_role_outputs = {role: role_outputs.get(role) for role in ROLE_ORDER}
+    pack = context_pack or build_ic_review_context_pack(context)
     return (
         "# IC Agentic Review Synthesis Step\n\n"
         "## Original Synthesis Instructions\n"
         f"{synthesis_instructions}\n\n"
-        "## Document And Main Analysis Context\n"
-        f"{_json_block(context.to_dict())}\n\n"
+        "## Context Pack\n"
+        f"{_json_block(pack.for_synthesis())}\n\n"
         "## Role Structured Outputs\n"
         f"{_json_block(ordered_role_outputs)}\n\n"
         "## Synthesis Requirements\n"

@@ -28,6 +28,7 @@ from app.security.secrets import decrypt_secret
 from app.services.provider_keys import get_shared_provider_key
 from app.storage.local import LocalDocumentStorage
 from ic_review.context import build_ic_review_context
+from ic_review.context_pack import build_ic_review_context_pack
 from ic_review.errors import safe_ic_review_error_message
 from ic_review.renderer import REVIEW_SCHEMA_PATH, ROLE_ORDER, render_synthesis_prompt
 from ic_review.role_runner import apply_ic_review_provider_defaults, run_role_step, write_prompt_artifact
@@ -138,6 +139,24 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
             formula_auditor_summary=formula_audit_summary,
             output_language=(check_run.run_parameters or {}).get("output_language"),
         )
+        context_pack = build_ic_review_context_pack(context)
+        context_pack_path = _write_json_artifact(structured_dir / "context_pack.json", context_pack.to_dict())
+        _add_artifact(
+            check_run,
+            key="artifact:context_pack",
+            kind="other",
+            path=context_pack_path,
+            media_type="application/json",
+        )
+        run_parameters = dict(check_run.run_parameters or {})
+        run_parameters["context_pack_artifact_path"] = str(context_pack_path)
+        run_parameters["context_pack_fingerprint"] = hashlib.sha256(
+            json.dumps(context_pack.to_dict(), ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        check_run.run_parameters = run_parameters
+        flag_modified(check_run, "artifacts")
+        flag_modified(check_run, "run_parameters")
+        session.commit()
 
         role_outputs: dict[str, dict] = {}
         for role in ROLE_ORDER:
@@ -149,6 +168,7 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
                 analysis=analysis,
                 role=role,
                 context=context,
+                context_pack=context_pack,
                 source_snapshot=source_snapshot,
                 api_key=api_key,
                 base_url=base_url,
@@ -165,6 +185,7 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         synthesis_response_schema = _synthesis_wrapper_schema(review_schema)
         synthesis_prompt = render_synthesis_prompt(
             context=context,
+            context_pack=context_pack,
             role_outputs=role_outputs,
             source_snapshot=source_snapshot,
             review_schema=review_schema,

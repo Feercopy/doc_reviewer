@@ -60,6 +60,41 @@ def test_completed_run_without_workbook_skips_spreadsheet_audit_and_persists_art
         db.close()
 
 
+def test_completed_run_persists_context_pack_and_avoids_full_document_repetition(tmp_path, monkeypatch):
+    db = _create_session()
+    calls: dict[str, object] = {}
+    evidence = "Section 4: CAC payback is 19 months and gross margin is 31% in the base case."
+    raw_tail = "FULL_RAW_DOCUMENT_SENTINEL " * 260
+    try:
+        records = _seed_run(
+            db,
+            tmp_path,
+            monkeypatch=monkeypatch,
+            workbook=False,
+            parsed_document_text=f"{evidence}\n\n{raw_tail}",
+        )
+        _patch_script_pipeline(monkeypatch, calls, validation_text="validation ok\n")
+
+        run_ic_agentic_review(str(records["check_run"].id), db=db)
+
+        check_run = db.get(AnalysisCheckRun, records["check_run"].id)
+        steps = db.execute(select(AnalysisCheckStep).order_by(AnalysisCheckStep.created_at)).scalars().all()
+        context_pack_artifact = next(artifact for artifact in check_run.artifacts if artifact["key"] == "artifact:context_pack")
+        context_pack = json.loads(Path(context_pack_artifact["path"]).read_text(encoding="utf-8"))
+        first_role_prompt = Path(steps[0].prompt_artifact_path).read_text(encoding="utf-8")
+        synthesis_prompt = Path(check_run.run_parameters["synthesis_prompt_artifact_path"]).read_text(encoding="utf-8")
+
+        assert check_run.status == RunStatus.COMPLETED.value
+        assert check_run.run_parameters["context_pack_fingerprint"]
+        assert context_pack["source_stats"]["parsed_document_chars"] == len(f"{evidence}\n\n{raw_tail}")
+        assert "CAC payback is 19 months" in json.dumps(context_pack, ensure_ascii=False)
+        assert "FULL_RAW_DOCUMENT_SENTINEL" not in first_role_prompt
+        assert "FULL_RAW_DOCUMENT_SENTINEL" not in synthesis_prompt
+        assert len(first_role_prompt) < len(f"{evidence}\n\n{raw_tail}") * 0.8
+    finally:
+        db.close()
+
+
 def test_completed_run_with_workbook_runs_formula_and_excel_audit(tmp_path, monkeypatch):
     db = _create_session()
     calls: dict[str, object] = {}
@@ -516,6 +551,7 @@ def _seed_run(
     invalid_role_payload: tuple[str, dict] | None = None,
     legacy_report: dict | None = None,
     compact_result: dict | None = None,
+    parsed_document_text: str = "The document claims break-even by month six.",
 ) -> dict:
     storage_root = tmp_path / "storage"
     monkeypatch.setenv("STORAGE_ROOT", str(storage_root))
@@ -558,7 +594,7 @@ def _seed_run(
         parse_status=DocumentParseStatus.COMPLETED.value,
         detected_document_type=DocumentType.GATE_3.value,
         document_type_confidence=None,
-        parsed_text="The document claims break-even by month six.",
+        parsed_text=parsed_document_text,
         status=EntityStatus.ACTIVE.value,
     )
     main_skill = Skill(

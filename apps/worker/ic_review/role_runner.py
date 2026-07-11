@@ -14,6 +14,7 @@ from app.models.base import utc_now
 from app.schemas.enums import Provider, RunStatus
 from app.storage.local import LocalDocumentStorage
 from ic_review.context import ICReviewContext
+from ic_review.context_pack import ICReviewContextPack
 from ic_review.renderer import ROLE_SCHEMA_PATH, SnapshotTextReader, render_role_prompt
 from providers.base import ProviderRunRequest
 from providers.registry import get_provider_adapter
@@ -34,6 +35,7 @@ def run_role_step(
     analysis: Analysis,
     role: str,
     context: ICReviewContext,
+    context_pack: ICReviewContextPack | None = None,
     source_snapshot: SnapshotTextReader,
     api_key: str | None = None,
     base_url: str | None = None,
@@ -64,6 +66,7 @@ def run_role_step(
         prompt = render_role_prompt(
             role=role,
             context=context,
+            context_pack=context_pack,
             source_snapshot=source_snapshot,
             role_schema=schema,
         )

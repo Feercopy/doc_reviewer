@@ -56,6 +56,17 @@ describe("responsive UI safeguards", () => {
     expect(documentDetailPage).toContain(".document-detail .gc-table {\n  display: table;\n  min-width: 560px;");
   });
 
+  it("shows analysis history above parsed document on narrow document detail screens", () => {
+    const documentDetailPage = source("src/app/documents/[documentId]/page.tsx");
+    const narrowLayoutSource = documentDetailPage.slice(
+      documentDetailPage.indexOf("@media (max-width: 1100px)"),
+      documentDetailPage.indexOf("@media (max-width: 720px)"),
+    );
+
+    expect(narrowLayoutSource).toContain(".document-detail .gc-history-panel {\n    order: 1;");
+    expect(narrowLayoutSource).toContain(".document-detail .gc-text-panel {\n    order: 2;");
+  });
+
   it("keeps benchmark command buttons at least 44px tall", () => {
     const benchmarksPage = source("src/app/benchmarks/page.tsx");
 
