@@ -21,6 +21,14 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Deploy IC Agentic Review release to production: merged
+  `codex/ic-agentic-review-check` into `main`, pushed `main` to origin,
+  synchronized a clean `git archive` release tree to `178.250.159.250`,
+  rebuilt production `api`, `worker`, and `web`, applied Alembic migration
+  `202607090001`, refreshed skill seeds (`baseline skills ready: 6`),
+  force-recreated `edge`, and verified container status, Alembic head, direct
+  API health, canonical `/doc-challanger/api/health`, `/doc-challanger/login`,
+  and fresh API/worker/edge logs.
 - [x] Adjust document detail narrow-screen layout: when the document detail
   columns collapse, the `Analysis history` panel now renders above the parsed
   document text via responsive grid item ordering. Verified
