@@ -32,6 +32,7 @@ from ic_review.context_pack import build_ic_review_context_pack
 from ic_review.errors import safe_ic_review_error_message
 from ic_review.renderer import REVIEW_SCHEMA_PATH, ROLE_ORDER, render_synthesis_prompt
 from ic_review.role_runner import apply_ic_review_provider_defaults, run_role_step, write_prompt_artifact
+from ic_review.schema_normalization import normalize_schema_bounded_strings
 from ic_review.script_runner import (
     ScriptPipelineResult,
     ScriptResult,
@@ -573,7 +574,7 @@ def _parse_synthesis_wrapper(structured_text: str, review_schema: dict) -> tuple
     legacy_report_json = payload["legacy_report_json"]
     if not isinstance(compact_result, dict) or not isinstance(legacy_report_json, dict):
         raise RuntimeError("invalid_synthesis_wrapper")
-    compact_result = _normalize_schema_bounded_strings(compact_result, review_schema, review_schema)
+    compact_result = normalize_schema_bounded_strings(compact_result, review_schema, review_schema)
     legacy_report_json = _normalize_legacy_report_json(legacy_report_json, compact_result=compact_result)
     normalized_payload = {
         "compact_result": compact_result,
@@ -584,91 +585,6 @@ def _parse_synthesis_wrapper(structured_text: str, review_schema: dict) -> tuple
     except ValidationError as exc:
         raise RuntimeError(f"invalid_synthesis_wrapper:{safe_ic_review_error_message(exc)}") from exc
     return compact_result, legacy_report_json
-
-
-def _normalize_schema_bounded_strings(value: Any, schema: dict, root_schema: dict) -> Any:
-    resolved_schema = schema
-    if "$ref" in resolved_schema:
-        resolved = _resolve_local_schema_ref(str(resolved_schema["$ref"]), root_schema)
-        if resolved is not None:
-            resolved_schema = resolved
-
-    for combinator in ("anyOf", "oneOf"):
-        options = resolved_schema.get(combinator)
-        if isinstance(options, list):
-            for option in options:
-                if isinstance(option, dict) and _schema_option_matches_value(option, value, root_schema):
-                    return _normalize_schema_bounded_strings(value, option, root_schema)
-            return value
-
-    all_of = resolved_schema.get("allOf")
-    if isinstance(all_of, list):
-        normalized = value
-        for option in all_of:
-            if isinstance(option, dict):
-                normalized = _normalize_schema_bounded_strings(normalized, option, root_schema)
-        return normalized
-
-    expected_type = resolved_schema.get("type")
-    if expected_type == "string" and isinstance(value, str):
-        max_length = resolved_schema.get("maxLength")
-        if isinstance(max_length, int) and len(value) > max_length:
-            return value[:max_length]
-        return value
-
-    if expected_type == "object" and isinstance(value, dict):
-        properties = resolved_schema.get("properties")
-        if not isinstance(properties, dict):
-            return value
-        normalized = dict(value)
-        for key, child_schema in properties.items():
-            if key in normalized and isinstance(child_schema, dict):
-                normalized[key] = _normalize_schema_bounded_strings(normalized[key], child_schema, root_schema)
-        return normalized
-
-    if expected_type == "array" and isinstance(value, list):
-        item_schema = resolved_schema.get("items")
-        if isinstance(item_schema, dict):
-            return [_normalize_schema_bounded_strings(item, item_schema, root_schema) for item in value]
-        return value
-
-    return value
-
-
-def _schema_option_matches_value(schema: dict, value: Any, root_schema: dict) -> bool:
-    if "$ref" in schema:
-        resolved = _resolve_local_schema_ref(str(schema["$ref"]), root_schema)
-        if resolved is not None:
-            return _schema_option_matches_value(resolved, value, root_schema)
-
-    expected_type = schema.get("type")
-    if expected_type == "string":
-        return isinstance(value, str)
-    if expected_type == "null":
-        return value is None
-    if expected_type == "object":
-        return isinstance(value, dict)
-    if expected_type == "array":
-        return isinstance(value, list)
-    if expected_type == "number":
-        return isinstance(value, int | float) and not isinstance(value, bool)
-    if expected_type == "integer":
-        return isinstance(value, int) and not isinstance(value, bool)
-    if expected_type == "boolean":
-        return isinstance(value, bool)
-    return True
-
-
-def _resolve_local_schema_ref(ref: str, root_schema: dict) -> dict | None:
-    if not ref.startswith("#/"):
-        return None
-    current: Any = root_schema
-    for raw_part in ref.removeprefix("#/").split("/"):
-        part = raw_part.replace("~1", "/").replace("~0", "~")
-        if not isinstance(current, dict) or part not in current:
-            return None
-        current = current[part]
-    return current if isinstance(current, dict) else None
 
 
 def _normalize_legacy_report_json(legacy_report_json: dict, *, compact_result: dict | None = None) -> dict:

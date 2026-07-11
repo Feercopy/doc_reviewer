@@ -266,6 +266,52 @@ def test_run_role_step_persists_prompt_raw_structured_and_metadata(tmp_path):
         db.close()
 
 
+def test_run_role_step_trims_overlong_schema_bounded_strings_before_validation(tmp_path):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        role_result = {
+            **_role_result("ic-tech-dd"),
+            "summary": "x" * 1565,
+        }
+        raw_output = json.dumps(role_result)
+        check_run = _check_run(
+            analysis_id=analysis.id,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": raw_output,
+                    "raw_output": raw_output,
+                    "input_tokens": 17,
+                    "output_tokens": 19,
+                    "latency_ms": 23,
+                }
+            },
+        )
+        db.add_all([analysis, check_run])
+        db.commit()
+
+        structured = run_role_step(
+            session=db,
+            check_run=check_run,
+            analysis=analysis,
+            role="ic-tech-dd",
+            context=_context(),
+            source_snapshot=_snapshot(),
+            storage=LocalDocumentStorage(tmp_path / "storage"),
+        )
+
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        assert step.status == RunStatus.COMPLETED.value
+        assert len(structured["summary"]) == 1500
+        assert len(step.structured_output["summary"]) == 1500
+        assert step.raw_output == raw_output
+        assert len(json.loads(step.raw_output)["summary"]) == 1565
+        assert step.input_tokens == 17
+        assert step.output_tokens == 19
+    finally:
+        db.close()
+
+
 def test_role_run_parameters_add_provider_timeouts_and_preserve_overrides():
     defaulted = _role_run_parameters(
         base_parameters={},

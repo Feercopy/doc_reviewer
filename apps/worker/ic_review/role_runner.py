@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from jsonschema import validate
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -16,9 +17,10 @@ from app.storage.local import LocalDocumentStorage
 from ic_review.context import ICReviewContext
 from ic_review.context_pack import ICReviewContextPack
 from ic_review.renderer import ROLE_SCHEMA_PATH, SnapshotTextReader, render_role_prompt
+from ic_review.schema_normalization import normalize_schema_bounded_strings
 from providers.base import ProviderRunRequest
 from providers.registry import get_provider_adapter
-from results.schema_validation import parse_and_validate_json_output
+from results.schema_validation import parse_json_output
 
 from .errors import safe_ic_review_error_message
 
@@ -101,10 +103,9 @@ def run_role_step(
         step.estimated_cost = result.estimated_cost
         session.commit()
 
-        structured = parse_and_validate_json_output(
-            structured_text=result.structured_text,
-            schema_path=ROLE_SCHEMA_PATH,
-        )
+        payload = parse_json_output(result.structured_text)
+        structured = normalize_schema_bounded_strings(payload, schema, schema)
+        validate(instance=structured, schema=schema)
         step.structured_output = structured
         step.status = RunStatus.COMPLETED.value
         step.completed_at = utc_now()
