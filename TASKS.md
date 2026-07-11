@@ -1500,3 +1500,12 @@ Exit criteria:
   and no `predicted_comment_run` was created. Fixed the document detail launch
   payload to prefer `manual_document_type` over `detected_document_type` and
   verified the focused frontend tests pass.
+- 2026-07-11: Repaired production IC review run
+  `d72a6c2f-ba17-4133-881e-f68753f60745` for analysis
+  `713193a4-740f-4efd-b9e5-865247afd0d4` without rerunning completed roles.
+  Rebuilt/recreated the production worker with role output maxLength
+  normalization, normalized the saved `ic-tech-dd` raw output to structured
+  output, resumed only the missing `ic-risk-scenario` and synthesis/postprocess
+  stages, and verified the run is `completed` with 8/8 role steps completed,
+  9 artifacts, validation `warn` with 0 failures, and production health
+  returning HTTP 200.
