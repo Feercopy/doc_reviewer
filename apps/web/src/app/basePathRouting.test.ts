@@ -18,6 +18,17 @@ describe("base path routing", () => {
     expect(compose).toContain("NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-/doc-challanger}");
   });
 
+  it("mounts the IC Agentic Review source in production API and worker containers", () => {
+    const compose = repoSource("infra/docker-compose.prod.yml");
+
+    expect(compose.match(/IC_AGENTIC_REVIEW_SOURCE_PATH: \/external\/ic-agentic-review/g)).toHaveLength(2);
+    expect(
+      compose.match(
+        /\$\{IC_AGENTIC_REVIEW_HOST_PATH:\?IC_AGENTIC_REVIEW_HOST_PATH is required\}:\/external\/ic-agentic-review:ro/g,
+      ),
+    ).toHaveLength(2);
+  });
+
   it("uses appPath for imperative redirects that Next Link cannot prefix", () => {
     const appShell = webSource("src/components/AppShell.tsx");
     const loginPage = webSource("src/app/login/page.tsx");

@@ -21,6 +21,19 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Fix production IC Agentic Review source path: root cause was
+  `infra/docker-compose.prod.yml` missing `IC_AGENTIC_REVIEW_SOURCE_PATH` and
+  the `/external/ic-agentic-review` readonly mount, so production skill seeds
+  fell back to the local macOS path
+  `/Users/iseremenko/Documents/IC-Agentic-Review`. Added the prod env/mount for
+  `api` and `worker`, added regression coverage in `basePathRouting.test.ts`,
+  copied a clean `IC-Agentic-Review` source tree plus Git metadata to
+  `/opt/gate-challenger/external/ic-agentic-review`, set
+  `IC_AGENTIC_REVIEW_HOST_PATH` in production `infra/.env` with a backup,
+  recreated `api`, `worker`, and `edge`, re-ran skill seeds, and verified the DB
+  source path is `/external/ic-agentic-review`, the API container can collect
+  the source manifest (`26` files), public health returns 200, and fresh
+  API/worker logs are clean.
 - [x] Deploy IC Agentic Review release to production: merged
   `codex/ic-agentic-review-check` into `main`, pushed `main` to origin,
   synchronized a clean `git archive` release tree to `178.250.159.250`,

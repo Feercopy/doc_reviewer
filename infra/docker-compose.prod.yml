@@ -46,6 +46,7 @@ services:
       HERMES_HTTP_URL: ${HERMES_HTTP_URL:-http://127.0.0.1:8787}
       GATE_CHALLENGER_SOURCE_PATH: /external/gate-challenger
       DEVILS_ADVOCATE_SOURCE_PATH: /external/devils-advocate
+      IC_AGENTIC_REVIEW_SOURCE_PATH: /external/ic-agentic-review
       SKILL_SOURCE_SNAPSHOT_MODE: ${SKILL_SOURCE_SNAPSHOT_MODE:-production_export}
       OUTBOUND_PROXY_URL: ${OUTBOUND_PROXY_URL:-}
       ALL_PROXY: ${OUTBOUND_PROXY_URL:-}
@@ -62,6 +63,7 @@ services:
       - storage_data:/var/lib/gate-challenger/storage
       - "${GATE_CHALLENGER_HOST_PATH:?GATE_CHALLENGER_HOST_PATH is required}:/external/gate-challenger:ro"
       - "${DEVILS_ADVOCATE_HOST_PATH:?DEVILS_ADVOCATE_HOST_PATH is required}:/external/devils-advocate:ro"
+      - "${IC_AGENTIC_REVIEW_HOST_PATH:?IC_AGENTIC_REVIEW_HOST_PATH is required}:/external/ic-agentic-review:ro"
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,6 +91,7 @@ services:
       HERMES_HTTP_URL: ${HERMES_HTTP_URL:-http://127.0.0.1:8787}
       GATE_CHALLENGER_SOURCE_PATH: /external/gate-challenger
       DEVILS_ADVOCATE_SOURCE_PATH: /external/devils-advocate
+      IC_AGENTIC_REVIEW_SOURCE_PATH: /external/ic-agentic-review
       SKILL_SOURCE_SNAPSHOT_MODE: ${SKILL_SOURCE_SNAPSHOT_MODE:-production_export}
       OUTBOUND_PROXY_URL: ${OUTBOUND_PROXY_URL:-}
       ALL_PROXY: ${OUTBOUND_PROXY_URL:-}
@@ -103,6 +106,7 @@ services:
       - storage_data:/var/lib/gate-challenger/storage
       - "${GATE_CHALLENGER_HOST_PATH:?GATE_CHALLENGER_HOST_PATH is required}:/external/gate-challenger:ro"
       - "${DEVILS_ADVOCATE_HOST_PATH:?DEVILS_ADVOCATE_HOST_PATH is required}:/external/devils-advocate:ro"
+      - "${IC_AGENTIC_REVIEW_HOST_PATH:?IC_AGENTIC_REVIEW_HOST_PATH is required}:/external/ic-agentic-review:ro"
     depends_on:
       postgres:
         condition: service_healthy
