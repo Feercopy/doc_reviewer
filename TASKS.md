@@ -21,6 +21,20 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Adapt latest Gate Challenger reference updates for service runtime:
+  external source head moved from previously synced `a738279` to `d7323d6`,
+  adding strategic spine / driver focus / vision-metric coupling checks across
+  Gate 2, Stream Review, Gate 3, and common adversarial rubrics. The service
+  already snapshots the full reference directory, so fresh runs will carry the
+  new rubric content; updated the worker prompt frame from five-pass to
+  six-pass language and tightened unknown-stage reference filtering so the
+  service no longer preloads all stage-specific rubrics before routing. Added
+  renderer regression coverage for strategic-spine content and unknown-stage
+  filtering. Verified
+  `.venv/bin/python -m pytest apps/worker/tests/test_skill_renderers.py -q`
+  (`14 passed`) and
+  `.venv/bin/python -m pytest apps/worker/tests/test_skill_renderers.py apps/worker/tests/test_run_analysis_job.py -q`
+  (`22 passed`, existing `passlib/argon2` deprecation warning).
 - [x] Fix production IC Agentic Review source path: root cause was
   `infra/docker-compose.prod.yml` missing `IC_AGENTIC_REVIEW_SOURCE_PATH` and
   the `/external/ic-agentic-review` readonly mount, so production skill seeds

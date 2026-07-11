@@ -45,9 +45,9 @@ def render_gate2_challenger_prompt(
     parts = [
         f"Skill: {skill.name} ({skill.version})",
         "\n".join(source_lines),
-        "Use the canonical Gate2-challenger review method. Preserve the five-pass review intent, "
-        "including coordinator normalization, Layer 1 decision-critical review, Layer 2 atomic weak-link "
-        "review, adversarial committee-risk review, and final synthesis.",
+        "Use the canonical Gate2-challenger review method. Preserve the six-pass review intent, "
+        "including coordinator normalization, stage detection and routing, Layer 1 decision-critical review, "
+        "Layer 2 atomic weak-link review, adversarial committee-risk review, and final synthesis.",
         output_language_instruction(output_language) if output_language is not None else "",
         "External skill instructions:",
         skill_prompt,
@@ -237,6 +237,8 @@ def _should_include_reference(*, relative_path: str, document_type: str | None) 
         return True
     if expected_stage_file and filename in _KNOWN_STAGE_REFERENCE_FILES:
         return filename == expected_stage_file
+    if filename in _KNOWN_STAGE_REFERENCE_FILES:
+        return False
     return True
 
 
