@@ -11,6 +11,7 @@ from app.schemas.analyses import AnalysesListResponse, AnalysisCreate, AnalysisD
 from app.services.analyses import (
     AnalysisNotFoundError,
     AnalysisPreconditionError,
+    cancel_analysis_for_actor,
     create_analysis_for_document,
     delete_analysis_for_actor,
     get_latest_analysis_detail_run_for_actor,
@@ -103,6 +104,19 @@ def delete_analysis(
         delete_analysis_for_actor(db=db, actor=current_user, analysis_id=analysis_id)
     except AnalysisNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+
+
+@router.post("/analyses/{analysis_id}/cancel", response_model=AnalysisRead)
+def cancel_analysis(
+    analysis_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> AnalysisRead:
+    try:
+        analysis = cancel_analysis_for_actor(db=db, actor=current_user, analysis_id=analysis_id)
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+    return read_analysis(db=db, actor=current_user, analysis=analysis)
 
 
 @router.post("/analyses/{analysis_id}/details", response_model=AnalysisDetailRunRead)

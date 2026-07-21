@@ -218,7 +218,8 @@ def run_ic_review_script_pipeline(
         if formula_audit_json_path is not None
         else artifacts_root / "formula_audit.json"
     )
-    legacy_report_text = artifacts_root / "legacy_report.txt"
+    legacy_report_markdown = artifacts_root / "legacy_report.md"
+    legacy_report_pdf = artifacts_root / "legacy_report.pdf"
     legacy_audit_xlsx = artifacts_root / "legacy_audit.xlsx"
     validation_report = artifacts_root / "validation_report.txt"
 
@@ -261,7 +262,28 @@ def run_ic_review_script_pipeline(
             timeout_seconds=timeout_seconds,
         )
     )
-    _write_legacy_report_text(postprocessed_json, legacy_report_text)
+    _write_legacy_report_markdown(postprocessed_json, legacy_report_markdown)
+
+    _notify_stage(stage_callback, "pdf_generator")
+    _ensure_pdf_fonts_available(workspace_root)
+    scripts.append(
+        run_source_script(
+            snapshot_workspace_root=workspace_root,
+            args=[
+                python,
+                "scripts/invest/pdf_generator.py",
+                "--data",
+                postprocessed_json,
+                "--output",
+                legacy_report_pdf,
+            ],
+            log_dir=logs_root,
+            script_name="pdf_generator",
+            artifact_paths=[legacy_report_pdf],
+            owner_root=run_root,
+            timeout_seconds=timeout_seconds,
+        )
+    )
 
     if workbook_path is not None:
         workbook = _resolve_owned_path(workbook_path, run_root, "workbook_path_escapes_run_dir")
@@ -294,10 +316,13 @@ def run_ic_review_script_pipeline(
         "scripts/invest/validate_report.py",
         "--json",
         postprocessed_json,
+        "--pdf",
+        legacy_report_pdf,
     ]
     artifacts = {
         "postprocessed_json": str(postprocessed_json),
-        "legacy_report_text": str(legacy_report_text),
+        "legacy_report_markdown": str(legacy_report_markdown),
+        "legacy_report_pdf": str(legacy_report_pdf),
         "validation_report": str(validation_report),
     }
     if workbook_path is not None:
@@ -321,26 +346,52 @@ def run_ic_review_script_pipeline(
     return ScriptPipelineResult(scripts=scripts, artifacts=artifacts)
 
 
+def _ensure_pdf_fonts_available(workspace_root: Path, target_dir: Path | None = None) -> None:
+    """Expose snapshotted DejaVu fonts where the legacy PDF script expects them."""
+    source_dir = workspace_root / "fonts"
+    target_dir = target_dir or Path("/usr/share/fonts/truetype/dejavu")
+    font_files = (
+        "DejaVuSans.ttf",
+        "DejaVuSans-Bold.ttf",
+        "DejaVuSans-Oblique.ttf",
+    )
+    if all((target_dir / name).is_file() for name in font_files):
+        return
+    if not all((source_dir / name).is_file() for name in ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf")):
+        return
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for name in font_files:
+            source = source_dir / name
+            if not source.is_file() and name == "DejaVuSans-Oblique.ttf":
+                source = source_dir / "DejaVuSans.ttf"
+            target = target_dir / name
+            if source.is_file() and not target.is_file():
+                shutil.copy2(source, target)
+    except OSError:
+        return
+
+
 def _notify_stage(stage_callback: Callable[[str], None] | None, script_name: str) -> None:
     if stage_callback is not None:
         stage_callback(script_name)
 
 
-def _write_legacy_report_text(json_path: Path, output_path: Path) -> None:
+def _write_legacy_report_markdown(json_path: Path, output_path: Path) -> None:
     source_text = json_path.read_text(encoding="utf-8")
     try:
         payload = json.loads(source_text)
     except json.JSONDecodeError:
         output_path.write_text(source_text, encoding="utf-8")
         return
-    output_path.write_text(_legacy_report_debug_text(payload), encoding="utf-8")
+    output_path.write_text(_legacy_report_markdown(payload), encoding="utf-8")
 
 
-def _legacy_report_debug_text(payload: object) -> str:
+def _legacy_report_markdown(payload: object) -> str:
     if not isinstance(payload, dict):
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
-    lines: list[str] = ["# IC Review Legacy Output"]
+    lines: list[str] = ["# IC Review Full Report"]
     meta = payload.get("meta")
     if isinstance(meta, dict):
         _append_mapping(lines, "Meta", meta)

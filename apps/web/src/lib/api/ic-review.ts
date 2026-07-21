@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch, resolveApiBaseUrl } from "./client";
 import type {
   AnalysisCheckRunRecord,
   AnalysisCheckRunsListResponse,
@@ -41,4 +41,8 @@ export async function listIcReviewRuns(analysisId: string): Promise<AnalysisChec
 
 export async function getLatestIcReviewRun(analysisId: string): Promise<AnalysisCheckRunRecord> {
   return apiFetch<AnalysisCheckRunRecord>(`/analyses/${analysisId}/ic-review-runs/latest`);
+}
+
+export function icReviewArtifactUrl(runId: string, artifactKey: string): string {
+  return `${resolveApiBaseUrl()}/ic-review-runs/${runId}/artifacts/${encodeURIComponent(artifactKey)}`;
 }

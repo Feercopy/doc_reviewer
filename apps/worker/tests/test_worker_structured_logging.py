@@ -12,7 +12,7 @@ from test_run_analysis_job import (
     _create_session,
     _create_skill,
     _create_user,
-    _main_analysis_json,
+    _main_analysis_summary_json,
 )
 
 
@@ -42,7 +42,7 @@ def test_worker_and_provider_logs_include_job_context_without_api_key(tmp_path, 
             status=RunStatus.QUEUED.value,
             run_parameters={
                 "mock_provider_result": {
-                    "structured_text": _main_analysis_json("Needs evidence."),
+                    "structured_text": _main_analysis_summary_json("Needs evidence."),
                     "raw_output": "raw output",
                     "input_tokens": 3,
                     "output_tokens": 4,

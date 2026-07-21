@@ -21,6 +21,246 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Add `Stop Analysis` to the document detail Analysis history running
+  state: the button now calls `POST /analyses/{analysis_id}/cancel`, active
+  Gate/Devil's Advocate/detail/IC Review runs are marked `cancelled`, completed
+  Gate Challenger output remains persisted and openable, and a persisted
+  `analysis_chain_cancel_requested_at` marker prevents automatic IC Review from
+  being created if the user stops the chain after Gate completion but before the
+  IC row exists. Verified Python syntax, Docker API focused tests
+  (`18 passed`), Docker worker focused tests (`49 passed`), and focused web
+  tests with matching API base URL (`17 passed`). Full TypeScript typecheck is
+  still blocked by pre-existing unrelated test fixture type errors in
+  `analysisDisplay.test.ts` and `provider-settings.test.ts`.
+- [x] Restore deleted Documents-page case row after monitored IC Review
+  completion: IC Review run `f7ed2771-279a-491b-b2c9-9db7eed106f0` completed
+  successfully, and the missing case was caused by the primary document
+  `281867e6-af34-4aea-a375-99d454a893f9` plus linked Fin Summary
+  `b2f2e3fc-a8fc-4b6b-9d41-2aa208607495` being marked `deleted`. Restored
+  both to `active`, verified the primary document is `active primary completed`,
+  analysis `158ee455-6329-4a6c-b763-bcaaeba9a366` is completed, Devil's
+  Advocate is completed, IC Review is completed, and stopped the heartbeat
+  monitor.
+- [x] Fix `Load detailed Layer 1 / Layer 2` precondition mismatch: the UI no
+  longer shows the lazy-detail request button when a staged Gate Challenger
+  summary lacks `gate_challenger_response_id`, which happens for runs created
+  without Responses API conversation state. Full Output now shows a clear
+  explanatory message instead of triggering the API error
+  `Gate Challenger response id is missing`. Verified focused `analysisPage`
+  web test in Docker (`23 passed`), rebuilt/restarted local `web`, and checked
+  clean startup logs.
+- [x] Rename and reorder Full Report subtabs: the second-level tabs now appear
+  as `Product Analysis`, `Financial Analysis`, `Document comments`, and
+  `Full Output` while preserving the existing underlying panel logic. Verified
+  focused `analysisPage` web test in Docker (`23 passed`), rebuilt/restarted
+  local `web`, and confirmed the running container has the new tab order.
+- [x] Rebuild the Summary page report body into two collapsible blocks:
+  `Продуктовый анализ` reuses the Gate Challenger text output and truncates it
+  before any `IC Recommendations`/`IC Recomendations` section, while
+  `Финансовый анализ` reuses the compact IC Review text output without
+  download/artifact controls or uploaded-document UI. Kept the existing verdict
+  and `Short Summary` blocks unchanged, verified focused web tests in Docker
+  (`48 passed`), rebuilt/restarted local `web`, and confirmed the running
+  client bundle contains both new block titles.
+- [x] Polish Summary report styling: Financial `Executive brief` now uses a
+  pure white block and standard dark text, Summary report blocks are white, and
+  open disclosure controls use the main button green with a white, heavier
+  chevron while the closed state keeps the existing neutral treatment. Verified
+  focused `analysisPage` web test in Docker (`22 passed`) and rebuilt/restarted
+  local `web`.
+- [x] Trim Summary `Продуктовый анализ` content: the Summary-only product
+  markdown now removes `Рекомендация инвестиционного комитета` and both
+  `Что можно улучшить в документе` / `Что нужно улучшить в документе` sections
+  with their nested content, without changing the Gate Challenger tab output.
+  Rebuilt/restarted local `web` and verified focused `analysisPage` test in
+  Docker (`23 passed`).
+- [x] Add source evidence labels to Summary rationale subpoints: result
+  rationale synthesis now persists structured `rationale_items` with per-item
+  `gate_challenger`/`ic_review` evidence sources, the Summary page renders each
+  subpoint with a gray `Источники - Gate Challenger, IC Review` label inside
+  the subpoint title row, and legacy markdown remains as fallback. Backfilled local analysis
+  `964e2d93-902d-409b-9593-008238fe1dbc` with 6 sourced rationale items.
+  Verified Docker API schema/seeds tests (`31 passed`), worker synthesis/job
+  tests (`27 passed`), focused web tests (`43 passed` plus `22 passed` after
+  moving labels into the title row), rebuilt/restarted local `api`/`worker`/`web`,
+  and checked clean web/worker startup logs.
+- [x] Update the analysis result page summary surface: renamed the top
+  `Executive Summary` tab to `Summary` and expanded the final verdict block
+  with two one-line agent verdict rows: `Продуктовый анализ` and
+  `Финансовый анализ`. Each row uses the normalized three-state verdict with a
+  green/yellow/red circular marker, with IC `CONDITIONAL` rendered as
+  `Need Evidence`; statuses now sit next to the row labels instead of being
+  pushed to the far edge. Verified focused web tests inside Docker (`26 passed`)
+  and rebuilt/restarted local `web`; Docker reports `127.0.0.1:3000->3000/tcp`
+  published.
+- [x] Fix IC Review `schema_validation_failed:additionalProperties` on
+  `ic-product-analyst`: the latest failed local run validated a provider
+  chat-completions envelope (`choices`/`usage`/`model`) instead of the nested
+  role JSON, and after unwrapping exposed a role-level `primary_verify_notes`
+  field that belongs under `full_report_materials`. The shared worker JSON
+  parser now unwraps OpenAI-compatible chat/Responses envelopes before schema
+  validation and normalizes IC role `primary_verify_notes` into the allowed
+  report-materials location. Rebuilt/restarted local `worker`; verified
+  `python3 -m py_compile apps/worker/results/schema_validation.py`, focused
+  Docker worker tests (`48 passed`), worker startup logs, and direct validation
+  of failed step `facdefd9-f5a6-4d75-bfe1-490d15436e84` (`validation ok`,
+  role `ic-product-analyst`).
+- [x] Split the `/documents` upload surface into two drag-and-drop zones:
+  `Документ для защиты` and `Fin Summary`. The API now accepts an optional
+  `fin_summary_file`, stores it as a linked `fin_summary` document, keeps the
+  primary document as the only row in the normal documents list, and exposes
+  linked Fin Summary metadata on document reads for future `Start Analysis`
+  wiring. Added migration `202607140001`, rebuilt/restarted local
+  `api`/`worker`/`web`, applied Alembic head, and verified
+  `tests/test_documents_upload.py` (`18 passed`), relevant web tests
+  (`40 passed`), `/health` `200`, and `/documents` `200`.
+- [x] Fix IC Review `ic_review_validation_failed` caused by original
+  postprocess scripts not finding generated PDF/Excel artifacts: the failed run
+  reached validation but `pdf_generator` could not find Cyrillic fonts and
+  `excel_audit` expected KPI rows as two-value pairs. The worker now exposes
+  snapshotted DejaVu fonts at the legacy PDF script's expected Linux font path
+  before PDF generation and serializes legacy KPIs as `[name, value]` pairs for
+  the original Excel audit script. Rebuilt/restarted local `worker`; verified
+  focused worker tests: `52 passed`.
+- [x] Fix recurring IC Review `invalid_json:Unterminated string` after moving
+  toward full reports: synthesis no longer asks the LLM to return a large
+  `legacy_report_json`. The model now returns only the compact
+  `ic-agentic-review-result` UI object, while the worker assembles the full
+  PDF/Markdown `legacy_report_json` from role-level `full_report_materials`.
+  Reduced synthesis output budget back to `12000`, kept backward-compatible
+  parsing for old `compact_result` wrappers, rebuilt/restarted local `worker`,
+  and verified focused worker tests: `50 passed`.
+- [x] Preserve the current web IC Review logic as a rollback point and switch
+  future IC Review full-report generation toward the original full skill
+  depth while keeping the existing compact web summary path intact. Saved a
+  rollback copy of the touched web/worker contract files under
+  `.local/backups/ic-review-web-logic-20260714-1318/` and documented it in
+  `docs/handoffs/2026-07-14-ic-review-web-logic-rollback.md`. Added
+  role-level `full_report_materials`, expanded synthesis instructions for the
+  10-section original-style report, increased IC Review context/report output
+  budgets, and updated focused API/worker tests. Verified
+  `43 passed` for API contract/IC Review API tests and `50 passed` for
+  worker IC Review renderer/job/script tests.
+- [x] Restructure the analysis detail output navigation into two levels without
+  changing result calculation or panel content: the top level now has
+  `Executive Summary` and `Full Report`, `Executive Summary` reuses the former
+  Result panel and is selected by default, and `Full Report` reveals nested
+  `Gate Challenger`, `Document comments`, `IC review`, and `Full Output` tabs
+  with `Gate Challenger` selected by default. Verified focused web tests and
+  rebuilt/restarted the local `web` container.
+- [x] Add Result tab rationale synthesis block: compare Gate Challenger
+  `Почему оценка именно такая` with IC Review `Top findings`, synthesize the
+  merged explanation into the same Result-tab surface, and append IC Review
+  `Critical risks` plus `Data gaps`. Added the persisted
+  `result_rationale_synthesis` path with
+  `contracts/schemas/result-rationale.schema.json`, seeded the local DB skill,
+  wired the worker to run it after completed IC Review, backfilled local
+  analysis `964e2d93-902d-409b-9593-008238fe1dbc`, rebuilt/restarted
+  `api`/`worker`/`web`, and verified targeted API/worker/frontend tests.
+- [x] Set Result verdict block text color to `#161616` for both the label and
+  verdict text. Verified `npm run test -- analysisPage resultDisplay` inside
+  the web container (`22 passed`), rebuilt/restarted local `web`, and confirmed
+  the target analysis page returns `200`.
+- [x] Apply user-provided Result verdict colors: updated the Result tab verdict
+  block to use muted variants of `B4CB75` for `Approved`, `FFCE69` for
+  `Need Evidence`, and `EF6D4E` for `Rejected`. Verified
+  `npm run test -- analysisPage resultDisplay` inside the web container
+  (`22 passed`), rebuilt/restarted local `web` with Docker Compose, and
+  confirmed the target analysis page returns `200`.
+- [x] Add initial analysis `Result` tab for aggregated business verdict:
+  inserted a first-level `Result` tab before `Gate Challenger` on the analysis
+  detail page and made it the default active tab. The tab currently renders only
+  one muted color verdict block with `Rejected`, `Need Evidence`, or `Approved`.
+  The verdict is the strictest available value across Gate Challenger and the
+  latest completed IC Review compact output: IC `GO` maps to `Approved`,
+  `CONDITIONAL`/`UNKNOWN` to `Need Evidence`, and `NO-GO`/`FREEZE` to
+  `Rejected`; Gate verdicts are normalized into the same three states. Added
+  focused unit coverage in `resultDisplay.test.ts` and updated analysis page
+  tab tests. Verified inside the rebuilt web container:
+  `npm run test -- analysisPage resultDisplay` (`22 passed`), rebuilt/restarted
+  local `web` with Docker Compose, and confirmed
+  `/analyses/964e2d93-902d-409b-9593-008238fe1dbc` returns `200` with clean
+  compile logs. Note: standalone `npm run build` still hits the pre-existing
+  Next `/404` `<Html>` import prerender error after successful compile/typecheck.
+- [x] Create GitHub rollback branch for the saved local site checkpoint:
+  pushed the current project source state, without `.env`, `.local`, logs,
+  local databases, uploaded documents, or build artifacts, to
+  `Feercopy/Gate-Challenger-Seva` branch `Jul14-0932` for a readable restore
+  point in addition to the local rollback archive and Docker image tags.
+- [x] Save local rollback checkpoint for the current site before further edits:
+  created source archive
+  `.local/rollback-snapshots/site-20260714-092236/project-source-no-secrets.tar.gz`
+  excluding `.env` and prior rollback snapshots, with SHA-256
+  `cae799240fbbfcb33dbb3aa6e9d56b8d85bbe9785cd5dba9dbe56f9caa208f9f`.
+  Tagged current local Docker images as
+  `gate-challenger-local-web:rollback-20260714-092236`,
+  `gate-challenger-local-api:rollback-20260714-092236`, and
+  `gate-challenger-local-worker:rollback-20260714-092236`. Wrote restore notes
+  to `.local/rollback-snapshots/site-20260714-092236/MANIFEST.md`.
+- [x] Fix local IC Review synthesis `invalid_json:Unterminated string` failure:
+  root cause was the final synthesis step returning malformed/truncated JSON
+  after all role calls had already completed. Tightened the synthesis prompt so
+  `legacy_report_json` stays a concise shell that the worker deterministically
+  expands from `compact_result`, added a `20000` token synthesis output default,
+  and added one automatic synthesis-only retry on `JSONDecodeError` without
+  rerunning the eight role steps. The retry records safe metadata in
+  `run_parameters["synthesis_json_retry"]` and preserves the successful retry
+  raw output in the normal admin-only raw field. Rebuilt/restarted local
+  `worker`; verified inside Docker after temporary `pytest` install:
+  `python -m pytest tests/test_run_ic_agentic_review_job.py
+  tests/test_ic_review_renderer.py -q` (`39 passed`).
+- [x] Diagnose local Quotio Codex auth after `gpt-5.5` returned
+  `auth_unavailable`: direct minimal Quotio probes showed the failure was inside
+  Quotio/CLIProxy Codex OAuth, not the Gate Challenger request shape. Immediately
+  after account relogin, one `gpt-5.5` request still returned an invalidated
+  OAuth-token error, while `claude-opus-4-7` worked. The refreshed Codex auth
+  file then became usable; follow-up probes for `gpt-5.4` and `gpt-5.5` both
+  returned `200` with `ok`, and a final `gpt-5.5` repeat also returned `200`.
+  Keep the GPT models available; if the error recurs, reauthenticate the Codex
+  provider in Quotio and wait/retry once before changing service code.
+- [x] Fix local Quotio Gate Challenger malformed JSON after switching off
+  Responses API: the follow-up failure
+  `Expecting ',' delimiter: line 1 column 77435` came from sending the full
+  large Gate Challenger result schema through chat completions. The worker now
+  separates the compact Gate Challenger summary schema choice from the transport
+  choice: Gate Challenger uses the compact summary schema for both official
+  OpenAI Responses and local/custom OpenAI-compatible chat providers, while
+  `http://host.docker.internal:8317/v1` still avoids Responses API. Added an
+  end-to-end worker regression for Quotio-style base URL using chat completions
+  with the summary schema. Rebuilt/restarted local `worker`; verified
+  `python -m pytest tests/test_run_analysis_job.py tests/test_provider_adapters.py -q`
+  inside Docker (`24 passed`, existing passlib/argon2 warnings) and confirmed a
+  fresh local run would use `summary_schema=True`, `responses_api=False`.
+- [x] Fix local Quotio/OpenAI-compatible Gate Challenger run using the wrong
+  provider API: root cause of the `messages: at least one message is required`
+  failure was automatic use of OpenAI Responses API for Gate Challenger summary
+  runs even when `base_url` was the local Quotio bridge
+  `http://host.docker.internal:8317/v1`. Quotio accepts the OpenAI-compatible
+  chat-completions shape for Claude model IDs, but the Responses request sends
+  `input` instead of `messages`. The worker now auto-selects Responses only for
+  the official OpenAI base URL (or an explicit `provider_api: responses`
+  override) and uses chat completions for local/custom OpenAI-compatible
+  providers. Added regression coverage for the Quotio base URL and explicit
+  override behavior. Rebuilt/restarted the local `worker` container and verified
+  inside Docker: `python -m pytest tests/test_run_analysis_job.py
+  tests/test_provider_adapters.py -q` (`23 passed`, existing passlib/argon2
+  warnings) plus a live metadata check showing a fresh run with
+  `claude-opus-4-7` and `http://host.docker.internal:8317/v1` no longer selects
+  Responses API.
+- [x] Fix local Gate Challenger skill-source mount for parser runs: SSH access
+  to `git@github.com:Ilya-eremenko/Gate2-challenger-skill.git` works, cloned
+  the repo to `.local/git-sources/Gate2-challenger-skill`, and pointed local
+  `.env` `GATE_CHALLENGER_HOST_PATH` at that git copy. Added `git` to the API
+  Docker image because `local_git_repo` source snapshots run `git rev-parse`
+  during analysis creation. Rebuilt/restarted the local `api` container,
+  recreated `worker`, verified the API container sees
+  `/external/gate-challenger/skills/gate-challenger/SKILL.md`, collects a
+  `10`-file manifest including `stream-review-2-plus-rubric.md`, and passes
+  `check_git_freshness` at revision
+  `bfe1ee2203928c0e8c06ebba6f5ed274dd5252cf` with `dirty=False`. Local note:
+  the source clone's branch upstream tracking is unset because the compose mount
+  is intentionally read-only and `git fetch` would otherwise try to write
+  `.git/FETCH_HEAD` inside the container.
 - [x] Adapt latest Gate Challenger reference updates for service runtime:
   external source head moved from previously synced `a738279` to `d7323d6`,
   adding strategic spine / driver focus / vision-metric coupling checks across
@@ -137,26 +377,31 @@ Primary plan index:
   `https://openrouter.ai/api/v1/models` currently returns `ConnectTimeout` with
   no local `OUTBOUND_PROXY_URL` configured, so new runs may still fail if local
   network access to OpenRouter remains unavailable.
-- [x] Remove legacy PDF generation from IC review deterministic artifacts:
-  worker now saves `artifacts/legacy_report.txt` as a text debug artifact
-  derived from `postprocessed_legacy_report.json`, runs `validate_report.py`
-  with JSON-only input when no workbook is provided and JSON+Excel when a
-  workbook is provided, and persists artifact kind `legacy_report_text` instead
-  of `legacy_report_pdf`. Verified
-  `.venv/bin/python -m pytest apps/worker/tests/test_ic_review_script_runner.py
-  apps/worker/tests/test_run_ic_agentic_review_job.py
-  apps/worker/tests/test_ic_review_renderer.py -q` (`43 passed`),
-  `.venv/bin/python -m pytest apps/worker/tests/test_run_ic_agentic_review_job.py
-  apps/worker/tests/test_ic_review_script_runner.py
-  apps/worker/tests/test_ic_review_renderer.py
-  apps/worker/tests/test_provider_adapters.py -q` (`55 passed`),
-  `.venv/bin/python -m pytest apps/api/tests/test_contract_schemas.py
-  apps/api/tests/test_ic_review_api.py -q` (`40 passed`), and
-  `npm --prefix apps/web run test -- analysisPage icReviewDisplay` (`24
-  passed`). Safe local replay on normalized stored legacy JSON with the real
-  IC source scripts produced `json_postprocess=0`, `validate_report=0`,
-  `0` validation failures, a `legacy_report.txt` artifact, and no
-  `legacy_report.pdf`.
+- [x] Restore full IC review report artifacts while keeping the compact web
+  summary: synthesis now asks for both `compact_result` and full
+  10-section `legacy_report_json`, the deterministic runner writes
+  `legacy_report.md`, runs the source `pdf_generator.py`, validates with
+  `--pdf`, and persists user-visible `legacy_report_markdown` and
+  `legacy_report_pdf` artifacts. The IC Review tab still renders compact
+  summary content and exposes download links for the full PDF/MD files.
+  Verified `docker compose --env-file .env -f infra/docker-compose.test.yml
+  run --rm api-test python -m pytest apps/api/tests/test_ic_review_api.py
+  apps/api/tests/test_contract_schemas.py -q` (`43 passed`),
+  `docker compose --env-file .env -f infra/docker-compose.test.yml run --rm
+  worker-test python -m pytest tests/test_ic_review_script_runner.py
+  tests/test_run_ic_agentic_review_job.py tests/test_ic_review_renderer.py -q`
+  (`50 passed`), and `docker compose --env-file .env -f
+  infra/docker-compose.yml exec -T -e NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+  web npm run test -- analysisPage documents` (`54 passed`). Rebuilt and
+  restarted runtime `api`, `web`, and `worker`; all are up locally.
+- [x] Move IC Review full-report downloads above `Executive brief` and localize
+  the block to `Скачать полный отчет` with `Скачать PDF` / `Скачать MD`
+  buttons. Backfilled analysis `964e2d93-902d-409b-9593-008238fe1dbc` latest
+  completed IC run `127a8acd-183f-4fc6-a533-2f3892ac8e1b` with user-visible
+  `legacy_report.pdf` and `legacy_report.md` artifacts. Verified
+  `docker compose --env-file .env -f infra/docker-compose.yml exec -T -e
+  NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 web npm run test --
+  analysisPage documents` (`54 passed`) and rebuilt/restarted runtime `web`.
 - [x] Fix local IC review deterministic validation failure on run
   `cb6c52c9-e949-43f3-8427-f33f2b2aca43`: root cause was not provider output
   generation but legacy-script compatibility after synthesis. The compact
@@ -1530,3 +1775,136 @@ Exit criteria:
   stages, and verified the run is `completed` with 8/8 role steps completed,
   9 artifacts, validation `warn` with 0 failures, and production health
   returning HTTP 200.
+- 2026-07-14: Added the `Result` tab short summary block directly under the
+  final verdict and aligned its background with the Gate Challenger short
+  summary treatment (`#f7f9fb` with `#e5eaf0` border) while keeping text
+  `#161616`. Verified focused frontend tests (`23 passed`), rebuilt/restarted
+  the local web container, and confirmed the analysis detail page returns HTTP
+  200.
+- 2026-07-14: Added the baseline `result_summary_synthesis` skill and worker
+  synthesis step that runs after a completed IC Agentic Review. The step
+  extracts Gate Challenger recommendations plus the IC Review executive brief,
+  calls the configured provider with `contracts/schemas/result-short-summary`
+  JSON output, and stores the merged Result tab summary at
+  `analysis.structured_output.result.short_summary`; the frontend now prefers
+  that value before legacy Gate summary fallbacks. Seeded the local DB with the
+  new skill, rebuilt/restarted API/worker/web, verified frontend tests (`43
+  passed`), Python compile/smoke checks, and container health. Runtime images
+  still do not include `pytest`, so backend/worker pytest files were added but
+  could not be executed inside the current containers.
+- 2026-07-14: Added reproducible Docker pytest support without adding dev
+  dependencies to runtime images. API and worker Dockerfiles now accept
+  `INSTALL_DEV=true`, and `infra/docker-compose.test.yml` defines `api-test`
+  and `worker-test` services that install optional dev extras and run pytest.
+  Documented the commands in `README.md`. Verified
+  `docker compose --env-file .env -f infra/docker-compose.test.yml config`,
+  full API pytest (`180 passed`), and full worker pytest (`137 passed`).
+  Fixed brittle skill-index test fixtures to select seeded skills by name and
+  updated worker mock Gate Challenger outputs to the current summary schema.
+- 2026-07-14: Backfilled Result tab `Short Summary` for local analysis
+  `964e2d93-902d-409b-9593-008238fe1dbc` using the same
+  `result_summary_synthesis` worker path that runs after completed IC Review.
+  Verified `analysis.structured_output.result.short_summary_status=completed`
+  and the local web container serves the analysis page.
+- 2026-07-14: Added a white auto-sized Result tab surface around the verdict
+  and short-summary blocks so the outer container grows with whatever Result
+  content is present. Verified focused frontend tests (`analysisPage`, 21
+  passed), rebuilt/restarted the local web container, and confirmed the
+  analysis page is served by the updated web image.
+- 2026-07-14: Added Result tab rationale synthesis from Gate Challenger
+  `Почему оценка именно такая` plus IC Review `Top findings`, with appended
+  `Critical risks` and `Data gaps`. Added
+  `contracts/schemas/result-rationale.schema.json`, seeded the inline
+  `result_rationale_synthesis` skill, wired worker execution after completed
+  IC Review, and rendered the new `Почему оценка именно такая` block inside the
+  auto-sized Result surface. Verified API schema/seed tests (`31 passed`),
+  focused worker synthesis/job tests (`26 passed`), focused web tests
+  (`42 passed`), rebuilt/restarted local `api`/`worker`/`web`, seeded the
+  local DB, backfilled analysis `964e2d93-902d-409b-9593-008238fe1dbc`, and
+  confirmed the analysis page is served by the updated web image.
+- 2026-07-14: Reworked the analysis detail output tabs into a two-level
+  structure: top-level `Executive Summary` and `Full Report`, with the former
+  Result panel reused as `Executive Summary`; `Full Report` now contains nested
+  `Gate Challenger`, `Document comments`, `IC review`, and `Full Output` tabs.
+  The defaults are `Executive Summary` and nested `Gate Challenger`. Verified
+  focused web tests (`43 passed`), confirmed Next compile/typecheck reaches the
+  known pre-existing `/404` `<Html>` prerender failure, rebuilt/restarted the
+  local `web` container, and confirmed the analysis page is served.
+- 2026-07-14: Reworked document detail `Start analysis` into a full-package
+  launch: the Gate Challenger worker flow still runs Devil's Advocate/predicted
+  comments, then automatically creates and enqueues IC Review after the Gate run
+  completes, using a linked valid `.xlsx` Fin Summary when available. The
+  document detail UI now keeps users on the page, shows a running-package
+  progress panel, disables duplicate launches, polls until Gate Challenger,
+  Devil's Advocate, and IC Review are complete, and only then shows the
+  completed package in the analysis history list. Verified Python compile,
+  focused worker tests (`12 passed`), focused web document tests (`32 passed`),
+  focused API IC/document tests (`38 passed`), rebuilt/restarted local
+  `api`/`worker`/`web`, and confirmed `/health` plus `/documents` return 200.
+- 2026-07-14: Changed the primary `/documents` upload action into `Start
+  Analysis`: the page now uploads the defense document plus optional Fin
+  Summary, polls the uploaded primary document until parsing completes, starts
+  the same full-package analysis flow used by the document detail page with the
+  configured default provider/model, then opens the document detail page to show
+  full-package progress. Added focused web coverage for the upload-to-analysis
+  orchestration. Verified focused document web tests (`34 passed`),
+  rebuilt/restarted the local `web` container, confirmed `/documents` returns
+  200, and confirmed Next dev compiled `/documents` successfully. A direct
+  `tsc --noEmit` still reaches pre-existing test-fixture type errors in
+  `analysisDisplay.test.ts` and `provider-settings.test.ts`.
+- 2026-07-14: Reworked the `/documents` table from uploaded-document rows into
+  completed case rows. The first column is now `Case`, the per-file format badge
+  is removed, rows are shown only after the latest analysis package has completed
+  Gate Challenger, Devil's Advocate, and IC Review, and each row's `Open` action
+  now links directly to `/analyses/{analysis_id}`. Added focused web coverage
+  for the completed-case table behavior. Verified focused document web tests
+  (`35 passed`), rebuilt/restarted the local `web` container, confirmed
+  `/documents` returns 200, and confirmed Next dev compiled `/documents`.
+- 2026-07-14: Adjusted the `/documents` case table to keep in-progress cases
+  visible after analysis launch. The table now stores the latest analysis per
+  document, shows a dedicated `Analysis` status column for Gate Challenger,
+  Devil's Advocate, IC Review, completed, or failed states, and disables `Open`
+  until the full package is complete. Verified focused document web tests
+  (`35 passed`), rebuilt/restarted the local `web` container, and confirmed
+  `/documents` returns 200.
+- 2026-07-14: Clarified `/documents` case-table status semantics for linked Fin
+  Summary workbooks. `.xlsx` Fin Summary attachments now display as `Workbook
+  attached` instead of surfacing the generic document parser's unsupported-file
+  failure, avoiding conflict with the real analysis status column where IC
+  Review can continue running from the workbook file. Verified the local Avito
+  Sales case has a completed primary `.docx`, a linked `.xlsx` Fin Summary with
+  generic parser failure, and an IC Review run in progress. Verified focused
+  document web tests (`35 passed`), rebuilt/restarted `web`, and confirmed
+  `/documents` returns 200.
+- 2026-07-15: Investigated the local Avito Sales IC Review failure and found
+  the IC run failed with `job_timeout_exception` almost exactly at the previous
+  30-minute RQ timeout while still reporting the coarse `preparing_context`
+  stage. Increased IC agentic review enqueue timeout to 2 hours and split the
+  early worker stage reporting into `loading_snapshot`, `extracting_workbook`,
+  `formula_audit`, and `building_context` so future slowdowns identify whether
+  the time is spent in workbook extraction, original-skill formula audit, or
+  final context assembly. Added focused API coverage for the IC timeout setting.
+  Verified Python compile, focused API timeout test (`1 passed`), focused IC
+  worker job tests (`25 passed`), rebuilt/restarted local `api` and `worker`,
+  and confirmed API health from inside the container (`{"status":"ok"}`).
+- 2026-07-15: Updated the `/documents` case table actions so the completed
+  analysis link is labeled `Analysis results` and still remains disabled until
+  the full package completes, while a new `Open Case` action opens the original
+  document/case detail page in a new tab. Verified focused web coverage
+  (`uploadStartAnalysis.test.ts`, `2 passed`), rebuilt/restarted local `web`,
+  and confirmed `/documents` returns 200 from inside the web container.
+- 2026-07-15: Investigated the new Avito Sales IC Review failure
+  `invalid_json:Unterminated string starting at` and found it occurred in the
+  first role step (`failed:ic-financial-auditor`), not synthesis. The failed
+  step sent a very large prompt (`261124` input tokens) and hit the exact
+  previous role output cap (`12000` output tokens), leaving an unterminated JSON
+  string. Fixed the root causes by compacting workbook context for LLM prompts,
+  removing duplicate workbook context injection from role prompts, raising IC
+  role output budget to `32000`, and adding a role-level invalid-JSON retry
+  without rerunning completed roles. Measured the real Avito role prompt path:
+  old saved prompt was about `812k` characters; the new rendered equivalent is
+  about `132k` characters, with workbook context about `30k` and no duplicate
+  `## Workbook Context` block. Verified Python compile, focused worker tests
+  (`test_ic_review_renderer.py` + `test_run_ic_agentic_review_job.py`, `42
+  passed`), rebuilt/restarted local `worker`, and confirmed the running worker
+  uses role output limit `32000`.

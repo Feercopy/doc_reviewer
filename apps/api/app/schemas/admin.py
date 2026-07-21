@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from app.schemas.enums import (
     DocumentParseStatus,
+    DocumentRole,
     DocumentType,
     EntityStatus,
     EtalonSource,
@@ -20,6 +21,7 @@ from app.schemas.enums import (
 class AdminDocumentRead(BaseModel):
     id: UUID
     owner_id: UUID
+    linked_fin_summary_document_id: UUID | None
     owner_login: str
     title: str
     original_filename: str
@@ -29,6 +31,7 @@ class AdminDocumentRead(BaseModel):
     parse_status: DocumentParseStatus
     detected_document_type: DocumentType
     manual_document_type: DocumentType | None
+    document_role: DocumentRole
     document_type_confidence: Decimal | None
     parse_error: str | None
     status: EntityStatus

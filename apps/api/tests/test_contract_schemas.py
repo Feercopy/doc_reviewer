@@ -20,6 +20,31 @@ def role_comment_item(anchor_text: str, body: str, comment_type: str = "missing_
     }
 
 
+def ic_role_full_report_materials() -> dict:
+    return {
+        "section_drafts": [
+            {
+                "section_key": "section_4",
+                "title": "Financial model review",
+                "content": "Detailed role-level material for the full investment committee report.",
+                "evidence_ids": ["doc-001"],
+            }
+        ],
+        "tables": [
+            {
+                "section_key": "section_4",
+                "title": "Key numbers",
+                "markdown": "| Metric | Value |\n|---|---|\n| Budget | 12000000 |",
+            }
+        ],
+        "risks": [{"title": "Model dependency", "detail": "The model depends on unverified assumptions.", "severity": "critical"}],
+        "data_gaps": [{"title": "Cohort proof", "detail": "Cohort proof is missing."}],
+        "recommendations": [{"title": "Add evidence", "detail": "Add measured evidence before approval."}],
+        "scenarios": [{"title": "Base", "detail": "Base case depends on the stated assumptions."}],
+        "primary_verify_notes": ["Financial auditor is primary for section_4."],
+    }
+
+
 def ic_review_minimal_payload() -> dict:
     return {
         "run_mode": "ic_agentic_review_compact",
@@ -805,6 +830,50 @@ def test_ic_agentic_review_schema_accepts_minimal_compact_result():
     validate(instance=ic_review_minimal_payload(), schema=schema)
 
 
+def test_result_short_summary_schema_accepts_llm_synthesis_payload():
+    schema = load_schema("result-short-summary.schema.json")
+
+    validate(
+        instance={
+            "run_mode": "result_short_summary",
+            "short_summary": (
+                "Gate Challenger and IC Review both point to a conditional decision: the case has a coherent "
+                "business direction, but approval should wait until the team closes the evidence gaps, validates "
+                "unit economics, and documents the risk mitigations needed for an IC-ready launch."
+            ),
+        },
+        schema=schema,
+    )
+
+
+def test_result_rationale_schema_accepts_llm_synthesis_payload():
+    schema = load_schema("result-rationale.schema.json")
+
+    validate(
+        instance={
+            "run_mode": "result_rationale",
+            "rationale_markdown": (
+                "Оценка остается условной: Gate Challenger фиксирует, что ключевые доказательства пока "
+                "не закрывают полный масштаб, а IC Review усиливает этот вывод через finding по модели, "
+                "где финансовые допущения и uplift-механики требуют дополнительной проверки перед полным approval."
+            ),
+            "rationale_items": [
+                {
+                    "title": "Главный uplift не доказан текущей фактической дельтой.",
+                    "detail": (
+                        "Gate Challenger фиксирует отсутствие текущей A/B delta, а IC Review показывает, "
+                        "что финансовая модель опирается на внешние и исторические бенчмарки."
+                    ),
+                    "sources": ["gate_challenger", "ic_review"],
+                }
+            ],
+            "critical_risks": ["Full rollout may lock in hiring before uplift is proven."],
+            "data_gaps": ["Missing current A/B delta tied to the requested investment case."],
+        },
+        schema=schema,
+    )
+
+
 def test_ic_agentic_review_schema_accepts_full_compact_result():
     schema = load_schema("ic-agentic-review-result.schema.json")
 
@@ -829,6 +898,7 @@ def test_ic_agentic_role_schema_accepts_each_original_role_result():
             ],
             "data_gaps": [],
             "numbers_used": [],
+            "full_report_materials": ic_role_full_report_materials(),
         }
 
         validate(instance=payload, schema=schema)
@@ -892,6 +962,7 @@ def test_ic_agentic_role_schema_rejects_extra_nested_finding_field():
         ],
         "data_gaps": [],
         "numbers_used": [],
+        "full_report_materials": ic_role_full_report_materials(),
     }
 
     assert_schema_rejects(payload, schema, "schema accepted unexpected nested field in role finding")
@@ -920,6 +991,7 @@ def test_ic_agentic_role_schema_rejects_unbounded_arrays():
             "findings": [finding],
             "data_gaps": [],
             "numbers_used": [],
+            "full_report_materials": ic_role_full_report_materials(),
         }
         payload[field] = value
 

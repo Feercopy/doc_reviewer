@@ -3,6 +3,77 @@ import json
 from results import schema_validation
 
 
+def test_parse_json_output_unwraps_chat_completion_envelope():
+    structured_text = json.dumps(
+        {
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "model": "test-model",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps({"summary": "ok", "findings": []}),
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        }
+    )
+
+    payload = schema_validation.parse_json_output(structured_text)
+
+    assert payload == {"summary": "ok", "findings": []}
+
+
+def test_parse_json_output_unwraps_fenced_json_inside_chat_completion_envelope():
+    structured_text = json.dumps(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": '\n```json\n{"summary": "ok"}\n```',
+                    },
+                }
+            ],
+        }
+    )
+
+    payload = schema_validation.parse_json_output(structured_text)
+
+    assert payload == {"summary": "ok"}
+
+
+def test_parse_and_validate_json_output_moves_ic_role_primary_verify_notes_to_report_materials():
+    payload = {
+        "role": "ic-product-analyst",
+        "section_keys": ["5"],
+        "summary": "Product summary.",
+        "findings": [],
+        "data_gaps": [],
+        "numbers_used": [],
+        "full_report_materials": {
+            "section_drafts": [],
+            "tables": [],
+            "risks": [],
+            "data_gaps": [],
+            "recommendations": [],
+            "scenarios": [],
+        },
+        "primary_verify_notes": ["Primary owner note."],
+    }
+
+    normalized = schema_validation.parse_and_validate_json_output(
+        structured_text=json.dumps(payload),
+        schema_path="contracts/schemas/ic-agentic-role-result.schema.json",
+    )
+
+    assert "primary_verify_notes" not in normalized
+    assert normalized["full_report_materials"]["primary_verify_notes"] == ["Primary owner note."]
+
+
 def test_parse_and_validate_json_output_accepts_fenced_json(tmp_path, monkeypatch):
     schema_path = tmp_path / "schema.json"
     schema_path.write_text(

@@ -39,6 +39,12 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
         detail_run = session.get(AnalysisDetailRun, detail_uuid)
         if detail_run is None:
             raise ValueError(f"Analysis detail run {detail_run_id} not found")
+        if detail_run.status == RunStatus.CANCELLED.value:
+            worker_logger.info(
+                "worker_job_cancelled",
+                extra={"job_type": "run_analysis_details", "entity_id": str(detail_uuid), "status": "cancelled"},
+            )
+            return
         analysis = session.get(Analysis, detail_run.analysis_id)
         if analysis is None:
             raise RuntimeError("analysis_context_missing")
@@ -82,6 +88,12 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
         result = get_provider_adapter(provider, detail_run.run_parameters).run_response(request)
         provider_raw_output = result.raw_output
         provider_structured_text = result.structured_text
+        if _detail_run_cancelled(session=session, detail_run=detail_run):
+            worker_logger.info(
+                "worker_job_cancelled",
+                extra={"job_type": "run_analysis_details", "entity_id": str(detail_uuid), "status": "cancelled"},
+            )
+            return
         structured = parse_and_validate_json_output(
             structured_text=result.structured_text,
             schema_path=DETAILS_SCHEMA_PATH,
@@ -133,6 +145,11 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
 
 def _get_provider_key(session: Session, provider: Provider) -> ProviderKey | None:
     return get_shared_provider_key(db=session, provider=provider)
+
+
+def _detail_run_cancelled(*, session: Session, detail_run: AnalysisDetailRun) -> bool:
+    session.refresh(detail_run)
+    return detail_run.status == RunStatus.CANCELLED.value
 
 
 def _resolve_schema_path(schema_path: str) -> Path:

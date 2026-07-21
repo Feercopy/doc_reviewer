@@ -19,13 +19,18 @@ ROLE_ORDER = (
 )
 
 
-MAX_COMMON_EVIDENCE = 10
-MAX_ROLE_EVIDENCE = 10
-MAX_SYNTHESIS_EVIDENCE = 18
-MAX_SNIPPET_CHARS = 900
-MAX_CONTEXT_STRING_CHARS = 1600
-MAX_CONTEXT_LIST_ITEMS = 12
-MAX_CONTEXT_DICT_ITEMS = 24
+MAX_COMMON_EVIDENCE = 16
+MAX_ROLE_EVIDENCE = 24
+MAX_SYNTHESIS_EVIDENCE = 48
+MAX_SNIPPET_CHARS = 1200
+MAX_CONTEXT_STRING_CHARS = 3200
+MAX_CONTEXT_LIST_ITEMS = 24
+MAX_CONTEXT_DICT_ITEMS = 48
+MAX_WORKBOOK_CONTEXT_SHEETS = 6
+MAX_WORKBOOK_CONTEXT_ROWS_PER_SHEET = 7
+MAX_WORKBOOK_CONTEXT_CELLS_PER_ROW = 7
+MAX_WORKBOOK_CONTEXT_FORMULA_CELLS_PER_SHEET = 12
+MAX_WORKBOOK_CONTEXT_CELL_CHARS = 80
 
 ROLE_KEYWORDS: dict[str, tuple[str, ...]] = {
     "ic-financial-auditor": (
@@ -199,6 +204,7 @@ class ICReviewContextPack:
                 "Use evidence_id values when grounding findings.",
                 "Treat omitted source text as unavailable context, not as evidence that a fact is absent.",
                 "Prefer document, main-analysis, workbook, and formula facts included in this pack.",
+                "Populate full_report_materials with detailed prose and tables suitable for the original IC full report.",
             ],
         }
 
@@ -214,6 +220,7 @@ class ICReviewContextPack:
                 "Synthesize from role outputs first, then use this evidence index for traceability.",
                 "Do not infer facts from source text that is not present in role outputs or this context pack.",
                 "Keep the final compact result short and evidence-grounded.",
+                "Do not generate the full report in synthesis; the worker assembles it from role full_report_materials.",
             ],
         }
 
@@ -368,9 +375,106 @@ def _workbook_context(context: ICReviewContext) -> dict[str, Any] | None:
     if context.workbook_extraction_summary is None and context.formula_auditor_summary is None:
         return None
     return {
-        "workbook_extraction_summary": _compact_value(context.workbook_extraction_summary),
+        "workbook_extraction_summary": _compact_workbook_snapshot(context.workbook_extraction_summary),
         "formula_auditor_summary": _compact_value(context.formula_auditor_summary),
     }
+
+
+def _compact_workbook_snapshot(snapshot: Any) -> Any:
+    if not isinstance(snapshot, dict):
+        return _compact_value(snapshot)
+
+    sheets = snapshot.get("sheets")
+    compact_sheets = []
+    if isinstance(sheets, list):
+        compact_sheets = [_compact_workbook_sheet(sheet) for sheet in sheets[:MAX_WORKBOOK_CONTEXT_SHEETS]]
+
+    return {
+        "format": snapshot.get("format"),
+        "source_filename": snapshot.get("source_filename"),
+        "sheet_count": snapshot.get("sheet_count"),
+        "sheets_truncated": snapshot.get("sheets_truncated")
+        or (isinstance(sheets, list) and len(sheets) > MAX_WORKBOOK_CONTEXT_SHEETS),
+        "limits": {
+            "max_sheets_sent_to_llm": MAX_WORKBOOK_CONTEXT_SHEETS,
+            "max_rows_per_sheet_sent_to_llm": MAX_WORKBOOK_CONTEXT_ROWS_PER_SHEET,
+            "max_cells_per_row_sent_to_llm": MAX_WORKBOOK_CONTEXT_CELLS_PER_ROW,
+            "max_formula_cells_per_sheet_sent_to_llm": MAX_WORKBOOK_CONTEXT_FORMULA_CELLS_PER_SHEET,
+        },
+        "sheets": compact_sheets,
+    }
+
+
+def _compact_workbook_sheet(sheet: Any) -> dict[str, Any]:
+    if not isinstance(sheet, dict):
+        return {"value": _compact_value(sheet)}
+
+    rows = sheet.get("rows")
+    compact_rows = []
+    formula_cells = []
+    if isinstance(rows, list):
+        compact_rows = [_compact_workbook_row(row) for row in rows[:MAX_WORKBOOK_CONTEXT_ROWS_PER_SHEET]]
+        formula_cells = _formula_cells_from_rows(rows)
+
+    return {
+        "name": sheet.get("name"),
+        "dimensions": sheet.get("dimensions"),
+        "rows_truncated": sheet.get("rows_truncated")
+        or (isinstance(rows, list) and len(rows) > MAX_WORKBOOK_CONTEXT_ROWS_PER_SHEET),
+        "columns_truncated": sheet.get("columns_truncated"),
+        "sample_rows": compact_rows,
+        "formula_cells": formula_cells,
+        "source_row_count_in_snapshot": len(rows) if isinstance(rows, list) else None,
+    }
+
+
+def _compact_workbook_row(row: Any) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        return {"value": _compact_value(row)}
+    cells = row.get("cells")
+    compact_cells = []
+    if isinstance(cells, list):
+        compact_cells = [_compact_workbook_cell(cell) for cell in cells[:MAX_WORKBOOK_CONTEXT_CELLS_PER_ROW]]
+    return {
+        "row_number": row.get("row_number"),
+        "cells": compact_cells,
+        "cells_truncated": isinstance(cells, list) and len(cells) > MAX_WORKBOOK_CONTEXT_CELLS_PER_ROW,
+    }
+
+
+def _formula_cells_from_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    formula_cells: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        cells = row.get("cells")
+        if not isinstance(cells, list):
+            continue
+        for cell in cells:
+            if not isinstance(cell, dict) or not cell.get("formula"):
+                continue
+            formula_cells.append(_compact_workbook_cell(cell))
+            if len(formula_cells) >= MAX_WORKBOOK_CONTEXT_FORMULA_CELLS_PER_SHEET:
+                return formula_cells
+    return formula_cells
+
+
+def _compact_workbook_cell(cell: Any) -> dict[str, Any]:
+    if not isinstance(cell, dict):
+        return {"value": _compact_value(cell)}
+    compact: dict[str, Any] = {}
+    for key in ("address", "column", "value", "data_only_value", "formula"):
+        if key in cell:
+            compact[key] = _compact_workbook_cell_value(cell[key])
+    return compact
+
+
+def _compact_workbook_cell_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return _bounded_text(value, MAX_WORKBOOK_CONTEXT_CELL_CHARS)
+    if isinstance(value, bool | int | float) or value is None:
+        return value
+    return _compact_value(value)
 
 
 def _compact_value(value: Any, *, depth: int = 0) -> Any:

@@ -16,6 +16,8 @@ from test_etalons import _valid_etalon_payload
 def test_admin_can_create_queued_benchmark_over_active_etalons(client, db_session):
     admin = create_user(db_session, "admin", "secret", Role.ADMIN)
     skills = seed_baseline_skills(db_session)
+    main_skill = _skill_by_name(skills, "gate2_challenger_main_analysis")
+    judge_skill = _skill_by_name(skills, "benchmark_judge")
     active = _create_etalon(client, db_session, admin, EtalonStatus.ACTIVE)
     enqueued: list[str] = []
     app.dependency_overrides[benchmarks_router.get_run_benchmark_enqueue] = lambda: lambda benchmark_id: enqueued.append(str(benchmark_id))
@@ -27,10 +29,10 @@ def test_admin_can_create_queued_benchmark_over_active_etalons(client, db_sessio
                 "name": "Gate 2 baseline",
                 "description": "Main skill over active etalons",
                 "etalon_ids": [str(active.id)],
-                "skill_id": str(skills[0].id),
+                "skill_id": str(main_skill.id),
                 "provider": "openai_compatible",
                 "model": "gpt-test",
-                "judge_skill_id": str(skills[3].id),
+                "judge_skill_id": str(judge_skill.id),
                 "evaluation_mode": "layer_1_and_layer_2",
                 "run_parameters": {
                     "mock_provider_result": {
@@ -53,8 +55,8 @@ def test_admin_can_create_queued_benchmark_over_active_etalons(client, db_sessio
     payload = response.json()
     assert payload["status"] == "queued"
     assert payload["etalon_ids"] == [str(active.id)]
-    assert payload["skill_version"] == skills[0].version
-    assert payload["judge_skill_id"] == str(skills[3].id)
+    assert payload["skill_version"] == main_skill.version
+    assert payload["judge_skill_id"] == str(judge_skill.id)
     assert payload["run_parameters"]["skill_source_snapshot"]["name"] == "gate2_challenger_main_analysis"
     assert payload["run_parameters"]["judge_skill_source_snapshot"]["name"] == "benchmark_judge"
     snapshot = payload["run_parameters"]["etalon_snapshots"][str(active.id)]
@@ -71,6 +73,8 @@ def test_admin_can_create_queued_benchmark_over_active_etalons(client, db_sessio
 def test_benchmark_create_rejects_draft_etalons(client, db_session):
     admin = create_user(db_session, "admin", "secret", Role.ADMIN)
     skills = seed_baseline_skills(db_session)
+    main_skill = _skill_by_name(skills, "gate2_challenger_main_analysis")
+    judge_skill = _skill_by_name(skills, "benchmark_judge")
     draft = _create_etalon(client, db_session, admin, EtalonStatus.DRAFT)
     login(client, admin.login, "secret")
 
@@ -80,10 +84,10 @@ def test_benchmark_create_rejects_draft_etalons(client, db_session):
             "name": "Draft benchmark",
             "description": "Should fail",
             "etalon_ids": [str(draft.id)],
-            "skill_id": str(skills[0].id),
+            "skill_id": str(main_skill.id),
             "provider": "openai_compatible",
             "model": "gpt-test",
-            "judge_skill_id": str(skills[3].id),
+            "judge_skill_id": str(judge_skill.id),
             "evaluation_mode": "layer_1_and_layer_2",
             "run_parameters": {"mock_provider_result": {"structured_text": "{}", "raw_output": "raw", "latency_ms": 1}},
         },
@@ -96,6 +100,8 @@ def test_benchmark_create_rejects_draft_etalons(client, db_session):
 def test_benchmark_create_rejects_unparsed_etalon_original(client, db_session):
     admin = create_user(db_session, "admin", "secret", Role.ADMIN)
     skills = seed_baseline_skills(db_session)
+    main_skill = _skill_by_name(skills, "gate2_challenger_main_analysis")
+    judge_skill = _skill_by_name(skills, "benchmark_judge")
     active = _create_etalon(client, db_session, admin, EtalonStatus.ACTIVE)
     document = db_session.get(Document, active.document_id)
     document.parse_status = DocumentParseStatus.QUEUED.value
@@ -109,10 +115,10 @@ def test_benchmark_create_rejects_unparsed_etalon_original(client, db_session):
             "name": "Unparsed benchmark",
             "description": "Should fail",
             "etalon_ids": [str(active.id)],
-            "skill_id": str(skills[0].id),
+            "skill_id": str(main_skill.id),
             "provider": "openai_compatible",
             "model": "gpt-test",
-            "judge_skill_id": str(skills[3].id),
+            "judge_skill_id": str(judge_skill.id),
             "evaluation_mode": "layer_1_and_layer_2",
             "run_parameters": {"mock_provider_result": {"structured_text": "{}", "raw_output": "raw", "latency_ms": 1}},
         },
@@ -163,6 +169,10 @@ def _main_analysis_json() -> str:
             ],
         }
     )
+
+
+def _skill_by_name(skills, name: str):
+    return next(skill for skill in skills if skill.name == name)
 
 
 def _create_etalon(client, db_session, user, status: EtalonStatus) -> Etalon:

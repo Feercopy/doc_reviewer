@@ -83,6 +83,58 @@ def test_run_analysis_runs_predicted_comments_before_gate_after_success(tmp_path
         _close_session(db)
 
 
+def test_run_predicted_comments_skips_cancelled_run(tmp_path):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, user)
+        main_skill = _create_main_skill(db)
+        predicted_skill = _create_predicted_skill(db, tmp_path)
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=main_skill.id,
+            skill_version=main_skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.COMPLETED.value,
+            verdict="need_evidence",
+            summary="Needs stronger evidence.",
+            structured_output={"layer_1": [], "layer_2": []},
+            raw_output="raw main",
+            run_parameters={},
+        )
+        db.add(analysis)
+        db.flush()
+        predicted_run = PredictedCommentRun(
+            analysis_id=analysis.id,
+            skill_id=predicted_skill.id,
+            skill_version=predicted_skill.version,
+            provider=analysis.provider,
+            model=analysis.model,
+            status=RunStatus.CANCELLED.value,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": _devils_advocate_json(),
+                    "raw_output": "provider should not run",
+                    "latency_ms": 1,
+                }
+            },
+        )
+        db.add(predicted_run)
+        db.commit()
+
+        run_predicted_comments(str(predicted_run.id), db=db)
+
+        db.refresh(predicted_run)
+        assert predicted_run.status == RunStatus.CANCELLED.value
+        assert predicted_run.structured_output is None
+        assert predicted_run.raw_output is None
+        assert predicted_run.started_at is None
+    finally:
+        _close_session(db)
+
+
 def test_run_analysis_snapshots_devils_advocate_source_and_retrieval_before_gate(tmp_path, monkeypatch):
     db = _create_session()
     try:
@@ -595,19 +647,15 @@ def _main_analysis_json(summary: str = "Needs evidence.") -> str:
             "verdict": "need_evidence",
             "summary": summary,
             "assessment_markdown": f"Оценка документа\nРекомендация: {summary}",
-            "findings": [],
-            "checks": [],
-            "layer_1_markdown": "Layer 1\nL1-001 — Decision-critical blocker.",
-            "layer_1": [
+            "layer_1_index": [
                 {
                     "id": "L1-001",
                     "severity": "critical",
                     "issue": "Mandatory readiness is not proven.",
-                    "evidence": "The document does not close the required proof.",
+                    "evidence_anchor": "The document does not close the required proof.",
                 }
             ],
-            "layer_2_markdown": "Layer 2\nL2-001 — Atomic weak-link finding.",
-            "layer_2": [
+            "layer_2_index": [
                 {
                     "id": "L2-001",
                     "parent_layer_1_id": "L1-001",
@@ -615,10 +663,13 @@ def _main_analysis_json(summary: str = "Needs evidence.") -> str:
                     "severity": "high",
                     "question": "Is the key target evidenced?",
                     "answer": "NO",
-                    "issue": "A key target is not evidenced.",
-                    "evidence": "The mock document omits the proof.",
+                    "short_evidence": "The mock document omits the proof.",
                 }
             ],
+            "details_status": "not_requested",
+            "details_run_id": None,
+            "revision_required": False,
+            "revision_reason": None,
         }
     )
 

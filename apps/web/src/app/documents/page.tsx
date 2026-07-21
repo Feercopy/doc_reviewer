@@ -5,21 +5,38 @@ import { DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "reac
 
 import { AppShell } from "@/components/AppShell";
 import {
+  getProviderDefaultModel,
+  listProviderModels,
+  type ProviderModelOptions,
+} from "@/lib/api/provider-settings";
+import {
   USER_SELECTABLE_DOCUMENT_TYPES,
+  createAnalysis,
   deleteDocument,
+  getDocument,
   listDocuments,
+  listAnalyses,
   uploadDocument,
+  type AnalysisRecord,
   type DocumentRecord,
   type DocumentType,
+  type OutputLanguage,
   type ParseStatus,
+  type Provider,
 } from "@/lib/api/documents";
 import { formatDate } from "@/lib/format";
 import { appPath } from "@/lib/routing";
-import { formatDocumentTypeLabel, getDocumentFileKind, getDocumentParsePresentation } from "./documentsDisplay";
+import { formatDocumentTypeLabel, getDocumentParsePresentation } from "./documentsDisplay";
 
 type ParseFilter = "all" | ParseStatus;
 
 const supportedExtensions = [".docx", ".pdf", ".md", ".txt"];
+type UploadSlot = "primary" | "finSummary";
+type UploadStep = "uploading" | "parsing" | "starting_analysis";
+
+const parsePollIntervalMs = 3000;
+const parsePollTimeoutMs = 5 * 60 * 1000;
+const defaultOutputLanguage: OutputLanguage = "en";
 
 const parseFilters: { label: string; value: ParseFilter }[] = [
   { label: "All", value: "all" },
@@ -43,22 +60,145 @@ function formatBytes(value: number): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function hasSupportedExtension(file: File): boolean {
-  const name = file.name.toLowerCase();
-  return supportedExtensions.some((extension) => name.endsWith(extension));
+function isWorkbookFile(filename: string): boolean {
+  return filename.trim().toLowerCase().endsWith(".xlsx");
 }
 
-function getDocumentSignal(document: DocumentRecord): { label: string; tone: "good" | "info" | "warn" | "bad" } {
-  if (document.parse_status === "completed") {
-    return { label: "Ready for analysis", tone: "good" };
+function getFinSummaryPresentation(document: DocumentRecord["linked_fin_summary_document"]): {
+  label: string;
+  tone: "good" | "info" | "warn" | "bad";
+} | null {
+  if (!document) {
+    return null;
+  }
+  if (isWorkbookFile(document.original_filename)) {
+    return { label: "Workbook attached", tone: "good" };
   }
   if (document.parse_status === "failed") {
-    return { label: "Parser failed", tone: "bad" };
+    return { label: "Attachment parser failed", tone: "warn" };
   }
-  if (document.parse_status === "running") {
-    return { label: "Parsing", tone: "info" };
+  return getDocumentParsePresentation(document.parse_status);
+}
+
+function isFullAnalysisComplete(analysis: AnalysisRecord): boolean {
+  return (
+    analysis.status === "completed" &&
+    analysis.predicted_comment_run?.status === "completed" &&
+    analysis.ic_review_run?.status === "completed"
+  );
+}
+
+function isFullAnalysisFailed(analysis: AnalysisRecord): boolean {
+  return (
+    analysis.status === "failed" ||
+    analysis.status === "cancelled" ||
+    analysis.predicted_comment_run?.status === "failed" ||
+    analysis.predicted_comment_run?.status === "cancelled" ||
+    analysis.ic_review_run?.status === "failed" ||
+    analysis.ic_review_run?.status === "cancelled"
+  );
+}
+
+function getLatestCaseAnalysis(analyses: AnalysisRecord[]): AnalysisRecord | null {
+  return (
+    analyses
+      .sort(
+        (left, right) =>
+          new Date(right.completed_at ?? right.created_at).getTime() -
+          new Date(left.completed_at ?? left.created_at).getTime(),
+      )[0] ?? null
+  );
+}
+
+function getAnalysisStatusSignal(analysis: AnalysisRecord): { label: string; tone: "good" | "info" | "warn" | "bad" } {
+  if (isFullAnalysisComplete(analysis)) {
+    return { label: "Analysis complete", tone: "good" };
   }
-  return { label: "Queued", tone: "warn" };
+  if (isFullAnalysisFailed(analysis)) {
+    return { label: "Analysis failed", tone: "bad" };
+  }
+  if (analysis.status === "queued") {
+    return { label: "Gate Challenger queued", tone: "warn" };
+  }
+  if (analysis.status === "running") {
+    return { label: "Gate Challenger running", tone: "info" };
+  }
+
+  const predictedStatus = analysis.predicted_comment_run?.status;
+  if (!predictedStatus) {
+    return { label: "Devils Advocate queued", tone: "warn" };
+  }
+  if (predictedStatus !== "completed") {
+    return { label: `Devils Advocate ${predictedStatus}`, tone: predictedStatus === "queued" ? "warn" : "info" };
+  }
+
+  const icStatus = analysis.ic_review_run?.status;
+  if (!icStatus) {
+    return { label: "IC Review queued", tone: "warn" };
+  }
+  if (icStatus !== "completed") {
+    return { label: `IC Review ${icStatus}`, tone: icStatus === "queued" ? "warn" : "info" };
+  }
+
+  return { label: "Analysis running", tone: "info" };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function chooseAnalysisConfig(providerModels: ProviderModelOptions[]): { provider: Provider; model: string } | null {
+  const configuredModels = providerModels.filter((item) => item.has_key);
+  const preferred =
+    configuredModels.find((item) => item.provider === "openai_compatible") ??
+    configuredModels[0] ??
+    null;
+
+  if (!preferred) {
+    return null;
+  }
+
+  const model = getProviderDefaultModel(providerModels, preferred.provider) || preferred.available_models[0] || "";
+  if (!model) {
+    return null;
+  }
+
+  return {
+    provider: preferred.provider,
+    model,
+  };
+}
+
+function getUploadButtonLabel(step: UploadStep | null): string {
+  if (step === "uploading") {
+    return "Uploading...";
+  }
+  if (step === "parsing") {
+    return "Parsing...";
+  }
+  if (step === "starting_analysis") {
+    return "Starting analysis...";
+  }
+  return "Start Analysis";
+}
+
+function getUploadProgressCopy(step: UploadStep | null): { title: string; note: string } {
+  if (step === "parsing") {
+    return {
+      title: "Parsing document",
+      note: "Full analysis starts automatically as soon as the parser finishes.",
+    };
+  }
+  if (step === "starting_analysis") {
+    return {
+      title: "Starting analysis",
+      note: "Gate Challenger, Devils Advocate, and IC Review are being queued.",
+    };
+  }
+  return {
+    title: "Uploading",
+    note: "Files are being stored before parsing starts.",
+  };
 }
 
 export default function DocumentsPage() {
@@ -70,21 +210,69 @@ export default function DocumentsPage() {
   const [parseFilter, setParseFilter] = useState<ParseFilter>("all");
   const [title, setTitle] = useState("");
   const [manualType, setManualType] = useState<DocumentType | "">("");
-  const [file, setFile] = useState<File | null>(null);
+  const [primaryFile, setPrimaryFile] = useState<File | null>(null);
+  const [finSummaryFile, setFinSummaryFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState("");
   const [pendingUpload, setPendingUpload] = useState(false);
-  const [draggingUpload, setDraggingUpload] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadStep, setUploadStep] = useState<UploadStep | null>(null);
+  const [draggingUpload, setDraggingUpload] = useState<UploadSlot | null>(null);
+  const [providerModels, setProviderModels] = useState<ProviderModelOptions[]>([]);
+  const [caseAnalysesByDocumentId, setCaseAnalysesByDocumentId] = useState<Record<string, AnalysisRecord>>({});
+  const primaryFileInputRef = useRef<HTMLInputElement | null>(null);
+  const finSummaryFileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function refresh() {
     const response = await listDocuments();
     setDocuments(response.documents);
+    await refreshCaseAnalyses(response.documents);
+  }
+
+  async function refreshCaseAnalyses(nextDocuments: DocumentRecord[]) {
+    const entries = await Promise.all(
+      nextDocuments.map(async (document) => {
+        try {
+          const response = await listAnalyses(document.id);
+          const latestAnalysis = getLatestCaseAnalysis(response.analyses);
+          return latestAnalysis ? ([document.id, latestAnalysis] as const) : null;
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    setCaseAnalysesByDocumentId(Object.fromEntries(entries.filter((entry) => entry !== null)));
   }
 
   useEffect(() => {
     refresh()
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load documents"))
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (documents.length === 0) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      refreshCaseAnalyses(documents).catch(() => undefined);
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [documents]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    listProviderModels()
+      .then((response) => {
+        if (!ignore) {
+          setProviderModels(response.provider_models);
+        }
+      })
+      .catch(() => setProviderModels([]));
+
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   async function handleDelete(document: DocumentRecord) {
@@ -104,53 +292,88 @@ export default function DocumentsPage() {
   }
 
   const inferredTitle = useMemo(() => {
-    if (!file) {
+    if (!primaryFile) {
       return "";
     }
-    return file.name.replace(/\.[^.]+$/, "");
-  }, [file]);
+    return primaryFile.name.replace(/\.[^.]+$/, "");
+  }, [primaryFile]);
 
-  function chooseFile(nextFile: File | null) {
+  function chooseFile(slot: UploadSlot, nextFile: File | null) {
     setUploadError("");
-    if (!nextFile) {
-      setFile(null);
+    if (slot === "primary") {
+      setPrimaryFile(nextFile);
       return;
     }
-    if (!hasSupportedExtension(nextFile)) {
-      setFile(null);
-      setUploadError("Unsupported file type. Use .docx, .pdf, .md, or .txt.");
-      return;
-    }
-    setFile(nextFile);
+    setFinSummaryFile(nextFile);
   }
 
-  function handleUploadDragOver(event: DragEvent<HTMLDivElement>) {
+  function handleUploadDragOver(slot: UploadSlot, event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    setDraggingUpload(true);
+    setDraggingUpload(slot);
   }
 
   function handleUploadDragLeave(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    setDraggingUpload(false);
+    setDraggingUpload(null);
   }
 
-  function handleUploadDrop(event: DragEvent<HTMLDivElement>) {
+  function handleUploadDrop(slot: UploadSlot, event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    setDraggingUpload(false);
-    chooseFile(event.dataTransfer.files[0] ?? null);
+    setDraggingUpload(null);
+    chooseFile(slot, event.dataTransfer.files[0] ?? null);
+  }
+
+  async function waitForUploadedDocumentParse(documentId: string): Promise<DocumentRecord> {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < parsePollTimeoutMs) {
+      const nextDocument = await getDocument(documentId);
+      setDocuments((items) => {
+        const existingIndex = items.findIndex((item) => item.id === nextDocument.id);
+        if (existingIndex === -1) {
+          return [nextDocument, ...items];
+        }
+        return items.map((item) => (item.id === nextDocument.id ? nextDocument : item));
+      });
+
+      if (nextDocument.parse_status === "completed") {
+        return nextDocument;
+      }
+      if (nextDocument.parse_status === "failed") {
+        throw new Error(nextDocument.parse_error || "Parser failed");
+      }
+
+      await sleep(parsePollIntervalMs);
+    }
+
+    throw new Error("Parsing did not finish within 5 minutes. Open the document to check parser status.");
+  }
+
+  async function getAnalysisConfig(): Promise<{ provider: Provider; model: string }> {
+    const models = providerModels.length > 0 ? providerModels : (await listProviderModels()).provider_models;
+    setProviderModels(models);
+    const config = chooseAnalysisConfig(models);
+    if (!config) {
+      throw new Error("Configure a provider key and default model before starting analysis.");
+    }
+    return config;
   }
 
   async function submitUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!file) {
-      setUploadError("Choose a document file");
+    if (!primaryFile) {
+      setUploadError("Choose a defense document file");
       return;
     }
     setPendingUpload(true);
+    setUploadStep("uploading");
     setUploadError("");
 
     const form = new FormData();
-    form.set("file", file);
+    form.set("file", primaryFile);
+    if (finSummaryFile) {
+      form.set("fin_summary_file", finSummaryFile);
+    }
     if (title.trim()) {
       form.set("title", title.trim());
     }
@@ -160,32 +383,58 @@ export default function DocumentsPage() {
 
     try {
       const document = await uploadDocument(form);
+      setDocuments((items) => [document, ...items.filter((item) => item.id !== document.id)]);
+      setUploadStep("parsing");
+      const parsedDocument = await waitForUploadedDocumentParse(document.id);
+      setUploadStep("starting_analysis");
+      const analysisConfig = await getAnalysisConfig();
+      await createAnalysis(parsedDocument.id, {
+        provider: analysisConfig.provider,
+        model: analysisConfig.model,
+        document_type_override: parsedDocument.manual_document_type ?? parsedDocument.detected_document_type,
+        run_parameters: {
+          output_language: defaultOutputLanguage,
+        },
+      });
       window.location.href = appPath(`/documents/${document.id}`);
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Upload failed");
+      setUploadError(err instanceof Error ? err.message : "Start analysis failed");
     } finally {
       setPendingUpload(false);
+      setUploadStep(null);
     }
   }
 
-  const filteredDocuments = useMemo(() => {
+  const caseDocuments = useMemo(
+    () => documents.filter((document) => caseAnalysesByDocumentId[document.id]),
+    [caseAnalysesByDocumentId, documents],
+  );
+
+  const filteredCases = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
-    return documents.filter((document) => {
+    return caseDocuments.filter((document) => {
       const matchesFilter = parseFilter === "all" || document.parse_status === parseFilter;
       const matchesQuery =
         !normalizedQuery ||
-        [document.title, document.original_filename, getEffectiveType(document), document.parse_error ?? ""]
+        [
+          document.title,
+          document.original_filename,
+          document.linked_fin_summary_document?.title ?? "",
+          document.linked_fin_summary_document?.original_filename ?? "",
+          getEffectiveType(document),
+          document.parse_error ?? "",
+        ]
           .join(" ")
           .toLowerCase()
           .includes(normalizedQuery);
 
       return matchesFilter && matchesQuery;
     });
-  }, [documents, parseFilter, query]);
+  }, [caseDocuments, parseFilter, query]);
 
-  const shownStart = filteredDocuments.length > 0 ? 1 : 0;
-  const shownEnd = filteredDocuments.length;
+  const shownStart = filteredCases.length > 0 ? 1 : 0;
+  const shownEnd = filteredCases.length;
 
   return (
     <AppShell>
@@ -202,56 +451,119 @@ export default function DocumentsPage() {
 
         <section className="gc-upload-card" aria-label="Upload document">
           <form className="gc-upload-form" onSubmit={submitUpload}>
-            <div
-              className={`gc-dropzone${draggingUpload ? " is-dragging" : ""}${file ? " has-file" : ""}`}
-              role="button"
-              tabIndex={0}
-              onClick={() => fileInputRef.current?.click()}
-              onDragLeave={handleUploadDragLeave}
-              onDragOver={handleUploadDragOver}
-              onDrop={handleUploadDrop}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  fileInputRef.current?.click();
-                }
-              }}
-            >
-              <input
-                aria-label="File"
-                accept=".docx,.pdf,.md,.txt"
-                ref={fileInputRef}
-                type="file"
-                onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
-              />
-              <div className="gc-upload-mark" aria-hidden="true">
-                <span />
+            <div className="gc-upload-zones" aria-label="Upload files">
+              <div
+                className={`gc-dropzone${draggingUpload === "primary" ? " is-dragging" : ""}${
+                  primaryFile ? " has-file" : ""
+                }`}
+                role="button"
+                tabIndex={0}
+                onClick={() => primaryFileInputRef.current?.click()}
+                onDragLeave={handleUploadDragLeave}
+                onDragOver={(event) => handleUploadDragOver("primary", event)}
+                onDrop={(event) => handleUploadDrop("primary", event)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    primaryFileInputRef.current?.click();
+                  }
+                }}
+              >
+                <input
+                  aria-label="Документ для защиты"
+                  ref={primaryFileInputRef}
+                  type="file"
+                  onChange={(event) => chooseFile("primary", event.target.files?.[0] ?? null)}
+                />
+                <div className="gc-upload-mark" aria-hidden="true">
+                  <span />
+                </div>
+                <div className="gc-drop-copy">
+                  <strong>Документ для защиты</strong>
+                  <p>{primaryFile ? "File selected" : "Drag and drop or click to browse"}</p>
+                </div>
+                <div className="gc-format-row" aria-label="Accepted formats">
+                  <span>Any file format</span>
+                  <span>Parser optimized for {supportedExtensions.join(", ")}; max 25 MB</span>
+                </div>
               </div>
-              <div className="gc-drop-copy">
-                <strong>{file ? "File selected" : "Drag and drop files here"}</strong>
-                <p>{file ? "Review details before uploading." : "or click to browse"}</p>
-              </div>
-              <div className="gc-format-row" aria-label="Supported formats">
-                <span>Supported formats: {supportedExtensions.join(", ")}</span>
-                <span>Max file size: 100 MB</span>
+
+              <div
+                className={`gc-dropzone${draggingUpload === "finSummary" ? " is-dragging" : ""}${
+                  finSummaryFile ? " has-file" : ""
+                }`}
+                role="button"
+                tabIndex={0}
+                onClick={() => finSummaryFileInputRef.current?.click()}
+                onDragLeave={handleUploadDragLeave}
+                onDragOver={(event) => handleUploadDragOver("finSummary", event)}
+                onDrop={(event) => handleUploadDrop("finSummary", event)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    finSummaryFileInputRef.current?.click();
+                  }
+                }}
+              >
+                <input
+                  aria-label="Fin Summary"
+                  ref={finSummaryFileInputRef}
+                  type="file"
+                  onChange={(event) => chooseFile("finSummary", event.target.files?.[0] ?? null)}
+                />
+                <div className="gc-upload-mark" aria-hidden="true">
+                  <span />
+                </div>
+                <div className="gc-drop-copy">
+                  <strong>Fin Summary</strong>
+                  <p>{finSummaryFile ? "File selected" : "Drag and drop or click to browse"}</p>
+                </div>
+                <div className="gc-format-row" aria-label="Accepted formats">
+                  <span>Any file format</span>
+                  <span>Optional attachment; max 25 MB</span>
+                </div>
               </div>
             </div>
 
             <div className="gc-upload-details">
-              {file ? (
+              {primaryFile ? (
                 <div className="gc-selected-file">
                   <div>
-                    <strong>{file.name}</strong>
-                    <span>{formatBytes(file.size)}</span>
+                    <small>Документ для защиты</small>
+                    <strong>{primaryFile.name}</strong>
+                    <span>{formatBytes(primaryFile.size)}</span>
                   </div>
                   <button
                     className="gc-compact-danger"
                     disabled={pendingUpload}
                     type="button"
                     onClick={() => {
-                      setFile(null);
-                      if (fileInputRef.current) {
-                        fileInputRef.current.value = "";
+                      setPrimaryFile(null);
+                      if (primaryFileInputRef.current) {
+                        primaryFileInputRef.current.value = "";
+                      }
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : null}
+
+              {finSummaryFile ? (
+                <div className="gc-selected-file">
+                  <div>
+                    <small>Fin Summary</small>
+                    <strong>{finSummaryFile.name}</strong>
+                    <span>{formatBytes(finSummaryFile.size)}</span>
+                  </div>
+                  <button
+                    className="gc-compact-danger"
+                    disabled={pendingUpload}
+                    type="button"
+                    onClick={() => {
+                      setFinSummaryFile(null);
+                      if (finSummaryFileInputRef.current) {
+                        finSummaryFileInputRef.current.value = "";
                       }
                     }}
                   >
@@ -290,8 +602,8 @@ export default function DocumentsPage() {
                     </span>
                   </label>
 
-                  <button className="gc-primary gc-submit" disabled={pendingUpload || !file} type="submit">
-                    {pendingUpload ? "Uploading..." : "Upload document"}
+                  <button className="gc-primary gc-submit" disabled={pendingUpload || !primaryFile} type="submit">
+                    {getUploadButtonLabel(uploadStep)}
                   </button>
                 </div>
               </div>
@@ -302,8 +614,8 @@ export default function DocumentsPage() {
                 <div className="gc-upload-progress" aria-live="polite">
                   <span />
                   <div>
-                    <strong>Uploading</strong>
-                    <small>The document detail page opens after the upload finishes.</small>
+                    <strong>{getUploadProgressCopy(uploadStep).title}</strong>
+                    <small>{getUploadProgressCopy(uploadStep).note}</small>
                   </div>
                 </div>
               ) : null}
@@ -345,40 +657,54 @@ export default function DocumentsPage() {
               <span>Use the upload panel above to add the first document.</span>
             </div>
           ) : null}
-          {!loading && documents.length > 0 && filteredDocuments.length === 0 ? (
-            <div className="gc-empty">No documents match the current filters.</div>
+          {!loading && documents.length > 0 && caseDocuments.length === 0 ? (
+            <div className="gc-empty">Cases appear here after analysis starts.</div>
+          ) : null}
+          {!loading && caseDocuments.length > 0 && filteredCases.length === 0 ? (
+            <div className="gc-empty">No cases match the current filters.</div>
           ) : null}
 
-          {filteredDocuments.length > 0 ? (
+          {filteredCases.length > 0 ? (
             <div className="gc-table-scroll">
               <table className="gc-table">
                 <thead>
                   <tr>
-                    <th>Document</th>
+                    <th>Case</th>
                     <th>Type</th>
                     <th>Parse</th>
-                    <th>Readiness</th>
+                    <th>Analysis</th>
                     <th>Uploaded</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredDocuments.map((document) => {
-                    const signal = getDocumentSignal(document);
-                    const fileKind = getDocumentFileKind(document.original_filename);
+                  {filteredCases.map((document) => {
                     const parseState = getDocumentParsePresentation(document.parse_status);
+                    const finSummary = document.linked_fin_summary_document;
+                    const finSummaryParseState = getFinSummaryPresentation(finSummary);
+                    const caseAnalysis = caseAnalysesByDocumentId[document.id];
+                    const analysisSignal = getAnalysisStatusSignal(caseAnalysis);
+                    const canOpenAnalysis = isFullAnalysisComplete(caseAnalysis);
 
                     return (
                       <tr key={document.id}>
                         <td>
                           <div className="gc-document-cell">
-                            <span className={`gc-file-kind is-${fileKind.tone}`} aria-hidden="true">
-                              {fileKind.label}
-                            </span>
                             <div className="gc-title-cell">
                               <strong>{document.title}</strong>
                               <span>{document.original_filename}</span>
                               <small>{formatBytes(document.file_size_bytes)}</small>
+                              {finSummary ? (
+                                <div className="gc-linked-document">
+                                  <span>Fin Summary</span>
+                                  <strong>{finSummary.original_filename}</strong>
+                                  {finSummaryParseState ? (
+                                    <small className={`gc-linked-parse is-${finSummaryParseState.tone}`}>
+                                      {finSummaryParseState.label}
+                                    </small>
+                                  ) : null}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
                         </td>
@@ -394,15 +720,24 @@ export default function DocumentsPage() {
                           {document.parse_error ? <div className="gc-error-text">{document.parse_error}</div> : null}
                         </td>
                         <td>
-                          <span className={`gc-signal is-${signal.tone}`}>{signal.label}</span>
+                          <span className={`gc-signal is-${analysisSignal.tone}`}>{analysisSignal.label}</span>
                         </td>
                         <td>
                           <span className="gc-date">{formatDate(document.created_at)}</span>
                         </td>
                         <td>
                           <div className="gc-action-row">
-                            <Link className="gc-compact-link" href={`/documents/${document.id}`}>
-                              Open
+                            {canOpenAnalysis ? (
+                              <Link className="gc-compact-link" href={`/analyses/${caseAnalysis.id}`}>
+                                Analysis results
+                              </Link>
+                            ) : (
+                              <button className="gc-compact-link is-disabled" disabled type="button">
+                                Analysis results
+                              </button>
+                            )}
+                            <Link className="gc-compact-link" href={`/documents/${document.id}`} target="_blank" rel="noreferrer">
+                              Open Case
                             </Link>
                             <button
                               className="gc-compact-danger"
@@ -421,7 +756,7 @@ export default function DocumentsPage() {
               </table>
               <div className="gc-table-footer">
                 <span>
-                  Showing {shownStart} to {shownEnd} of {documents.length} documents
+                  Showing {shownStart} to {shownEnd} of {caseDocuments.length} cases
                 </span>
               </div>
             </div>
@@ -478,9 +813,16 @@ const documentsStyles = `
 
 .gc-upload-form {
   display: grid;
-  grid-template-columns: minmax(340px, 0.9fr) minmax(320px, 1fr);
+  grid-template-columns: minmax(380px, 1fr) minmax(320px, 0.9fr);
   gap: 36px;
   align-items: center;
+}
+
+.gc-upload-zones {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .gc-dropzone {
@@ -627,6 +969,14 @@ const documentsStyles = `
   color: #111827;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.gc-selected-file small {
+  color: #5b6472;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+  text-transform: uppercase;
 }
 
 .gc-field-stack {
@@ -895,37 +1245,6 @@ const documentsStyles = `
   min-width: 0;
 }
 
-.gc-file-kind {
-  display: inline-flex;
-  width: 26px;
-  height: 32px;
-  flex: 0 0 26px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  color: #ffffff;
-  font-size: 10px;
-  font-weight: 850;
-  line-height: 1;
-}
-
-.gc-file-kind.is-word {
-  background: #2f7dd1;
-}
-
-.gc-file-kind.is-pdf {
-  background: #d82436;
-}
-
-.gc-file-kind.is-markdown,
-.gc-file-kind.is-generic {
-  background: #6b7280;
-}
-
-.gc-file-kind.is-text {
-  background: #4b5563;
-}
-
 .gc-title-cell {
   display: grid;
   min-width: 0;
@@ -948,6 +1267,64 @@ const documentsStyles = `
 
 .gc-type-text {
   color: #111827;
+}
+
+.gc-linked-document {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  border: 1px solid #e5eaf0;
+  border-radius: 6px;
+  background: #f7f9fb;
+  padding: 5px 7px;
+}
+
+.gc-linked-document > span {
+  color: #5b6472;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.gc-linked-document > strong {
+  overflow: hidden;
+  max-width: 220px;
+  color: #111827;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gc-linked-parse {
+  border-radius: 4px;
+  background: #eef2f6;
+  color: #344054;
+  padding: 1px 6px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.gc-linked-parse.is-good {
+  background: #eaf8f1;
+  color: #075e45;
+}
+
+.gc-linked-parse.is-info {
+  background: #eaf3fb;
+  color: #1d70b8;
+}
+
+.gc-linked-parse.is-warn {
+  background: #fff7df;
+  color: #8a5d00;
+}
+
+.gc-linked-parse.is-bad {
+  background: #fcecee;
+  color: #c92036;
 }
 
 .gc-parse-state {
@@ -1051,6 +1428,12 @@ const documentsStyles = `
 .gc-compact-link:hover {
   border-color: #0e9f6e;
   color: #075e45;
+}
+
+.gc-compact-link:disabled,
+.gc-compact-link.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .gc-compact-danger {
@@ -1193,7 +1576,7 @@ const documentsStyles = `
   }
 
   .gc-table td:nth-child(4)::before {
-    content: "Readiness";
+    content: "Analysis";
   }
 
   .gc-table td:nth-child(5)::before {
@@ -1244,6 +1627,10 @@ const documentsStyles = `
   .gc-upload-row {
     grid-template-columns: 1fr;
     gap: 12px;
+  }
+
+  .gc-upload-zones {
+    grid-template-columns: 1fr;
   }
 
   .gc-filter-tabs {

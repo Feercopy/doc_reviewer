@@ -24,6 +24,25 @@ IC_AGENTIC_REVIEW_SOURCE_PATH = Path(
     os.getenv("IC_AGENTIC_REVIEW_SOURCE_PATH", "/Users/iseremenko/Documents/IC-Agentic-Review")
 )
 BENCHMARK_JUDGE_V2_PROMPT_PATH = "LLM-as-a-judge для оценки v2.txt"
+RESULT_SUMMARY_SYNTHESIS_PROMPT = """You are the Result tab short-summary synthesis skill.
+
+Combine two already-produced review sections into one concise decision summary:
+1. Gate Challenger Recommendations.
+2. IC Review Executive Summary / Executive brief.
+
+Write only the final short summary. Do not introduce new facts, scores, or evidence.
+Preserve the strictest decision posture when the two sources disagree.
+Prefer clear business language for an investment/product defense committee.
+"""
+RESULT_RATIONALE_SYNTHESIS_PROMPT = """You are the Result tab rationale synthesis skill.
+
+Combine Gate Challenger's "Почему оценка именно такая" rationale with IC Review Top findings.
+Keep the output in the same business-review style and structure as Gate Challenger's rationale,
+but enrich it with IC Review findings when they add evidence, risks, or data-quality constraints.
+Do not introduce new facts, scores, or evidence. Return rationale_items with sources marked as
+gate_challenger, ic_review, or both when both sources support the same subpoint. Return Critical
+risks and Data gaps as separate lists.
+"""
 GATE_CHALLENGER_ENTRYPOINT = "skills/gate-challenger/SKILL.md"
 DEVILS_ADVOCATE_ENTRYPOINT = "ic-voting-prompt.md"
 IC_AGENTIC_REVIEW_ENTRYPOINT = ".claude/commands/invest-analysis.md"
@@ -295,6 +314,40 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "source_metadata": benchmark_judge_metadata,
             "prompt_text": benchmark_judge_prompt,
             "result_schema_path": "contracts/schemas/benchmark-judge-result.schema.json",
+            "runtime_mode": "inline",
+            "status": EntityStatus.ACTIVE.value,
+        },
+        {
+            "name": "result_summary_synthesis",
+            "description": "Synthesizes Result tab Short Summary from Gate Challenger recommendations and IC Review executive brief.",
+            "version": "baseline",
+            "skill_type": SkillType.RESULT_SUMMARY.value,
+            "supported_document_types": gate_challenger_document_types,
+            "source_type": SkillSourceType.INLINE_PROMPT.value,
+            "source_uri": None,
+            "source_entrypoint": None,
+            "source_revision": None,
+            "source_fingerprint": None,
+            "source_metadata": {"sources": ["gate_challenger_recommendations", "ic_review_executive_summary"]},
+            "prompt_text": RESULT_SUMMARY_SYNTHESIS_PROMPT,
+            "result_schema_path": "contracts/schemas/result-short-summary.schema.json",
+            "runtime_mode": "inline",
+            "status": EntityStatus.ACTIVE.value,
+        },
+        {
+            "name": "result_rationale_synthesis",
+            "description": "Synthesizes Result tab rationale from Gate Challenger rationale and IC Review top findings.",
+            "version": "baseline",
+            "skill_type": SkillType.RESULT_SUMMARY.value,
+            "supported_document_types": gate_challenger_document_types,
+            "source_type": SkillSourceType.INLINE_PROMPT.value,
+            "source_uri": None,
+            "source_entrypoint": None,
+            "source_revision": None,
+            "source_fingerprint": None,
+            "source_metadata": {"sources": ["gate_challenger_rationale", "ic_review_top_findings", "critical_risks", "data_gaps"]},
+            "prompt_text": RESULT_RATIONALE_SYNTHESIS_PROMPT,
+            "result_schema_path": "contracts/schemas/result-rationale.schema.json",
             "runtime_mode": "inline",
             "status": EntityStatus.ACTIVE.value,
         },

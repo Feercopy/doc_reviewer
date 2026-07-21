@@ -11,12 +11,13 @@ from app.dependencies.auth import require_current_user
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.documents import DocumentRead, DocumentTitlePatch, DocumentTypePatch, DocumentsListResponse
-from app.schemas.enums import DocumentParseStatus, DocumentType
+from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType
 from app.services.document_jobs import ParseDocumentEnqueue, enqueue_parse_document
 from app.services.documents import (
     DocumentNotFoundError,
     DocumentTooLargeError,
     UnsupportedDocumentFileTypeError,
+    attach_fin_summary_document,
     create_document_from_upload,
     delete_document_for_actor,
     get_document_for_actor,
@@ -41,6 +42,7 @@ def get_parse_document_enqueue() -> ParseDocumentEnqueue:
 @router.post("", response_model=DocumentRead, status_code=status.HTTP_201_CREATED)
 def create_document(
     file: Annotated[UploadFile, File()],
+    fin_summary_file: Annotated[UploadFile | None, File()] = None,
     title: Annotated[str | None, Form()] = None,
     manual_document_type: Annotated[DocumentType | None, Form()] = None,
     db: Session = Depends(get_db),
@@ -56,8 +58,28 @@ def create_document(
             upload=file,
             title=title,
             manual_document_type=manual_document_type,
+            document_role=DocumentRole.PRIMARY,
         )
-        enqueue(document.id)
+        enqueued_document_ids = [document.id]
+        if fin_summary_file is not None and fin_summary_file.filename:
+            fin_summary_document = create_document_from_upload(
+                db=db,
+                actor=current_user,
+                storage=storage,
+                upload=fin_summary_file,
+                title=None,
+                manual_document_type=None,
+                document_role=DocumentRole.FIN_SUMMARY,
+            )
+            document = attach_fin_summary_document(
+                db=db,
+                actor=current_user,
+                primary_document=document,
+                fin_summary_document=fin_summary_document,
+            )
+            enqueued_document_ids.append(fin_summary_document.id)
+        for document_id in enqueued_document_ids:
+            enqueue(document_id)
         return document
     except UnsupportedDocumentFileTypeError as exc:
         raise HTTPException(
