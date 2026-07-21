@@ -18,6 +18,11 @@ from ic_review.role_runner import apply_ic_review_provider_defaults
 from providers.base import ProviderRunRequest
 from providers.registry import get_provider_adapter
 from results.schema_validation import parse_json_output
+from skills.result_synthesis_trace import (
+    complete_result_synthesis_step,
+    fail_result_synthesis_step,
+    start_result_synthesis_step,
+)
 
 
 RESULT_RATIONALE_SKILL_NAME = "result_rationale_synthesis"
@@ -84,19 +89,51 @@ def update_result_rationale(
         response_schema=schema,
     )
     run_parameters = _result_rationale_run_parameters(check_run.run_parameters or {})
-    result = get_provider_adapter(provider, run_parameters).run(
-        ProviderRunRequest(
-            provider=provider,
-            model=model,
-            api_key=api_key,
-            base_url=base_url,
-            prompt=prompt,
-            response_schema=schema,
-            run_parameters=run_parameters,
-        )
+    step = start_result_synthesis_step(
+        session=session,
+        check_run=check_run,
+        step_name="result_rationale",
+        prompt=prompt,
+        run_parameters=run_parameters,
+        skill=skill,
+        fallback_skill_metadata=_skill_metadata(skill),
     )
-    payload = parse_json_output(result.structured_text)
-    validate(instance=payload, schema=schema)
+    raw_to_preserve = None
+    try:
+        result = get_provider_adapter(provider, run_parameters).run(
+            ProviderRunRequest(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                prompt=prompt,
+                response_schema=schema,
+                run_parameters=run_parameters,
+            )
+        )
+        raw_to_preserve = result.raw_output or result.structured_text
+        payload = parse_json_output(result.structured_text)
+        validate(instance=payload, schema=schema)
+    except Exception as exc:
+        session.rollback()
+        fail_result_synthesis_step(
+            session=session,
+            step=step,
+            error_message=str(exc),
+            raw_output=raw_to_preserve,
+        )
+        raise
+
+    complete_result_synthesis_step(
+        session=session,
+        step=step,
+        raw_output=raw_to_preserve,
+        structured_output=payload,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        latency_ms=result.latency_ms,
+        estimated_cost=result.estimated_cost,
+    )
 
     _persist_result_rationale(
         analysis=analysis,
@@ -108,6 +145,7 @@ def update_result_rationale(
             "status": "completed",
             "skill": _skill_metadata(skill),
             "ic_review_run_id": str(check_run.id),
+            "trace_step_id": str(step.id),
             "prompt_fingerprint": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
             "source_fingerprint": _source_fingerprint(
                 gate_rationale=gate_rationale,

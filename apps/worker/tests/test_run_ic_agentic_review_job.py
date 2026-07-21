@@ -47,8 +47,18 @@ def test_completed_run_without_workbook_skips_spreadsheet_audit_and_persists_art
             "failures_count": 0,
         }
         assert calls["workbook_path"] is None
-        assert [step.step_name for step in steps] == list(ROLE_ORDER)
-        assert all(step.raw_output == f"raw {step.step_name}" for step in steps)
+        assert [step.step_name for step in steps] == [*list(ROLE_ORDER), "result_short_summary", "result_rationale"]
+        role_steps = [step for step in steps if step.step_type == "role"]
+        result_steps = [step for step in steps if step.step_type == "result_synthesis"]
+        assert all(step.raw_output == f"raw {step.step_name}" for step in role_steps)
+        assert {step.step_name for step in result_steps} == {"result_short_summary", "result_rationale"}
+        assert all(step.prompt_artifact_path for step in result_steps)
+        assert all(step.raw_output for step in result_steps)
+        assert all(step.structured_output for step in result_steps)
+        assert all(
+            any(artifact.get("key") == "effective_run_parameters" for artifact in step.artifacts)
+            for step in result_steps
+        )
         assert check_run.run_parameters["synthesis_prompt_artifact_path"].endswith("/prompts/synthesis.txt")
         assert check_run.run_parameters["synthesis_prompt_fingerprint"]
         artifact_keys = {artifact["key"] for artifact in check_run.artifacts}
@@ -70,6 +80,7 @@ def test_completed_run_without_workbook_skips_spreadsheet_audit_and_persists_art
             records["analysis"].structured_output["result"]["short_summary_metadata"]["skill"]["name"]
             == "result_summary_synthesis"
         )
+        assert records["analysis"].structured_output["result"]["short_summary_metadata"]["trace_step_id"]
         assert records["analysis"].structured_output["result"]["rationale_markdown"] == _result_rationale_markdown()
         assert records["analysis"].structured_output["result"]["rationale_items"] == _result_rationale_items()
         assert records["analysis"].structured_output["result"]["critical_risks"] == ["Hiring scale-up may precede proof."]
@@ -79,6 +90,7 @@ def test_completed_run_without_workbook_skips_spreadsheet_audit_and_persists_art
             records["analysis"].structured_output["result"]["rationale_metadata"]["skill"]["name"]
             == "result_rationale_synthesis"
         )
+        assert records["analysis"].structured_output["result"]["rationale_metadata"]["trace_step_id"]
     finally:
         db.close()
 
@@ -557,8 +569,9 @@ def test_synthesis_invalid_json_retries_once_without_rerunning_roles(tmp_path, m
             "reason": "Unterminated string starting at",
             "retry_step": "synthesis:json_retry",
         }
-        assert [step.step_name for step in steps] == list(ROLE_ORDER)
-        assert [step.status for step in steps] == [RunStatus.COMPLETED.value] * len(ROLE_ORDER)
+        role_steps = [step for step in steps if step.step_type == "role"]
+        assert [step.step_name for step in role_steps] == list(ROLE_ORDER)
+        assert [step.status for step in role_steps] == [RunStatus.COMPLETED.value] * len(ROLE_ORDER)
     finally:
         db.close()
 

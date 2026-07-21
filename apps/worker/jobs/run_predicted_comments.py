@@ -5,6 +5,7 @@ from uuid import UUID
 
 from redis import Redis
 from rq import Queue
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -51,15 +52,12 @@ def run_predicted_comments(predicted_comment_run_id: str, *, db: Session | None 
     provider_raw_output = None
     provider_structured_text = None
     try:
-        predicted_run = session.get(PredictedCommentRun, run_uuid)
+        predicted_run = _claim_queued_predicted_run(session=session, run_uuid=run_uuid)
         if predicted_run is None:
-            raise ValueError(f"Predicted comment run {predicted_comment_run_id} not found")
-        if predicted_run.status == RunStatus.CANCELLED.value:
+            existing = session.get(PredictedCommentRun, run_uuid)
+            if existing is None:
+                raise ValueError(f"Predicted comment run {predicted_comment_run_id} not found")
             return
-        predicted_run.status = RunStatus.RUNNING.value
-        predicted_run.started_at = utc_now()
-        predicted_run.error_message = None
-        session.commit()
 
         analysis = session.get(Analysis, predicted_run.analysis_id)
         skill = session.get(Skill, predicted_run.skill_id)
@@ -104,26 +102,32 @@ def run_predicted_comments(predicted_comment_run_id: str, *, db: Session | None 
             schema_path=skill.result_schema_path,
         )
 
-        predicted_run.structured_output = structured
-        predicted_run.raw_output = result.raw_output
-        predicted_run.input_tokens = result.input_tokens
-        predicted_run.output_tokens = result.output_tokens
-        predicted_run.latency_ms = result.latency_ms
-        predicted_run.estimated_cost = result.estimated_cost
-        predicted_run.status = RunStatus.COMPLETED.value
-        predicted_run.completed_at = utc_now()
-        session.commit()
+        _complete_predicted_run_if_running(
+            session=session,
+            predicted_run=predicted_run,
+            structured=structured,
+            raw_output=result.raw_output,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            latency_ms=result.latency_ms,
+            estimated_cost=result.estimated_cost,
+        )
     except Exception as exc:
         session.rollback()
+        if not _fail_predicted_run_if_active(
+            session=session,
+            run_uuid=run_uuid,
+            exc=exc,
+            provider_raw_output=provider_raw_output,
+            provider_structured_text=provider_structured_text,
+        ):
+            existing = session.get(PredictedCommentRun, run_uuid)
+            if existing is None:
+                raise
+            return
         failed = session.get(PredictedCommentRun, run_uuid)
         if failed is None:
             raise
-        failed.status = RunStatus.FAILED.value
-        failed.error_message = str(exc)
-        if provider_raw_output is not None and failed.raw_output is None:
-            failed.raw_output = provider_raw_output or provider_structured_text
-        failed.completed_at = utc_now()
-        session.commit()
     finally:
         if owns_session:
             session.close()
@@ -133,9 +137,82 @@ def _get_provider_key(session: Session, analysis: Analysis, provider: Provider) 
     return get_shared_provider_key(db=session, provider=provider)
 
 
+def _claim_queued_predicted_run(*, session: Session, run_uuid: UUID) -> PredictedCommentRun | None:
+    result = session.execute(
+        update(PredictedCommentRun)
+        .where(PredictedCommentRun.id == run_uuid, PredictedCommentRun.status == RunStatus.QUEUED.value)
+        .values(status=RunStatus.RUNNING.value, started_at=utc_now(), error_message=None)
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        return None
+    session.commit()
+    return session.get(PredictedCommentRun, run_uuid)
+
+
 def _predicted_run_cancelled(*, session: Session, predicted_run: PredictedCommentRun) -> bool:
     session.refresh(predicted_run)
     return predicted_run.status == RunStatus.CANCELLED.value
+
+
+def _complete_predicted_run_if_running(
+    *,
+    session: Session,
+    predicted_run: PredictedCommentRun,
+    structured: dict,
+    raw_output: str,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    latency_ms: int | None,
+    estimated_cost,
+) -> bool:
+    result = session.execute(
+        update(PredictedCommentRun)
+        .where(PredictedCommentRun.id == predicted_run.id, PredictedCommentRun.status == RunStatus.RUNNING.value)
+        .values(
+            structured_output=structured,
+            raw_output=raw_output,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=latency_ms,
+            estimated_cost=estimated_cost,
+            status=RunStatus.COMPLETED.value,
+            completed_at=utc_now(),
+        )
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        session.refresh(predicted_run)
+        return False
+    session.commit()
+    session.refresh(predicted_run)
+    return True
+
+
+def _fail_predicted_run_if_active(
+    *,
+    session: Session,
+    run_uuid: UUID,
+    exc: Exception,
+    provider_raw_output: str | None,
+    provider_structured_text: str | None,
+) -> bool:
+    failed = session.get(PredictedCommentRun, run_uuid)
+    if failed is None:
+        return False
+    raw_output = failed.raw_output
+    if provider_raw_output is not None and raw_output is None:
+        raw_output = provider_raw_output or provider_structured_text
+    result = session.execute(
+        update(PredictedCommentRun)
+        .where(PredictedCommentRun.id == run_uuid, PredictedCommentRun.status.in_([RunStatus.QUEUED.value, RunStatus.RUNNING.value]))
+        .values(status=RunStatus.FAILED.value, error_message=str(exc), raw_output=raw_output, completed_at=utc_now())
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        return False
+    session.commit()
+    return True
 
 
 def _resolve_schema_path(schema_path: str) -> Path:

@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Session
 
@@ -23,7 +23,7 @@ from app.services.audit import record_audit
 from app.services.analysis_jobs import enqueue_run_ic_agentic_review
 from app.services.analyses import ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY
 from app.services.devils_retrieval import create_devils_retrieval_snapshot
-from app.services.ic_review import create_automatic_ic_review_run_for_analysis
+from app.services.ic_review import create_automatic_ic_review_run_for_analysis, mark_ic_review_run_enqueue_failed
 from app.services.provider_keys import get_shared_provider_key
 from app.services.skill_snapshots import create_skill_source_snapshot
 from app.services.skill_sources import SkillSourceValidationError, refresh_skill_source_material
@@ -58,19 +58,17 @@ def run_analysis(
             "worker_job_started",
             extra={"job_type": "run_analysis", "entity_id": str(analysis_uuid), "status": "running"},
         )
-        analysis = session.get(Analysis, analysis_uuid)
+        analysis = _claim_queued_analysis(session=session, analysis_uuid=analysis_uuid)
         if analysis is None:
-            raise ValueError(f"Analysis {analysis_id} not found")
-        if analysis.status == RunStatus.CANCELLED.value:
-            worker_logger.info(
-                "worker_job_cancelled",
-                extra={"job_type": "run_analysis", "entity_id": str(analysis_uuid), "status": "cancelled"},
-            )
+            existing = session.get(Analysis, analysis_uuid)
+            if existing is None:
+                raise ValueError(f"Analysis {analysis_id} not found")
+            if existing.status == RunStatus.CANCELLED.value:
+                worker_logger.info(
+                    "worker_job_cancelled",
+                    extra={"job_type": "run_analysis", "entity_id": str(analysis_uuid), "status": "cancelled"},
+                )
             return
-        analysis.status = RunStatus.RUNNING.value
-        analysis.started_at = utc_now()
-        analysis.error_message = None
-        session.commit()
 
         document = session.get(Document, analysis.document_id)
         skill = session.get(Skill, analysis.skill_id)
@@ -144,39 +142,30 @@ def run_analysis(
             schema_path=schema_path,
         )
 
-        analysis.structured_output = structured
-        analysis.raw_output = result.raw_output
-        analysis.verdict = structured.get("verdict")
-        analysis.summary = structured.get("summary")
-        analysis.input_tokens = result.input_tokens
-        analysis.output_tokens = result.output_tokens
-        analysis.latency_ms = result.latency_ms
-        analysis.estimated_cost = result.estimated_cost
+        completed_run_parameters = analysis.run_parameters
         if use_responses_api:
-            run_parameters = dict(analysis.run_parameters or {})
+            run_parameters = dict(completed_run_parameters or {})
             response_id = result.provider_metadata.get("response_id")
             if response_id:
                 run_parameters["gate_challenger_response_id"] = response_id
             run_parameters["provider_api"] = "responses"
-            analysis.run_parameters = run_parameters
-            flag_modified(analysis, "run_parameters")
-        analysis.status = RunStatus.COMPLETED.value
-        analysis.completed_at = utc_now()
-        record_audit(
-            db=session,
-            actor_id=analysis.user_id,
-            action="analysis.completed",
-            entity_type="analysis",
-            entity_id=analysis.id,
-            metadata={
-                "document_id": str(analysis.document_id),
-                "provider": analysis.provider,
-                "model": analysis.model,
-                "input_tokens": analysis.input_tokens,
-                "output_tokens": analysis.output_tokens,
-            },
-        )
-        session.commit()
+            completed_run_parameters = run_parameters
+        if not _complete_analysis_if_running(
+            session=session,
+            analysis=analysis,
+            structured=structured,
+            raw_output=result.raw_output,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            latency_ms=result.latency_ms,
+            estimated_cost=result.estimated_cost,
+            run_parameters=completed_run_parameters,
+        ):
+            worker_logger.info(
+                "worker_job_cancelled",
+                extra={"job_type": "run_analysis", "entity_id": str(analysis_uuid), "status": "cancelled"},
+            )
+            return
         _create_and_enqueue_automatic_ic_review(
             session=session,
             analysis=analysis,
@@ -190,28 +179,24 @@ def run_analysis(
         )
     except Exception as exc:
         session.rollback()
+        if not _fail_analysis_if_active(
+            session=session,
+            analysis_uuid=analysis_uuid,
+            exc=exc,
+            provider_raw_output=provider_raw_output,
+            provider_structured_text=provider_structured_text,
+        ):
+            existing = session.get(Analysis, analysis_uuid)
+            if existing is None:
+                raise
+            worker_logger.info(
+                "worker_job_cancelled",
+                extra={"job_type": "run_analysis", "entity_id": str(analysis_uuid), "status": existing.status},
+            )
+            return
         failed = session.get(Analysis, analysis_uuid)
         if failed is None:
             raise
-        failed.status = RunStatus.FAILED.value
-        failed.error_message = str(exc)
-        if provider_raw_output is not None and failed.raw_output is None:
-            failed.raw_output = provider_raw_output or provider_structured_text
-        failed.completed_at = utc_now()
-        record_audit(
-            db=session,
-            actor_id=failed.user_id,
-            action="analysis.failed",
-            entity_type="analysis",
-            entity_id=failed.id,
-            metadata={
-                "document_id": str(failed.document_id),
-                "provider": failed.provider,
-                "model": failed.model,
-                "error_class": exc.__class__.__name__,
-            },
-        )
-        session.commit()
         worker_logger.info(
             "worker_job_failed",
             extra={
@@ -230,9 +215,121 @@ def _get_provider_key(session: Session, analysis: Analysis, provider: Provider) 
     return get_shared_provider_key(db=session, provider=provider)
 
 
+def _claim_queued_analysis(*, session: Session, analysis_uuid: UUID) -> Analysis | None:
+    started_at = utc_now()
+    result = session.execute(
+        update(Analysis)
+        .where(Analysis.id == analysis_uuid, Analysis.status == RunStatus.QUEUED.value)
+        .values(status=RunStatus.RUNNING.value, started_at=started_at, error_message=None)
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        return None
+    session.commit()
+    return session.get(Analysis, analysis_uuid)
+
+
 def _analysis_cancelled(*, session: Session, analysis: Analysis) -> bool:
     session.refresh(analysis)
     return analysis.status == RunStatus.CANCELLED.value
+
+
+def _complete_analysis_if_running(
+    *,
+    session: Session,
+    analysis: Analysis,
+    structured: dict,
+    raw_output: str,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    latency_ms: int | None,
+    estimated_cost,
+    run_parameters: dict,
+) -> bool:
+    completed_at = utc_now()
+    result = session.execute(
+        update(Analysis)
+        .where(Analysis.id == analysis.id, Analysis.status == RunStatus.RUNNING.value)
+        .values(
+            structured_output=structured,
+            raw_output=raw_output,
+            verdict=structured.get("verdict"),
+            summary=structured.get("summary"),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=latency_ms,
+            estimated_cost=estimated_cost,
+            run_parameters=run_parameters,
+            status=RunStatus.COMPLETED.value,
+            completed_at=completed_at,
+        )
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        session.refresh(analysis)
+        return False
+    record_audit(
+        db=session,
+        actor_id=analysis.user_id,
+        action="analysis.completed",
+        entity_type="analysis",
+        entity_id=analysis.id,
+        metadata={
+            "document_id": str(analysis.document_id),
+            "provider": analysis.provider,
+            "model": analysis.model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        },
+    )
+    session.commit()
+    session.refresh(analysis)
+    return True
+
+
+def _fail_analysis_if_active(
+    *,
+    session: Session,
+    analysis_uuid: UUID,
+    exc: Exception,
+    provider_raw_output: str | None,
+    provider_structured_text: str | None,
+) -> bool:
+    failed = session.get(Analysis, analysis_uuid)
+    if failed is None:
+        return False
+    raw_output = failed.raw_output
+    if provider_raw_output is not None and raw_output is None:
+        raw_output = provider_raw_output or provider_structured_text
+    completed_at = utc_now()
+    result = session.execute(
+        update(Analysis)
+        .where(Analysis.id == analysis_uuid, Analysis.status.in_([RunStatus.QUEUED.value, RunStatus.RUNNING.value]))
+        .values(
+            status=RunStatus.FAILED.value,
+            error_message=str(exc),
+            raw_output=raw_output,
+            completed_at=completed_at,
+        )
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        return False
+    record_audit(
+        db=session,
+        actor_id=failed.user_id,
+        action="analysis.failed",
+        entity_type="analysis",
+        entity_id=failed.id,
+        metadata={
+            "document_id": str(failed.document_id),
+            "provider": failed.provider,
+            "model": failed.model,
+            "error_class": exc.__class__.__name__,
+        },
+    )
+    session.commit()
+    return True
 
 
 def _create_and_enqueue_automatic_ic_review(*, session: Session, analysis: Analysis, enqueue_ic_review) -> None:
@@ -251,7 +348,11 @@ def _create_and_enqueue_automatic_ic_review(*, session: Session, analysis: Analy
             output_language=output_language,
         )
         if getattr(check_run, "created_for_request", False) and enqueue_ic_review is not None:
-            enqueue_ic_review(check_run.id)
+            try:
+                enqueue_ic_review(check_run.id)
+            except Exception as exc:
+                mark_ic_review_run_enqueue_failed(db=session, run_id=check_run.id, error_message=str(exc))
+                raise
         worker_logger.info(
             "automatic_ic_review_requested",
             extra={

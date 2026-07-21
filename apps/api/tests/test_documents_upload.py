@@ -1,6 +1,8 @@
 from pathlib import Path
 from uuid import UUID
+import io
 import hashlib
+import zipfile
 
 import pytest
 from sqlalchemy.orm import Session
@@ -72,6 +74,14 @@ def upload_document(client, filename: str, content: bytes, content_type: str = "
     )
 
 
+def valid_xlsx_bytes() -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("[Content_Types].xml", '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+        archive.writestr("xl/workbook.xml", "<workbook/>")
+    return buffer.getvalue()
+
+
 def assert_under_storage_root(path: str, storage_root: Path) -> Path:
     storage_path = Path(path)
     assert storage_path.resolve().is_relative_to(storage_root.resolve())
@@ -115,25 +125,26 @@ def test_upload_enqueues_parse_job(api_client, db_session, enqueued_parse_jobs):
     assert enqueued_parse_jobs == [response.json()["id"]]
 
 
-def test_upload_accepts_arbitrary_file_format_for_later_processing(api_client, db_session, storage_root, enqueued_parse_jobs):
+def test_upload_rejects_unsupported_primary_file_without_db_or_storage_artifacts(
+    api_client,
+    db_session,
+    storage_root,
+    enqueued_parse_jobs,
+):
     create_user(db_session, "author", "secret")
     login(api_client, "author", "secret")
 
     response = upload_document(
         api_client,
         "spreadsheet.xlsx",
-        b"not directly parseable yet",
+        valid_xlsx_bytes(),
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
-    assert response.status_code == 201
-    payload = response.json()
-    assert payload["original_filename"] == "spreadsheet.xlsx"
-    assert payload["mime_type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    assert payload["document_role"] == "primary"
-    assert enqueued_parse_jobs == [payload["id"]]
-    document = db_session.query(Document).one()
-    assert_under_storage_root(document.storage_path, storage_root)
+    assert response.status_code == 415
+    assert db_session.query(Document).count() == 0
+    assert enqueued_parse_jobs == []
+    assert not any(path.is_file() for path in storage_root.rglob("*"))
 
 
 def test_upload_can_attach_fin_summary_document_to_primary_document(api_client, db_session, enqueued_parse_jobs):
@@ -147,7 +158,7 @@ def test_upload_can_attach_fin_summary_document_to_primary_document(api_client, 
             "file": ("gate-2.docx", b"main defense", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
             "fin_summary_file": (
                 "fin-summary.xlsx",
-                b"financial summary",
+                valid_xlsx_bytes(),
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             ),
         },
@@ -172,6 +183,74 @@ def test_upload_can_attach_fin_summary_document_to_primary_document(api_client, 
     documents = documents_response.json()["documents"]
     assert [document["original_filename"] for document in documents] == ["gate-2.docx"]
     assert documents[0]["linked_fin_summary_document"]["original_filename"] == "fin-summary.xlsx"
+
+
+def test_upload_rejects_invalid_fin_summary_without_primary_or_storage_artifacts(
+    api_client,
+    db_session,
+    storage_root,
+    enqueued_parse_jobs,
+):
+    create_user(db_session, "author", "secret")
+    login(api_client, "author", "secret")
+
+    response = api_client.post(
+        "/documents",
+        data={"title": "Gate 2 Defense"},
+        files={
+            "file": ("gate-2.docx", b"main defense", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            "fin_summary_file": (
+                "fin-summary.xlsx",
+                b"not a zip workbook",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        },
+    )
+
+    assert response.status_code == 415
+    assert db_session.query(Document).count() == 0
+    assert enqueued_parse_jobs == []
+    assert not any(path.is_file() for path in storage_root.rglob("*"))
+
+
+def test_upload_cleans_primary_and_fin_summary_when_second_enqueue_fails(
+    client,
+    db_session,
+    storage_root,
+):
+    enqueued: list[str] = []
+
+    def flaky_enqueue(document_id):
+        enqueued.append(str(document_id))
+        if len(enqueued) == 2:
+            raise RuntimeError("redis unavailable")
+
+    app.dependency_overrides[documents_router.get_parse_document_enqueue] = lambda: flaky_enqueue
+    try:
+        create_user(db_session, "author", "secret")
+        login(client, "author", "secret")
+
+        response = client.post(
+            "/documents",
+            data={"title": "Gate 2 Defense"},
+            files={
+                "file": ("gate-2.docx", b"main defense", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+                "fin_summary_file": (
+                    "fin-summary.xlsx",
+                    valid_xlsx_bytes(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            },
+        )
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Failed to enqueue document parsing"
+        assert len(enqueued) == 2
+        assert db_session.query(Document).count() == 0
+        assert db_session.query(AuditLog).count() == 0
+        assert not any(path.is_file() for path in storage_root.rglob("*"))
+    finally:
+        app.dependency_overrides.pop(documents_router.get_parse_document_enqueue, None)
 
 
 def test_path_traversal_filename_is_sanitized_for_storage(api_client, db_session, storage_root):

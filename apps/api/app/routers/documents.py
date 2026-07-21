@@ -11,14 +11,14 @@ from app.dependencies.auth import require_current_user
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.documents import DocumentRead, DocumentTitlePatch, DocumentTypePatch, DocumentsListResponse
-from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType
+from app.schemas.enums import DocumentParseStatus, DocumentType
 from app.services.document_jobs import ParseDocumentEnqueue, enqueue_parse_document
 from app.services.documents import (
     DocumentNotFoundError,
     DocumentTooLargeError,
     UnsupportedDocumentFileTypeError,
-    attach_fin_summary_document,
-    create_document_from_upload,
+    cleanup_uploaded_document_bundle,
+    create_uploaded_document_bundle,
     delete_document_for_actor,
     get_document_for_actor,
     list_documents_for_actor,
@@ -51,36 +51,25 @@ def create_document(
     enqueue: ParseDocumentEnqueue = Depends(get_parse_document_enqueue),
 ) -> Document:
     try:
-        document = create_document_from_upload(
+        bundle = create_uploaded_document_bundle(
             db=db,
             actor=current_user,
             storage=storage,
-            upload=file,
+            primary_upload=file,
+            fin_summary_upload=fin_summary_file,
             title=title,
             manual_document_type=manual_document_type,
-            document_role=DocumentRole.PRIMARY,
         )
-        enqueued_document_ids = [document.id]
-        if fin_summary_file is not None and fin_summary_file.filename:
-            fin_summary_document = create_document_from_upload(
-                db=db,
-                actor=current_user,
-                storage=storage,
-                upload=fin_summary_file,
-                title=None,
-                manual_document_type=None,
-                document_role=DocumentRole.FIN_SUMMARY,
-            )
-            document = attach_fin_summary_document(
-                db=db,
-                actor=current_user,
-                primary_document=document,
-                fin_summary_document=fin_summary_document,
-            )
-            enqueued_document_ids.append(fin_summary_document.id)
-        for document_id in enqueued_document_ids:
-            enqueue(document_id)
-        return document
+        try:
+            for document_id in bundle.enqueued_document_ids:
+                enqueue(document_id)
+        except Exception as exc:
+            cleanup_uploaded_document_bundle(db=db, storage=storage, primary_document_id=bundle.primary_document.id)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to enqueue document parsing",
+            ) from exc
+        return bundle.primary_document
     except UnsupportedDocumentFileTypeError as exc:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,

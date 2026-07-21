@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
 from app.core.config import get_settings
-from app.models.analysis import Analysis, PredictedCommentRun
+from app.models.analysis import Analysis, AnalysisCheckRun, PredictedCommentRun
 from app.models.document import Document
 from app.models.provider_key import ProviderKey
 from app.models.skill import Skill
@@ -120,6 +120,115 @@ def test_run_analysis_skips_cancelled_run_without_provider_call(tmp_path):
         _close_session(db)
 
 
+def test_run_analysis_does_not_overwrite_cancelled_status_after_provider_race(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        db.add(
+            ProviderKey(
+                owner_id=_create_user(db, role=Role.ADMIN).id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url=None,
+                default_model="gpt-test",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": _main_analysis_summary_json("Should not complete."),
+                    "raw_output": "raw provider text",
+                    "latency_ms": 30,
+                },
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        def cancel_then_parse(*args, **kwargs):
+            db.refresh(analysis)
+            analysis.status = RunStatus.CANCELLED.value
+            analysis.error_message = "cancelled_by_user"
+            db.commit()
+            return json.loads(kwargs["structured_text"])
+
+        monkeypatch.setattr("jobs.run_analysis.parse_and_validate_json_output", cancel_then_parse)
+
+        run_analysis(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        assert analysis.status == RunStatus.CANCELLED.value
+        assert analysis.error_message == "cancelled_by_user"
+        assert analysis.structured_output is None
+        assert analysis.raw_output is None
+    finally:
+        _close_session(db)
+
+
+def test_run_analysis_does_not_overwrite_cancelled_status_on_error_race(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        db.add(
+            ProviderKey(
+                owner_id=_create_user(db, role=Role.ADMIN).id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url=None,
+                default_model="gpt-test",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": "not json",
+                    "raw_output": "raw provider text",
+                    "latency_ms": 30,
+                },
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        def cancel_then_raise(*args, **kwargs):
+            db.refresh(analysis)
+            analysis.status = RunStatus.CANCELLED.value
+            analysis.error_message = "cancelled_by_user"
+            db.commit()
+            raise ValueError("validation failed")
+
+        monkeypatch.setattr("jobs.run_analysis.parse_and_validate_json_output", cancel_then_raise)
+
+        run_analysis(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        assert analysis.status == RunStatus.CANCELLED.value
+        assert analysis.error_message == "cancelled_by_user"
+        assert analysis.raw_output is None
+    finally:
+        _close_session(db)
+
+
 def test_run_analysis_requests_automatic_ic_review_after_completed_gate_run(tmp_path, monkeypatch):
     db = _create_session()
     try:
@@ -176,6 +285,77 @@ def test_run_analysis_requests_automatic_ic_review_after_completed_gate_run(tmp_
         assert analysis.status == RunStatus.COMPLETED.value
         assert captured == {"analysis_id": analysis.id, "output_language": "en"}
         assert enqueued_ic_review_run_ids == [check_run_id]
+    finally:
+        _close_session(db)
+
+
+def test_run_analysis_marks_auto_ic_review_failed_when_enqueue_raises(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        db.add(
+            ProviderKey(
+                owner_id=_create_user(db, role=Role.ADMIN).id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url=None,
+                default_model="gpt-test",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": _main_analysis_summary_json("Needs stronger metric evidence."),
+                    "raw_output": "raw provider text",
+                    "latency_ms": 30,
+                },
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        def fake_create_automatic_ic_review_run_for_analysis(*, db, analysis, output_language):
+            check_run = AnalysisCheckRun(
+                analysis_id=analysis.id,
+                skill_id=skill.id,
+                skill_version=skill.version,
+                check_type="ic_agentic_review",
+                provider=analysis.provider,
+                model=analysis.model,
+                status=RunStatus.QUEUED.value,
+                current_stage="queued",
+                run_parameters={},
+                artifacts=[],
+                uploaded_workbook_metadata={},
+            )
+            db.add(check_run)
+            db.commit()
+            check_run.created_for_request = True
+            return check_run
+
+        monkeypatch.setattr(
+            "jobs.run_analysis.create_automatic_ic_review_run_for_analysis",
+            fake_create_automatic_ic_review_run_for_analysis,
+        )
+
+        run_analysis(str(analysis.id), db=db, enqueue_ic_review=lambda run_id: (_ for _ in ()).throw(RuntimeError("redis unavailable")))
+
+        db.refresh(analysis)
+        check_run = db.query(AnalysisCheckRun).one()
+        assert analysis.status == RunStatus.COMPLETED.value
+        assert check_run.status == RunStatus.FAILED.value
+        assert check_run.current_stage == "enqueue_failed"
+        assert "redis unavailable" in check_run.error_message
     finally:
         _close_session(db)
 

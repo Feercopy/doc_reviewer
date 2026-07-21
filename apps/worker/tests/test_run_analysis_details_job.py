@@ -144,6 +144,75 @@ def test_run_analysis_details_failure_keeps_main_analysis_completed(tmp_path):
         _close_session(db)
 
 
+def test_run_analysis_details_does_not_overwrite_cancelled_status_after_provider_race(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        db.add(
+            ProviderKey(
+                owner_id=_create_user(db, role=Role.ADMIN).id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url="https://admllm.test/v1",
+                default_model="openai/gpt-5.5",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="openai/gpt-5.5",
+            status=RunStatus.COMPLETED.value,
+            verdict=Verdict.NEED_EVIDENCE.value,
+            summary="Needs evidence",
+            structured_output=_summary_output(),
+            run_parameters={"provider_api": "responses", "gate_challenger_response_id": "resp-summary-1"},
+        )
+        db.add(analysis)
+        db.flush()
+        detail_run = AnalysisDetailRun(
+            analysis_id=analysis.id,
+            status=RunStatus.QUEUED.value,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="openai/gpt-5.5",
+            previous_response_id="resp-summary-1",
+            run_parameters={
+                "provider_api": "responses",
+                "mock_provider_response_result": {
+                    "structured_text": json.dumps(_details_output(str(analysis.id))),
+                    "raw_output": "raw detail responses",
+                    "provider_metadata": {"response_id": "resp-detail-1"},
+                },
+            },
+        )
+        db.add(detail_run)
+        db.commit()
+
+        def cancel_then_parse(*args, **kwargs):
+            db.refresh(detail_run)
+            detail_run.status = RunStatus.CANCELLED.value
+            detail_run.error_message = "cancelled_by_user"
+            db.commit()
+            return json.loads(kwargs["structured_text"])
+
+        monkeypatch.setattr("jobs.run_analysis_details.parse_and_validate_json_output", cancel_then_parse)
+
+        run_analysis_details(str(detail_run.id), db=db)
+
+        db.refresh(detail_run)
+        assert detail_run.status == RunStatus.CANCELLED.value
+        assert detail_run.error_message == "cancelled_by_user"
+        assert detail_run.structured_output is None
+        assert detail_run.raw_output is None
+    finally:
+        _close_session(db)
+
+
 def _summary_output() -> dict:
     return {
         "verdict": "need_evidence",

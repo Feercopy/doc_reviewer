@@ -21,6 +21,23 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Address PR #3 review blockers except the explicitly accepted scope item
+  about automatic IC Review/user-visible PDF: restored primary upload extension
+  allowlist while allowing only valid `.xlsx` Fin Summary attachments, made
+  primary+Fin Summary upload and enqueue cleanup compensation non-orphaning,
+  guarded main/detail/predicted worker terminal writes so cancellation cannot be
+  overwritten by completed/failed races, marks automatic IC Review enqueue
+  failures as `failed/enqueue_failed`, records Result summary/rationale provider
+  calls as durable `AnalysisCheckStep` traces with prompt artifacts, raw output,
+  structured output, and effective parameters, and fixed the Result page
+  TypeScript `endIndex` build error plus stale basePath test expectation.
+  Verified Docker API tests (`185 passed`), Docker worker tests (`146 passed`),
+  focused upload tests (`18 passed`), focused web tests (`24 passed`), and
+  production web build with `NODE_ENV=production` (passed). Full web test run
+  inside the current compose web image is not representative because that image
+  contains only `apps/web` and sets `NEXT_PUBLIC_API_BASE_URL` to
+  `http://127.0.0.1:8000`, while repo-level tests expect the monorepo root and
+  default `localhost` URL.
 - [x] Add `Stop Analysis` to the document detail Analysis history running
   state: the button now calls `POST /analyses/{analysis_id}/cancel`, active
   Gate/Devil's Advocate/detail/IC Review runs are marked `cancelled`, completed

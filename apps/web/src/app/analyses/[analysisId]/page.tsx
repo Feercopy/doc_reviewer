@@ -892,7 +892,8 @@ function removeProductAnalysisSummaryExcludedSections(markdown: string | null): 
     const headingLevel = match[1].length;
     const followingText = value.slice(match.index + match[0].length);
     const nextHeading = findNextMarkdownHeadingAtOrAboveLevel(followingText, headingLevel);
-    const endIndex = nextHeading === null ? value.length : match.index + match[0].length + nextHeading;
+    const endIndex: number =
+      nextHeading === null ? value.length : match.index + match[0].length + nextHeading;
     value = `${value.slice(0, match.index).trimEnd()}\n\n${value.slice(endIndex).trimStart()}`.trim();
     match = excludedHeading.exec(value);
   }

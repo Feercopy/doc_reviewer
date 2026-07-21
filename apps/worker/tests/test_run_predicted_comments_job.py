@@ -318,6 +318,68 @@ def test_run_predicted_comments_persists_structured_raw_and_metadata(tmp_path):
         _close_session(db)
 
 
+def test_run_predicted_comments_does_not_overwrite_cancelled_status_after_provider_race(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, user)
+        main_skill = _create_main_skill(db)
+        predicted_skill = _create_predicted_skill(db, tmp_path)
+        _create_provider_key(db, user)
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=main_skill.id,
+            skill_version=main_skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.COMPLETED.value,
+            verdict="need_evidence",
+            summary="Needs stronger evidence.",
+            structured_output={"layer_1": [], "layer_2": []},
+            raw_output="raw main",
+            run_parameters={},
+        )
+        db.add(analysis)
+        db.flush()
+        predicted_run = PredictedCommentRun(
+            analysis_id=analysis.id,
+            skill_id=predicted_skill.id,
+            skill_version=predicted_skill.version,
+            provider=analysis.provider,
+            model=analysis.model,
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": _devils_advocate_json(),
+                    "raw_output": "raw predicted",
+                    "latency_ms": 25,
+                }
+            },
+        )
+        db.add(predicted_run)
+        db.commit()
+
+        def cancel_then_parse(*args, **kwargs):
+            db.refresh(predicted_run)
+            predicted_run.status = RunStatus.CANCELLED.value
+            predicted_run.error_message = "cancelled_by_user"
+            db.commit()
+            return json.loads(kwargs["structured_text"])
+
+        monkeypatch.setattr("jobs.run_predicted_comments.parse_and_validate_json_output", cancel_then_parse)
+
+        run_predicted_comments(str(predicted_run.id), db=db)
+
+        db.refresh(predicted_run)
+        assert predicted_run.status == RunStatus.CANCELLED.value
+        assert predicted_run.error_message == "cancelled_by_user"
+        assert predicted_run.structured_output is None
+        assert predicted_run.raw_output is None
+    finally:
+        _close_session(db)
+
+
 def test_run_predicted_comments_persists_structured_text_when_json_parse_fails(tmp_path):
     db = _create_session()
     try:
