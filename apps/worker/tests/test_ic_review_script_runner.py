@@ -59,6 +59,21 @@ def test_run_source_script_uses_argv_without_shell_and_persists_streams(tmp_path
     assert Path(result.stderr_path).read_text(encoding="utf-8") == "stderr text"
 
 
+def test_ensure_pdf_fonts_available_copies_snapshotted_dejavu_fonts(tmp_path):
+    workspace = tmp_path / "workspace"
+    fonts_dir = workspace / "fonts"
+    target_dir = tmp_path / "system-fonts"
+    fonts_dir.mkdir(parents=True)
+    (fonts_dir / "DejaVuSans.ttf").write_bytes(b"regular")
+    (fonts_dir / "DejaVuSans-Bold.ttf").write_bytes(b"bold")
+
+    script_runner._ensure_pdf_fonts_available(workspace, target_dir=target_dir)
+
+    assert (target_dir / "DejaVuSans.ttf").read_bytes() == b"regular"
+    assert (target_dir / "DejaVuSans-Bold.ttf").read_bytes() == b"bold"
+    assert (target_dir / "DejaVuSans-Oblique.ttf").read_bytes() == b"regular"
+
+
 def test_run_source_script_passes_bounded_env_without_secrets(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -244,6 +259,13 @@ def test_run_ic_review_script_pipeline_without_workbook_skips_formula_and_excel(
         "pathlib.Path('calls.txt').open('a').write('validate_report ' + ' '.join(sys.argv[1:]) + '\\n')\n"
         "print('validation ok')\n",
     )
+    _write_script(
+        scripts_dir / "pdf_generator.py",
+        "import pathlib, sys\n"
+        "args = sys.argv[1:]\n"
+        "pathlib.Path('calls.txt').open('a').write('pdf_generator ' + ' '.join(args) + '\\n')\n"
+        "pathlib.Path(args[args.index('--output') + 1]).write_bytes(b'%PDF-1.4\\n')\n",
+    )
     _write_script(scripts_dir / "formula_auditor.py", "raise SystemExit('should not run')\n")
     _write_script(scripts_dir / "excel_audit.py", "raise SystemExit('should not run')\n")
 
@@ -271,20 +293,20 @@ def test_run_ic_review_script_pipeline_without_workbook_skips_formula_and_excel(
 
     assert [item.script_name for item in result.scripts] == [
         "json_postprocess",
+        "pdf_generator",
         "validate_report",
     ]
     calls = calls_path.read_text(encoding="utf-8")
     assert "formula_auditor" not in calls
     assert "excel_audit" not in calls
-    assert "pdf_generator" not in calls
-    assert "--pdf" not in calls
+    assert "pdf_generator" in calls
+    assert "--pdf" in calls
     assert "--excel" not in calls
     assert Path(result.artifacts["postprocessed_json"]).is_file()
-    assert "legacy_report_pdf" not in result.artifacts
-    legacy_text = Path(result.artifacts["legacy_report_text"])
-    assert legacy_text.is_file()
-    assert "Legacy IC report" in legacy_text.read_text(encoding="utf-8")
-    assert not (run_dir / "artifacts" / "legacy_report.pdf").exists()
+    legacy_markdown = Path(result.artifacts["legacy_report_markdown"])
+    assert legacy_markdown.is_file()
+    assert "Legacy IC report" in legacy_markdown.read_text(encoding="utf-8")
+    assert Path(result.artifacts["legacy_report_pdf"]).is_file()
     assert Path(result.artifacts["validation_report"]).read_text(encoding="utf-8").strip() == "validation ok"
 
 
@@ -314,6 +336,13 @@ def test_run_ic_review_script_pipeline_with_existing_formula_audit_skips_formula
         "pathlib.Path('calls.txt').open('a').write('validate_report ' + ' '.join(sys.argv[1:]) + '\\n')\n"
         "print('validation ok')\n",
     )
+    _write_script(
+        scripts_dir / "pdf_generator.py",
+        "import pathlib, sys\n"
+        "args = sys.argv[1:]\n"
+        "pathlib.Path('calls.txt').open('a').write('pdf_generator ' + ' '.join(args) + '\\n')\n"
+        "pathlib.Path(args[args.index('--output') + 1]).write_bytes(b'%PDF-1.4\\n')\n",
+    )
 
     legacy_report = run_dir / "structured" / "legacy_report.json"
     legacy_report.parent.mkdir(parents=True)
@@ -340,16 +369,17 @@ def test_run_ic_review_script_pipeline_with_existing_formula_audit_skips_formula
 
     assert [item.script_name for item in result.scripts] == [
         "json_postprocess",
+        "pdf_generator",
         "excel_audit",
         "validate_report",
     ]
     calls = calls_path.read_text(encoding="utf-8")
     assert "formula_auditor" not in calls
-    assert "pdf_generator" not in calls
-    assert "--pdf" not in calls
+    assert "pdf_generator" in calls
+    assert "--pdf" in calls
     assert f"--formula-json {formula_audit}" in calls
     assert result.artifacts["formula_audit_json"] == str(formula_audit)
-    assert stages == ["json_postprocess", "excel_audit", "validate_report"]
+    assert stages == ["json_postprocess", "pdf_generator", "excel_audit", "validate_report"]
 
 
 def test_run_ic_review_script_pipeline_rejects_paths_outside_run_dir(tmp_path):

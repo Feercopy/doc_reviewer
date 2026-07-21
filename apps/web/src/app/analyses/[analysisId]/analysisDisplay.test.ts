@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   analysisGateDetailsOutput,
+  analysisResultRationale,
   analysisShortSummary,
   buildDocumentCommentAnchors,
   buildLayeredGateChecks,
@@ -14,6 +15,52 @@ import {
 } from "./analysisDisplay";
 
 describe("analysis display helpers", () => {
+  it("uses the Result tab synthesized short summary before legacy Gate summary fields", () => {
+    expect(
+      analysisShortSummary({
+        summary: "Persisted Gate short summary.",
+        structured_output: {
+          result: {
+            short_summary: "Combined Result short summary from Gate Challenger and IC Review.",
+          },
+          summary: "Structured Gate short summary.",
+        },
+      }),
+    ).toBe("Combined Result short summary from Gate Challenger and IC Review.");
+  });
+
+  it("reads the Result tab rationale block from structured output", () => {
+    expect(
+      analysisResultRationale({
+        structured_output: {
+          result: {
+            rationale_markdown: "Gate rationale enriched with IC Review top findings.",
+            rationale_items: [
+              {
+                title: "Главный uplift не доказан.",
+                detail: "Gate Challenger and IC Review both require stronger uplift evidence.",
+                sources: ["gate_challenger", "ic_review"],
+              },
+            ],
+            critical_risks: ["Scale-up before proof."],
+            data_gaps: ["Missing A/B delta."],
+          },
+        },
+      }),
+    ).toEqual({
+      markdown: "Gate rationale enriched with IC Review top findings.",
+      items: [
+        {
+          title: "Главный uplift не доказан.",
+          detail: "Gate Challenger and IC Review both require stronger uplift evidence.",
+          sources: ["gate_challenger", "ic_review"],
+        },
+      ],
+      criticalRisks: ["Scale-up before proof."],
+      dataGaps: ["Missing A/B delta."],
+    });
+  });
+
   it("uses the persisted analysis summary before structured fallback fields", () => {
     expect(
       analysisShortSummary({

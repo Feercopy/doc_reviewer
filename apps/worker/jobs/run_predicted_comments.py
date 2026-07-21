@@ -54,6 +54,8 @@ def run_predicted_comments(predicted_comment_run_id: str, *, db: Session | None 
         predicted_run = session.get(PredictedCommentRun, run_uuid)
         if predicted_run is None:
             raise ValueError(f"Predicted comment run {predicted_comment_run_id} not found")
+        if predicted_run.status == RunStatus.CANCELLED.value:
+            return
         predicted_run.status = RunStatus.RUNNING.value
         predicted_run.started_at = utc_now()
         predicted_run.error_message = None
@@ -95,6 +97,8 @@ def run_predicted_comments(predicted_comment_run_id: str, *, db: Session | None 
         result = get_provider_adapter(provider, predicted_run.run_parameters).run(request)
         provider_raw_output = result.raw_output
         provider_structured_text = result.structured_text
+        if _predicted_run_cancelled(session=session, predicted_run=predicted_run):
+            return
         structured = parse_and_validate_json_output(
             structured_text=result.structured_text,
             schema_path=skill.result_schema_path,
@@ -127,6 +131,11 @@ def run_predicted_comments(predicted_comment_run_id: str, *, db: Session | None 
 
 def _get_provider_key(session: Session, analysis: Analysis, provider: Provider) -> ProviderKey | None:
     return get_shared_provider_key(db=session, provider=provider)
+
+
+def _predicted_run_cancelled(*, session: Session, predicted_run: PredictedCommentRun) -> bool:
+    session.refresh(predicted_run)
+    return predicted_run.status == RunStatus.CANCELLED.value
 
 
 def _resolve_schema_path(schema_path: str) -> Path:

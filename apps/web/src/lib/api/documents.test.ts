@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   USER_SELECTABLE_DOCUMENT_TYPES,
+  cancelAnalysisChain,
   createAnalysis,
   createAnalysisDetails,
   deleteAnalysis,
@@ -15,6 +16,7 @@ import {
   createIcReviewRun,
   getIcReviewRun,
   getLatestIcReviewRun,
+  icReviewArtifactUrl,
   listIcReviewRuns,
 } from "./ic-review";
 
@@ -121,6 +123,18 @@ describe("documents api", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/analyses/analysis-id",
       expect.objectContaining({ method: "DELETE", credentials: "include" }),
+    );
+  });
+
+  it("cancels an analysis chain and reads the updated analysis", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "analysis-id", status: "cancelled" }) });
+    global.fetch = fetchMock;
+
+    await cancelAnalysisChain("analysis-id");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/analyses/analysis-id/cancel",
+      expect.objectContaining({ method: "POST", credentials: "include" }),
     );
   });
 
@@ -231,6 +245,12 @@ describe("documents api", () => {
       3,
       "http://localhost:8000/analyses/analysis-id/ic-review-runs/latest",
       expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("builds IC review artifact download urls with encoded artifact keys", () => {
+    expect(icReviewArtifactUrl("run-id", "artifact:legacy_report_pdf")).toBe(
+      "http://localhost:8000/ic-review-runs/run-id/artifacts/artifact%3Alegacy_report_pdf",
     );
   });
 });

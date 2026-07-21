@@ -75,6 +75,7 @@ def _read_document(document: Document, owner: User) -> AdminDocumentRead:
     return AdminDocumentRead(
         id=document.id,
         owner_id=document.owner_id,
+        linked_fin_summary_document_id=document.linked_fin_summary_document_id,
         owner_login=owner.login,
         title=document.title,
         original_filename=document.original_filename,
@@ -84,6 +85,7 @@ def _read_document(document: Document, owner: User) -> AdminDocumentRead:
         parse_status=document.parse_status,
         detected_document_type=document.detected_document_type,
         manual_document_type=document.manual_document_type,
+        document_role=document.document_role,
         document_type_confidence=document.document_type_confidence,
         parse_error=document.parse_error,
         status=document.status,

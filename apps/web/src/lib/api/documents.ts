@@ -15,6 +15,7 @@ export const USER_SELECTABLE_DOCUMENT_TYPES = [
 ] as const satisfies readonly DocumentType[];
 
 export type ParseStatus = "queued" | "running" | "completed" | "failed";
+export type DocumentRole = "primary" | "fin_summary";
 export type Provider = "openai_compatible" | "anthropic_compatible" | "hermes";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type OutputLanguage = "ru" | "en";
@@ -22,6 +23,7 @@ export type OutputLanguage = "ru" | "en";
 export type DocumentRecord = {
   id: string;
   owner_id: string;
+  linked_fin_summary_document_id: string | null;
   title: string;
   original_filename: string;
   mime_type: string;
@@ -32,8 +34,22 @@ export type DocumentRecord = {
   document_type_confidence: string | null;
   document_type_explanation: string | null;
   manual_document_type: DocumentType | null;
+  document_role: DocumentRole;
   parse_error: string | null;
   status: "active" | "archived" | "deleted";
+  linked_fin_summary_document: LinkedDocumentRecord | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LinkedDocumentRecord = {
+  id: string;
+  title: string;
+  original_filename: string;
+  mime_type: string;
+  file_size_bytes: number;
+  parse_status: ParseStatus;
+  parse_error: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -183,6 +199,8 @@ export type IcReviewResultArtifact = {
   kind:
     | "formula_audit"
     | "legacy_report_json"
+    | "legacy_report_markdown"
+    | "legacy_report_pdf"
     | "legacy_report_text"
     | "legacy_audit_xlsx"
     | "validation_report"
@@ -369,6 +387,10 @@ export async function createAnalysis(
 
 export async function createAnalysisDetails(analysisId: string): Promise<AnalysisDetailRunRecord> {
   return apiFetch<AnalysisDetailRunRecord>(`/analyses/${analysisId}/details`, { method: "POST" });
+}
+
+export async function cancelAnalysisChain(analysisId: string): Promise<AnalysisRecord> {
+  return apiFetch<AnalysisRecord>(`/analyses/${analysisId}/cancel`, { method: "POST" });
 }
 
 export async function deleteAnalysis(analysisId: string): Promise<void> {

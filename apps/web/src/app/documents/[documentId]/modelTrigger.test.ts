@@ -25,7 +25,7 @@ describe("document detail analysis controls", () => {
     const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
     const historyPanelSource = source.slice(
       source.indexOf('className="gc-panel gc-history-panel"'),
-      source.indexOf("{analyses.length > 0 ?"),
+      source.indexOf("{visibleAnalyses.length > 0 ?"),
     );
 
     expect(historyPanelSource).toContain("<h2>Analysis history</h2>");
@@ -39,6 +39,24 @@ describe("document detail analysis controls", () => {
     expect(source).not.toContain("gc-model-trigger");
     expect(source).not.toContain("gc-model-popover");
     expect(source).not.toContain('aria-label="Model settings"');
+  });
+
+  it("waits for the full Gate, Devil's Advocate, and IC Review package before showing history rows", () => {
+    const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
+
+    expect(source).toContain("function isFullAnalysisComplete");
+    expect(source).toContain('analysis.predicted_comment_run?.status === "completed"');
+    expect(source).toContain('analysis.ic_review_run?.status === "completed"');
+    expect(source).toContain("const visibleAnalyses = useMemo");
+    expect(source).toContain("Full analysis is running");
+    expect(source).toContain("Stop Analysis");
+    expect(source).toContain("cancelAnalysisChain");
+    expect(source).toContain("isAnalysisChainCancelled");
+    expect(source).toContain("analysis_chain_cancel_requested_at");
+    expect(source).toContain("Analysis stopped after Gate Challenger");
+    expect(source).toContain("The completed result will appear here after Gate Challenger, Devils Advocate, and IC Review finish.");
+    expect(source).toContain("await refresh();");
+    expect(source).not.toContain("window.location.href = appPath(`/analyses/${analysis.id}`)");
   });
 
   it("uses an interactive title editor instead of a decorative pencil", () => {

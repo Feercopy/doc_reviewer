@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gate-challenger.local/schemas/result-short-summary.schema.json",
+  "title": "ResultShortSummary",
+  "type": "object",
+  "required": ["run_mode", "short_summary"],
+  "additionalProperties": false,
+  "properties": {
+    "run_mode": { "type": "string", "const": "result_short_summary" },
+    "short_summary": { "type": "string", "minLength": 120, "maxLength": 1200 }
+  }
+}

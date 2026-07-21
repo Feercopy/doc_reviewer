@@ -29,7 +29,7 @@ from app.services.provider_keys import get_shared_provider_key
 from app.storage.local import LocalDocumentStorage
 from ic_review.context import build_ic_review_context
 from ic_review.context_pack import build_ic_review_context_pack
-from ic_review.errors import safe_ic_review_error_message
+from ic_review.errors import IcReviewRunCancelled, safe_ic_review_error_message
 from ic_review.renderer import REVIEW_SCHEMA_PATH, ROLE_ORDER, render_synthesis_prompt
 from ic_review.role_runner import apply_ic_review_provider_defaults, run_role_step, write_prompt_artifact
 from ic_review.schema_normalization import normalize_schema_bounded_strings
@@ -41,13 +41,16 @@ from ic_review.script_runner import (
     run_source_script,
 )
 from ic_review.workbook_parser import extract_workbook_snapshot
-from providers.base import ProviderRunRequest
+from providers.base import AnalysisProviderResult, ProviderRunRequest
 from providers.registry import get_provider_adapter
+from skills.result_rationale_synthesis import update_result_rationale
+from skills.result_summary_synthesis import update_result_short_summary
 from skills.snapshot_loader import load_skill_source_snapshot
 
 
 SYNTHESIS_STEP_NAME = "synthesis"
 LEGACY_REPORT_RELATIVE_PATH = "structured/legacy_report.json"
+IC_REVIEW_SYNTHESIS_MAX_OUTPUT_TOKENS = 12000
 
 
 def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> None:
@@ -93,6 +96,7 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         api_key = decrypt_secret(provider_key.encrypted_api_key) if provider_key else None
         base_url = provider_key.base_url if provider_key else None
 
+        _set_current_stage(session=session, check_run=check_run, stage="loading_snapshot")
         source_snapshot_path = _source_snapshot_artifact_path(session=session, check_run=check_run)
         source_snapshot = load_skill_source_snapshot(str(source_snapshot_path))
 
@@ -113,7 +117,9 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         formula_audit_json_path: Path | None = None
         if workbook_path is not None:
             try:
+                _set_current_stage(session=session, check_run=check_run, stage="extracting_workbook")
                 workbook_snapshot = extract_workbook_snapshot(workbook_path)
+                _set_current_stage(session=session, check_run=check_run, stage="formula_audit")
                 formula_audit_summary, formula_audit_json_path = _run_formula_auditor(
                     check_run=check_run,
                     run_dir=run_dir,
@@ -131,7 +137,9 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         else:
             _set_spreadsheet_audit_not_provided(check_run)
         session.commit()
+        _raise_if_cancelled(session=session, check_run=check_run)
 
+        _set_current_stage(session=session, check_run=check_run, stage="building_context")
         context = build_ic_review_context(
             document=document,
             analysis=analysis,
@@ -161,6 +169,7 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
 
         role_outputs: dict[str, dict] = {}
         for role in ROLE_ORDER:
+            _raise_if_cancelled(session=session, check_run=check_run)
             check_run.current_stage = f"role:{role}"
             session.commit()
             role_outputs[role] = run_role_step(
@@ -175,15 +184,17 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
                 base_url=base_url,
                 storage=storage,
             )
+            _raise_if_cancelled(session=session, check_run=check_run)
 
         check_run = session.get(AnalysisCheckRun, run_uuid)
         if check_run is None:
             raise RuntimeError("ic_review_run_missing")
+        _raise_if_cancelled(session=session, check_run=check_run)
         check_run.current_stage = "synthesis"
         session.commit()
 
         review_schema = _load_schema(REVIEW_SCHEMA_PATH)
-        synthesis_response_schema = _synthesis_wrapper_schema(review_schema)
+        synthesis_response_schema = review_schema
         synthesis_prompt = render_synthesis_prompt(
             context=context,
             context_pack=context_pack,
@@ -206,16 +217,16 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         session.commit()
 
         synthesis_parameters = _synthesis_run_parameters(check_run.run_parameters or {})
-        result = get_provider_adapter(provider, synthesis_parameters).run(
-            ProviderRunRequest(
-                provider=provider,
-                model=check_run.model,
-                api_key=api_key,
-                base_url=base_url,
-                prompt=synthesis_prompt,
-                response_schema=synthesis_response_schema,
-                run_parameters=synthesis_parameters,
-            )
+        _raise_if_cancelled(session=session, check_run=check_run)
+        result, synthesis_retry = _run_synthesis_with_json_retry(
+            provider=provider,
+            model=check_run.model,
+            api_key=api_key,
+            base_url=base_url,
+            synthesis_prompt=synthesis_prompt,
+            response_schema=synthesis_response_schema,
+            run_parameters=synthesis_parameters,
+            review_schema=review_schema,
         )
         provider_raw_output = result.raw_output
         provider_structured_text = result.structured_text
@@ -224,10 +235,21 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         check_run.output_tokens = result.output_tokens
         check_run.latency_ms = result.latency_ms
         check_run.estimated_cost = result.estimated_cost
+        if synthesis_retry is not None:
+            run_parameters = dict(check_run.run_parameters or {})
+            run_parameters["synthesis_json_retry"] = synthesis_retry
+            check_run.run_parameters = run_parameters
+            flag_modified(check_run, "run_parameters")
         session.commit()
+        _raise_if_cancelled(session=session, check_run=check_run)
 
-        compact_result, legacy_report_json = _parse_synthesis_wrapper(result.structured_text, review_schema)
-        legacy_report_json = _normalize_legacy_report_json(legacy_report_json)
+        compact_result = _parse_synthesis_compact(result.structured_text, review_schema)
+        legacy_report_json = _build_legacy_report_json(
+            compact_result=compact_result,
+            role_outputs=role_outputs,
+            context_pack=context_pack,
+        )
+        legacy_report_json = _normalize_legacy_report_json(legacy_report_json, compact_result=compact_result)
         _validate_legacy_report_json(legacy_report_json)
         compact_result = _with_spreadsheet_audit(
             compact_result=compact_result,
@@ -252,6 +274,7 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
 
         check_run.current_stage = "postprocess"
         session.commit()
+        _raise_if_cancelled(session=session, check_run=check_run)
         pipeline_result = run_ic_review_script_pipeline(
             run_dir=run_dir,
             snapshot_workspace_root=snapshot_workspace_root,
@@ -262,6 +285,7 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
             formula_audit_json_path=formula_audit_json_path,
             stage_callback=_script_stage_callback(session=session, check_run=check_run),
         )
+        _raise_if_cancelled(session=session, check_run=check_run)
         _persist_pipeline_artifacts(check_run=check_run, pipeline_result=pipeline_result)
         validation_summary = _validation_summary(pipeline_result)
         compact_with_validation = dict(check_run.structured_output or {})
@@ -287,9 +311,50 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         check_run.completed_at = utc_now()
         session.commit()
 
+        if check_run.status == RunStatus.COMPLETED.value:
+            try:
+                update_result_short_summary(
+                    session=session,
+                    analysis=analysis,
+                    check_run=check_run,
+                    provider=provider,
+                    model=check_run.model,
+                    api_key=api_key,
+                    base_url=base_url,
+                )
+            except Exception as exc:
+                _record_result_summary_failure(session=session, analysis=analysis, check_run=check_run, exc=exc)
+            try:
+                update_result_rationale(
+                    session=session,
+                    analysis=analysis,
+                    check_run=check_run,
+                    provider=provider,
+                    model=check_run.model,
+                    api_key=api_key,
+                    base_url=base_url,
+                )
+            except Exception as exc:
+                _record_result_rationale_failure(session=session, analysis=analysis, check_run=check_run, exc=exc)
+
         worker_logger.info(
             "worker_job_completed",
             extra={"job_type": "run_ic_agentic_review", "entity_id": str(run_uuid), "status": check_run.status},
+        )
+    except IcReviewRunCancelled:
+        session.rollback()
+        cancelled = session.get(AnalysisCheckRun, run_uuid)
+        if cancelled is None:
+            raise
+        cancelled.status = RunStatus.CANCELLED.value
+        cancelled.current_stage = "cancelled"
+        cancelled.error_message = "cancelled_by_user"
+        if cancelled.completed_at is None:
+            cancelled.completed_at = utc_now()
+        session.commit()
+        worker_logger.info(
+            "worker_job_cancelled",
+            extra={"job_type": "run_ic_agentic_review", "entity_id": str(run_uuid), "status": "cancelled"},
         )
     except Exception as exc:
         session.rollback()
@@ -322,6 +387,48 @@ def _get_provider_key(session: Session, provider: Provider) -> ProviderKey | Non
     return get_shared_provider_key(db=session, provider=provider)
 
 
+def _record_result_summary_failure(
+    *,
+    session: Session,
+    analysis: Analysis,
+    check_run: AnalysisCheckRun,
+    exc: Exception,
+) -> None:
+    output = dict(analysis.structured_output or {})
+    result = dict(output.get("result") or {})
+    result["short_summary_status"] = "failed"
+    result["short_summary_metadata"] = {
+        "status": "failed",
+        "ic_review_run_id": str(check_run.id),
+        "error": safe_ic_review_error_message(exc),
+    }
+    output["result"] = result
+    analysis.structured_output = output
+    flag_modified(analysis, "structured_output")
+    session.commit()
+
+
+def _record_result_rationale_failure(
+    *,
+    session: Session,
+    analysis: Analysis,
+    check_run: AnalysisCheckRun,
+    exc: Exception,
+) -> None:
+    output = dict(analysis.structured_output or {})
+    result = dict(output.get("result") or {})
+    result["rationale_status"] = "failed"
+    result["rationale_metadata"] = {
+        "status": "failed",
+        "ic_review_run_id": str(check_run.id),
+        "error": safe_ic_review_error_message(exc),
+    }
+    output["result"] = result
+    analysis.structured_output = output
+    flag_modified(analysis, "structured_output")
+    session.commit()
+
+
 def _claim_queued_run(session: Session, run_uuid: UUID) -> AnalysisCheckRun | None:
     started_at = utc_now()
     result = session.execute(
@@ -351,6 +458,23 @@ def _claim_queued_run(session: Session, run_uuid: UUID) -> AnalysisCheckRun | No
             current_run.completed_at = utc_now()
         session.commit()
     return None
+
+
+def _set_current_stage(*, session: Session, check_run: AnalysisCheckRun, stage: str) -> None:
+    check_run.current_stage = stage
+    session.commit()
+
+
+def _raise_if_cancelled(*, session: Session, check_run: AnalysisCheckRun) -> None:
+    session.refresh(check_run)
+    if check_run.status != RunStatus.CANCELLED.value:
+        return
+    check_run.current_stage = "cancelled"
+    check_run.error_message = "cancelled_by_user"
+    if check_run.completed_at is None:
+        check_run.completed_at = utc_now()
+    session.commit()
+    raise IcReviewRunCancelled("ic_review_cancelled")
 
 
 def _source_snapshot_artifact_path(*, session: Session, check_run: AnalysisCheckRun) -> Path:
@@ -525,8 +649,93 @@ def _synthesis_run_parameters(run_parameters: dict) -> dict:
     if "synthesis_mock_provider_result" in parameters:
         parameters["mock_provider_result"] = parameters["synthesis_mock_provider_result"]
     apply_ic_review_provider_defaults(parameters)
+    parameters.setdefault("max_output_tokens", IC_REVIEW_SYNTHESIS_MAX_OUTPUT_TOKENS)
     parameters["ic_review_step"] = SYNTHESIS_STEP_NAME
     return parameters
+
+
+def _run_synthesis_with_json_retry(
+    *,
+    provider: Provider,
+    model: str,
+    api_key: str | None,
+    base_url: str | None,
+    synthesis_prompt: str,
+    response_schema: dict,
+    run_parameters: dict,
+    review_schema: dict,
+) -> tuple[AnalysisProviderResult, dict[str, Any] | None]:
+    result = _call_synthesis_provider(
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        prompt=synthesis_prompt,
+        response_schema=response_schema,
+        run_parameters=run_parameters,
+    )
+    try:
+        _parse_synthesis_compact(result.structured_text, review_schema)
+    except json.JSONDecodeError as exc:
+        retry_parameters = _synthesis_json_retry_run_parameters(run_parameters)
+        retry_result = _call_synthesis_provider(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            prompt=_synthesis_json_retry_prompt(synthesis_prompt=synthesis_prompt, error=exc),
+            response_schema=response_schema,
+            run_parameters=retry_parameters,
+        )
+        return retry_result, {
+            "attempts": 2,
+            "reason": exc.msg,
+            "retry_step": retry_parameters["ic_review_step"],
+        }
+    return result, None
+
+
+def _call_synthesis_provider(
+    *,
+    provider: Provider,
+    model: str,
+    api_key: str | None,
+    base_url: str | None,
+    prompt: str,
+    response_schema: dict,
+    run_parameters: dict,
+) -> AnalysisProviderResult:
+    return get_provider_adapter(provider, run_parameters).run(
+        ProviderRunRequest(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            prompt=prompt,
+            response_schema=response_schema,
+            run_parameters=run_parameters,
+        )
+    )
+
+
+def _synthesis_json_retry_run_parameters(run_parameters: dict) -> dict:
+    parameters = dict(run_parameters)
+    repair_mock = parameters.get("synthesis_json_retry_mock_provider_result")
+    if repair_mock is not None:
+        parameters["mock_provider_result"] = repair_mock
+    parameters["ic_review_step"] = f"{SYNTHESIS_STEP_NAME}:json_retry"
+    return parameters
+
+
+def _synthesis_json_retry_prompt(*, synthesis_prompt: str, error: json.JSONDecodeError) -> str:
+    return (
+        synthesis_prompt.rstrip()
+        + "\n\n## JSON Retry Instruction\n"
+        + f"The previous synthesis response was not valid JSON: {error.msg}.\n"
+        + "Regenerate the required compact IC Review result from the context above. Return exactly one valid "
+        + "JSON object matching `ic-agentic-review-result.schema.json`. Do not include the full report, "
+        + "Markdown fences, commentary, or prose."
+    )
 
 
 def _synthesis_wrapper_schema(review_schema: dict) -> dict:
@@ -585,6 +794,296 @@ def _parse_synthesis_wrapper(structured_text: str, review_schema: dict) -> tuple
     except ValidationError as exc:
         raise RuntimeError(f"invalid_synthesis_wrapper:{safe_ic_review_error_message(exc)}") from exc
     return compact_result, legacy_report_json
+
+
+def _parse_synthesis_compact(structured_text: str, review_schema: dict) -> dict:
+    payload = json.loads(_extract_json_text(structured_text))
+    if isinstance(payload, dict) and isinstance(payload.get("compact_result"), dict):
+        compact_result = payload["compact_result"]
+    elif isinstance(payload, dict):
+        compact_result = payload
+    else:
+        raise RuntimeError("invalid_synthesis_compact")
+    compact_result = normalize_schema_bounded_strings(compact_result, review_schema, review_schema)
+    try:
+        validate(instance=compact_result, schema=review_schema)
+    except ValidationError as exc:
+        raise RuntimeError(f"invalid_synthesis_compact:{safe_ic_review_error_message(exc)}") from exc
+    return compact_result
+
+
+def _build_legacy_report_json(
+    *,
+    compact_result: dict,
+    role_outputs: dict[str, dict],
+    context_pack: Any,
+) -> dict:
+    sections = {
+        f"section_{index}": {
+            "title": _legacy_section_title(index),
+            "content": "",
+            "tables": [],
+            "subsections": [],
+            "callouts": [],
+        }
+        for index in range(1, 11)
+    }
+    risks_structured: list[dict[str, Any]] = []
+    data_gap_lines: list[str] = []
+    recommendation_lines: list[str] = []
+    scenario_lines: list[str] = []
+    appendices: list[dict[str, Any]] = []
+
+    for role in ROLE_ORDER:
+        role_output = role_outputs.get(role) or {}
+        materials = role_output.get("full_report_materials")
+        if not isinstance(materials, dict):
+            continue
+        _merge_section_drafts(sections=sections, role=role, materials=materials)
+        _merge_report_tables(sections=sections, role=role, materials=materials)
+        risks_structured.extend(_report_items(materials.get("risks"), role=role))
+        data_gap_lines.extend(_report_item_lines(materials.get("data_gaps"), role=role))
+        recommendation_lines.extend(_report_item_lines(materials.get("recommendations"), role=role))
+        scenario_lines.extend(_report_item_lines(materials.get("scenarios"), role=role))
+        notes = materials.get("primary_verify_notes")
+        if isinstance(notes, list) and notes:
+            appendices.append(
+                {
+                    "title": f"PRIMARY/VERIFY notes: {role}",
+                    "content": "\n".join(f"- {note}" for note in notes if isinstance(note, str) and note.strip()),
+                }
+            )
+
+    _append_lines(sections["section_1"], [_legacy_executive_summary_content(compact_result)])
+    _append_lines(sections["section_6"], ["## Scenarios", *scenario_lines])
+    _append_lines(sections["section_7"], _risk_map_lines(risks_structured, compact_result=compact_result))
+    _append_lines(sections["section_8"], ["## Data Gaps", *data_gap_lines, *_legacy_text_list_lines(compact_result, "data_gaps")])
+    _append_lines(
+        sections["section_9"],
+        ["## Recommendations and Required Actions", *recommendation_lines, *_legacy_text_list_lines(compact_result, "required_actions")],
+    )
+    _append_lines(sections["section_10"], [_verdict_rationale_content(compact_result)])
+
+    key_numbers = compact_result.get("key_numbers")
+    if isinstance(key_numbers, list) and key_numbers:
+        appendices.append({"title": "Key numbers", "content": "\n".join(_legacy_key_number_lines(compact_result))})
+
+    workbook_context = getattr(context_pack, "workbook_context", None)
+    formula_issues = _formula_issues_from_workbook_context(workbook_context)
+    if formula_issues:
+        appendices.append(
+            {
+                "title": "Formula audit findings",
+                "content": "\n".join(
+                    f"- {issue.get('title') or issue.get('cell') or 'Formula issue'}: {issue.get('detail') or issue.get('message') or issue}"
+                    for issue in formula_issues
+                    if isinstance(issue, dict)
+                ),
+            }
+        )
+
+    return {
+        "meta": {
+            "title": "IC Review Full Report",
+            "verdict": compact_result.get("verdict") or "UNKNOWN",
+            "confidence": compact_result.get("confidence"),
+            "generation_mode": "worker_assembled_from_role_full_report_materials",
+        },
+        "sections": sections,
+        "scenarios": _legacy_scenarios_from_lines(scenario_lines),
+        "formula_issues": formula_issues,
+        "kpis": _legacy_kpis_from_compact(compact_result),
+        "risks_structured": risks_structured,
+        "appendices": [appendix for appendix in appendices if str(appendix.get("content") or "").strip()],
+    }
+
+
+def _merge_section_drafts(*, sections: dict[str, dict], role: str, materials: dict) -> None:
+    drafts = materials.get("section_drafts")
+    if not isinstance(drafts, list):
+        return
+    for draft in drafts:
+        if not isinstance(draft, dict):
+            continue
+        section_key = _legacy_section_key(draft.get("section_key"))
+        if section_key not in sections:
+            continue
+        title = str(draft.get("title") or _legacy_section_title(int(section_key.rsplit("_", 1)[1]))).strip()
+        content = str(draft.get("content") or "").strip()
+        if not content:
+            continue
+        evidence_ids = draft.get("evidence_ids")
+        evidence_line = ""
+        if isinstance(evidence_ids, list) and evidence_ids:
+            evidence_line = "\nEvidence IDs: " + ", ".join(str(value) for value in evidence_ids if str(value).strip())
+        _append_lines(sections[section_key], [f"## {title}", f"Source role: {role}", content + evidence_line])
+
+
+def _merge_report_tables(*, sections: dict[str, dict], role: str, materials: dict) -> None:
+    tables = materials.get("tables")
+    if not isinstance(tables, list):
+        return
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        section_key = _legacy_section_key(table.get("section_key"))
+        if section_key not in sections:
+            section_key = "section_4"
+        title = str(table.get("title") or "Table").strip()
+        markdown = str(table.get("markdown") or "").strip()
+        if not markdown:
+            continue
+        sections[section_key]["tables"].append({"title": title, "markdown": markdown, "source_role": role})
+        _append_lines(sections[section_key], [f"### {title}", markdown])
+
+
+def _legacy_section_key(value: object) -> str:
+    if isinstance(value, str):
+        match = re.search(r"section[_\s-]*(10|[1-9])", value, re.IGNORECASE)
+        if match:
+            return f"section_{match.group(1)}"
+    return "section_4"
+
+
+def _append_lines(section: dict, lines: list[str]) -> None:
+    existing = str(section.get("content") or "").strip()
+    addition = "\n\n".join(str(line).strip() for line in lines if str(line).strip())
+    if not addition:
+        return
+    section["content"] = f"{existing}\n\n{addition}".strip() if existing else addition
+
+
+def _report_items(values: object, *, role: str) -> list[dict[str, Any]]:
+    if not isinstance(values, list):
+        return []
+    items = []
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        title = str(value.get("title") or "Item").strip()
+        detail = str(value.get("detail") or value.get("summary") or "").strip()
+        if not title and not detail:
+            continue
+        item = {
+            "title": title,
+            "detail": detail,
+            "severity": value.get("severity") or "medium",
+            "source_role": role,
+        }
+        evidence_ids = value.get("evidence_ids")
+        if isinstance(evidence_ids, list):
+            item["evidence_ids"] = evidence_ids
+        items.append(item)
+    return items
+
+
+def _report_item_lines(values: object, *, role: str) -> list[str]:
+    lines = []
+    for item in _report_items(values, role=role):
+        title = item.get("title") or "Item"
+        detail = item.get("detail") or ""
+        lines.append(f"- {title} ({role}): {detail}".strip())
+    return lines
+
+
+def _risk_map_lines(risks: list[dict[str, Any]], *, compact_result: dict) -> list[str]:
+    if not risks:
+        return ["## Risk Map", *_legacy_text_list_lines(compact_result, "critical_risks")]
+    lines = ["## Risk Map"]
+    for index, risk in enumerate(risks, start=1):
+        severity = str(risk.get("severity") or "medium").upper()
+        marker = _risk_marker(severity)
+        title = risk.get("title") or "Risk"
+        detail = risk.get("detail") or ""
+        source_role = risk.get("source_role") or "role"
+        lines.append(f"Риск #{index} {marker} {title} ({source_role}): {detail}".strip())
+    return lines
+
+
+def _risk_marker(severity: str) -> str:
+    if severity in {"BLOCKER", "БЛОКЕР"}:
+        return "[БЛОКЕР]"
+    if severity in {"CRITICAL", "КРИТИЧНО", "HIGH"}:
+        return "[КРИТИЧНО]"
+    if severity in {"MEDIUM", "СРЕДНИЙ"}:
+        return "[СРЕДНИЙ]"
+    return "[ВЫСОКИЙ]"
+
+
+def _legacy_executive_summary_content(compact_result: dict) -> str:
+    verdict = compact_result.get("verdict") or "UNKNOWN"
+    confidence = compact_result.get("confidence")
+    executive_brief = compact_result.get("executive_brief") or "No executive brief was provided."
+    findings = "\n".join(_legacy_finding_lines(compact_result))
+    return (
+        f"Verdict: {verdict}. Confidence: {confidence}.\n\n"
+        f"{executive_brief}\n\n"
+        f"Top findings:\n{findings}"
+    ).strip()
+
+
+def _verdict_rationale_content(compact_result: dict) -> str:
+    verdict = compact_result.get("verdict") or "UNKNOWN"
+    actions = "\n".join(_legacy_text_list_lines(compact_result, "required_actions")) or "- Close the documented evidence gaps."
+    risks = "\n".join(_legacy_text_list_lines(compact_result, "critical_risks")) or "- Critical risks were not separately listed."
+    gaps = "\n".join(_legacy_text_list_lines(compact_result, "data_gaps")) or "- Data gaps were not separately listed."
+    return (
+        f"Final IC verdict: {verdict}.\n\n"
+        "## Почему не GO\n"
+        f"{risks}\n\n"
+        "## Почему не NO-GO\n"
+        "The compact review does not support an unconditional rejection when the identified issues can be closed "
+        "through additional evidence, reconciled assumptions, or explicit risk mitigations.\n\n"
+        "## Условия для перехода в GO\n"
+        f"{actions}\n\n"
+        "## Условия для перехода в NO-GO\n"
+        f"{gaps}"
+    )
+
+
+def _legacy_scenarios_from_lines(lines: list[str]) -> dict:
+    scenarios: dict[str, dict] = {}
+    for index, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        scenarios[f"scenario_{index}"] = {"title": f"Scenario {index}", "content": line}
+    return scenarios
+
+
+def _legacy_kpis_from_compact(compact_result: dict) -> list[list[str]]:
+    key_numbers = compact_result.get("key_numbers")
+    if not isinstance(key_numbers, list):
+        return []
+    kpis: list[list[str]] = []
+    for item in key_numbers:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or item.get("name") or "Metric").strip()
+        value_parts = [
+            str(item.get("value") or "—").strip(),
+            str(item.get("unit") or "").strip(),
+        ]
+        source = str(item.get("source") or "").strip()
+        value = " ".join(part for part in value_parts if part).strip()
+        if source:
+            value = f"{value} | Source: {source}"
+        kpis.append([label, value or "—"])
+    return kpis
+
+
+def _formula_issues_from_workbook_context(workbook_context: object) -> list[dict[str, Any]]:
+    if not isinstance(workbook_context, dict):
+        return []
+    for key in ("formula_issues", "issues", "critical_issues"):
+        values = workbook_context.get(key)
+        if isinstance(values, list):
+            return [dict(value) if isinstance(value, dict) else {"detail": str(value)} for value in values]
+    formula_audit = workbook_context.get("formula_audit")
+    if isinstance(formula_audit, dict):
+        values = formula_audit.get("issues")
+        if isinstance(values, list):
+            return [dict(value) if isinstance(value, dict) else {"detail": str(value)} for value in values]
+    return []
 
 
 def _normalize_legacy_report_json(legacy_report_json: dict, *, compact_result: dict | None = None) -> dict:
@@ -812,6 +1311,8 @@ def _script_stage_callback(*, session: Session, check_run: AnalysisCheckRun):
     def callback(script_name: str) -> None:
         if script_name == "json_postprocess":
             check_run.current_stage = "postprocess"
+        elif script_name == "pdf_generator":
+            check_run.current_stage = "full_report_pdf"
         elif script_name == "excel_audit":
             check_run.current_stage = "legacy_artifacts"
         elif script_name == "validate_report":
@@ -840,6 +1341,7 @@ def _persist_pipeline_artifacts(*, check_run: AnalysisCheckRun, pipeline_result:
             kind=_artifact_kind(name),
             path=path,
             media_type=_media_type(path),
+            user_visible=name in {"legacy_report_pdf", "legacy_report_markdown"},
         )
 
 
@@ -889,6 +1391,7 @@ def _add_artifact(
     kind: str,
     path: Path,
     media_type: str | None,
+    user_visible: bool = False,
 ) -> None:
     artifacts = list(check_run.artifacts or [])
     artifacts = [artifact for artifact in artifacts if artifact.get("key") != key]
@@ -900,6 +1403,9 @@ def _add_artifact(
     }
     if media_type:
         record["media_type"] = media_type
+    if user_visible:
+        record["visibility"] = "user"
+        record["user_visible"] = True
     artifacts.append(record)
     check_run.artifacts = artifacts
     flag_modified(check_run, "artifacts")
@@ -910,8 +1416,10 @@ def _artifact_kind(name: str) -> str:
         return "formula_audit"
     if name == "postprocessed_json":
         return "legacy_report_json"
-    if name == "legacy_report_text":
-        return "legacy_report_text"
+    if name == "legacy_report_markdown":
+        return "legacy_report_markdown"
+    if name == "legacy_report_pdf":
+        return "legacy_report_pdf"
     if name == "legacy_audit_xlsx":
         return "legacy_audit_xlsx"
     if name == "validation_report":
@@ -925,6 +1433,8 @@ def _media_type(path: Path) -> str | None:
         return "application/json"
     if suffix == ".txt":
         return "text/plain"
+    if suffix == ".md":
+        return "text/markdown"
     if suffix == ".pdf":
         return "application/pdf"
     if suffix == ".xlsx":

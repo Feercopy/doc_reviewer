@@ -29,14 +29,16 @@ def test_seed_baseline_skills_is_idempotent(db_session):
     first_seed = seed_baseline_skills(db_session)
     second_seed = seed_baseline_skills(db_session)
 
-    assert len(first_seed) == 6
-    assert len(second_seed) == 6
+    assert len(first_seed) == 8
+    assert len(second_seed) == 8
     assert {skill.name for skill in second_seed} == {
         "gate2_challenger_main_analysis",
         "devils_advocate_predefense",
         "ic_agentic_review",
         "generic_predicted_comments_fallback",
         "benchmark_judge",
+        "result_summary_synthesis",
+        "result_rationale_synthesis",
         "document_classifier",
     }
 
@@ -109,3 +111,38 @@ def test_seeded_benchmark_judge_uses_gate2_v2_prompt_when_available(db_session, 
     assert judge.prompt_text == prompt_text
     assert judge.source_metadata["prompt_source_path"] == str(prompt_path)
     assert judge.source_metadata["prompt_sha256"] == hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
+
+
+def test_seeded_result_summary_synthesis_skill_is_inline_and_result_scoped(db_session):
+    skills = seed_baseline_skills(db_session)
+
+    result_summary = next(skill for skill in skills if skill.name == "result_summary_synthesis")
+
+    assert result_summary.version == "baseline"
+    assert result_summary.skill_type == SkillType.RESULT_SUMMARY.value
+    assert result_summary.source_type == SkillSourceType.INLINE_PROMPT.value
+    assert result_summary.result_schema_path == "contracts/schemas/result-short-summary.schema.json"
+    assert result_summary.runtime_mode == "inline"
+    assert result_summary.supported_document_types == [
+        DocumentType.GATE_2.value,
+        DocumentType.STREAM_REVIEW_1.value,
+        DocumentType.STREAM_REVIEW_2_PLUS.value,
+        DocumentType.GATE_3.value,
+    ]
+
+
+def test_seeded_result_rationale_synthesis_skill_is_inline_and_result_scoped(db_session):
+    skills = seed_baseline_skills(db_session)
+    result_rationale = next(skill for skill in skills if skill.name == "result_rationale_synthesis")
+
+    assert result_rationale.version == "baseline"
+    assert result_rationale.skill_type == SkillType.RESULT_SUMMARY.value
+    assert result_rationale.source_type == SkillSourceType.INLINE_PROMPT.value
+    assert result_rationale.result_schema_path == "contracts/schemas/result-rationale.schema.json"
+    assert result_rationale.runtime_mode == "inline"
+    assert result_rationale.supported_document_types == [
+        DocumentType.GATE_2.value,
+        DocumentType.STREAM_REVIEW_1.value,
+        DocumentType.STREAM_REVIEW_2_PLUS.value,
+        DocumentType.GATE_3.value,
+    ]

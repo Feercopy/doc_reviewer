@@ -31,7 +31,7 @@ from app.schemas.enums import (
 from app.security.passwords import hash_password
 from app.security.secrets import encrypt_secret
 from app.storage.local import LocalDocumentStorage
-from jobs.run_analysis import run_analysis
+from jobs.run_analysis import _should_use_responses_api, run_analysis
 
 
 def test_run_analysis_persists_structured_and_raw_output(tmp_path):
@@ -59,7 +59,7 @@ def test_run_analysis_persists_structured_and_raw_output(tmp_path):
             status=RunStatus.QUEUED.value,
             run_parameters={
                 "mock_provider_result": {
-                    "structured_text": _main_analysis_json("Needs stronger metric evidence."),
+                    "structured_text": _main_analysis_summary_json("Needs stronger metric evidence."),
                     "raw_output": "raw provider text",
                     "input_tokens": 10,
                     "output_tokens": 20,
@@ -80,6 +80,157 @@ def test_run_analysis_persists_structured_and_raw_output(tmp_path):
         assert analysis.input_tokens == 10
         assert analysis.output_tokens == 20
         assert analysis.latency_ms == 30
+    finally:
+        _close_session(db)
+
+
+def test_run_analysis_skips_cancelled_run_without_provider_call(tmp_path):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.CANCELLED.value,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": _main_analysis_summary_json("Should not be persisted."),
+                    "raw_output": "provider should not run",
+                    "latency_ms": 1,
+                }
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        run_analysis(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        assert analysis.status == RunStatus.CANCELLED.value
+        assert analysis.structured_output is None
+        assert analysis.raw_output is None
+        assert analysis.started_at is None
+    finally:
+        _close_session(db)
+
+
+def test_run_analysis_requests_automatic_ic_review_after_completed_gate_run(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        db.add(
+            ProviderKey(
+                owner_id=_create_user(db, role=Role.ADMIN).id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url=None,
+                default_model="gpt-test",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "output_language": "en",
+                "mock_provider_result": {
+                    "structured_text": _main_analysis_summary_json("Needs stronger metric evidence."),
+                    "raw_output": "raw provider text",
+                    "latency_ms": 30,
+                },
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        check_run_id = uuid4()
+        captured = {}
+
+        def fake_create_automatic_ic_review_run_for_analysis(*, db, analysis, output_language):
+            captured["analysis_id"] = analysis.id
+            captured["output_language"] = output_language
+            return SimpleNamespace(id=check_run_id, status=RunStatus.QUEUED.value, created_for_request=True)
+
+        monkeypatch.setattr(
+            "jobs.run_analysis.create_automatic_ic_review_run_for_analysis",
+            fake_create_automatic_ic_review_run_for_analysis,
+        )
+        enqueued_ic_review_run_ids = []
+
+        run_analysis(str(analysis.id), db=db, enqueue_ic_review=enqueued_ic_review_run_ids.append)
+
+        db.refresh(analysis)
+        assert analysis.status == RunStatus.COMPLETED.value
+        assert captured == {"analysis_id": analysis.id, "output_language": "en"}
+        assert enqueued_ic_review_run_ids == [check_run_id]
+    finally:
+        _close_session(db)
+
+
+def test_run_analysis_skips_automatic_ic_review_when_chain_cancelled(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        db.add(
+            ProviderKey(
+                owner_id=_create_user(db, role=Role.ADMIN).id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url=None,
+                default_model="gpt-test",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "analysis_chain_cancel_requested_at": "2026-07-20T10:00:00+00:00",
+                "mock_provider_result": {
+                    "structured_text": _main_analysis_summary_json("Needs stronger metric evidence."),
+                    "raw_output": "raw provider text",
+                    "latency_ms": 30,
+                },
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        def fake_create_automatic_ic_review_run_for_analysis(**kwargs):
+            raise AssertionError("automatic IC Review should not be created after chain cancellation")
+
+        monkeypatch.setattr(
+            "jobs.run_analysis.create_automatic_ic_review_run_for_analysis",
+            fake_create_automatic_ic_review_run_for_analysis,
+        )
+        enqueued_ic_review_run_ids = []
+
+        run_analysis(str(analysis.id), db=db, enqueue_ic_review=enqueued_ic_review_run_ids.append)
+
+        db.refresh(analysis)
+        assert analysis.status == RunStatus.COMPLETED.value
+        assert analysis.structured_output["summary"] == "Needs stronger metric evidence."
+        assert enqueued_ic_review_run_ids == []
     finally:
         _close_session(db)
 
@@ -136,6 +287,136 @@ def test_run_analysis_uses_responses_api_for_gate_challenger_summary(tmp_path):
         assert analysis.run_parameters["gate_challenger_response_id"] == "resp-summary-1"
         assert analysis.input_tokens == 100
         assert analysis.output_tokens == 40
+        rendered_prompt = Path(analysis.run_parameters["rendered_prompt_artifact_path"]).read_text(encoding="utf-8")
+        assert "details_status" in rendered_prompt
+        assert "layer_1_index" in rendered_prompt
+        assert "layer_1_markdown" not in rendered_prompt
+    finally:
+        _close_session(db)
+
+
+def test_gate_challenger_does_not_auto_use_responses_api_for_quotio_base_url(tmp_path):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        provider_key = ProviderKey(
+            owner_id=_create_user(db, role=Role.ADMIN).id,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            base_url="http://host.docker.internal:8317/v1",
+            default_model="claude-opus-4-7",
+            encrypted_api_key=encrypt_secret("sk-test"),
+            api_key_fingerprint="openai_compatible:...test",
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="claude-opus-4-7",
+            status=RunStatus.QUEUED.value,
+            run_parameters={},
+        )
+
+        assert (
+            _should_use_responses_api(
+                analysis=analysis,
+                provider=Provider.OPENAI_COMPATIBLE,
+                provider_key=provider_key,
+                skill=skill,
+            )
+            is False
+        )
+    finally:
+        _close_session(db)
+
+
+def test_gate_challenger_allows_explicit_responses_api_for_custom_base_url(tmp_path):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        provider_key = ProviderKey(
+            owner_id=_create_user(db, role=Role.ADMIN).id,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            base_url="http://host.docker.internal:8317/v1",
+            default_model="gpt-test",
+            encrypted_api_key=encrypt_secret("sk-test"),
+            api_key_fingerprint="openai_compatible:...test",
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            run_parameters={"provider_api": "responses"},
+        )
+
+        assert (
+            _should_use_responses_api(
+                analysis=analysis,
+                provider=Provider.OPENAI_COMPATIBLE,
+                provider_key=provider_key,
+                skill=skill,
+            )
+            is True
+        )
+    finally:
+        _close_session(db)
+
+
+def test_run_analysis_uses_summary_schema_with_chat_completions_for_quotio_base_url(tmp_path):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        db.add(
+            ProviderKey(
+                owner_id=_create_user(db, role=Role.ADMIN).id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url="http://host.docker.internal:8317/v1",
+                default_model="claude-opus-4-7",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="claude-opus-4-7",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": _main_analysis_summary_json("Needs stronger metric evidence."),
+                    "raw_output": "raw chat summary",
+                    "input_tokens": 100,
+                    "output_tokens": 40,
+                    "latency_ms": 300,
+                }
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        run_analysis(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        assert analysis.status == RunStatus.COMPLETED.value
+        assert analysis.verdict == Verdict.NEED_EVIDENCE.value
+        assert analysis.summary == "Needs stronger metric evidence."
+        assert analysis.structured_output["details_status"] == "not_requested"
+        assert "layer_1_markdown" not in analysis.structured_output
+        assert "provider_api" not in analysis.run_parameters
         rendered_prompt = Path(analysis.run_parameters["rendered_prompt_artifact_path"]).read_text(encoding="utf-8")
         assert "details_status" in rendered_prompt
         assert "layer_1_index" in rendered_prompt
@@ -339,7 +620,7 @@ def test_run_analysis_persists_rendered_prompt_from_source_snapshot(tmp_path, mo
                     "source_fingerprint": "snapshot-fingerprint",
                 },
                 "mock_provider_result": {
-                    "structured_text": _main_analysis_json("Needs stronger metric evidence."),
+                    "structured_text": _main_analysis_summary_json("Needs stronger metric evidence."),
                     "raw_output": "raw provider text",
                     "input_tokens": 10,
                     "output_tokens": 20,
@@ -394,7 +675,7 @@ def test_run_analysis_runs_devils_advocate_before_gate_and_passes_layer_4_contex
             status=RunStatus.QUEUED.value,
             run_parameters={
                 "mock_provider_result": {
-                    "structured_text": _main_analysis_json("Gate uses expert layer 4."),
+                    "structured_text": _main_analysis_summary_json("Gate uses expert layer 4."),
                     "raw_output": "raw main",
                     "latency_ms": 30,
                 },
@@ -555,7 +836,7 @@ def test_run_analysis_propagates_snapshot_mode_to_predicted_comments(tmp_path, m
                 "snapshot_mode": "development_current",
                 "output_language": "en",
                 "mock_provider_result": {
-                    "structured_text": _main_analysis_json("Needs stronger metric evidence."),
+                    "structured_text": _main_analysis_summary_json("Needs stronger metric evidence."),
                     "raw_output": "raw provider text",
                     "latency_ms": 30,
                 },

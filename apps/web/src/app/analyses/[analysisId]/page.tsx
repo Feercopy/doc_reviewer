@@ -22,7 +22,7 @@ import {
   type SourceTrace,
 } from "@/lib/api/documents";
 import { submitFeedback } from "@/lib/api/feedback";
-import { createIcReviewRun } from "@/lib/api/ic-review";
+import { createIcReviewRun, icReviewArtifactUrl } from "@/lib/api/ic-review";
 import {
   getProviderDefaultModel,
   listProviderModels,
@@ -55,8 +55,10 @@ import {
   isIcReviewCompactResult,
   isXlsxFinancialModelFile,
 } from "./icReviewDisplay";
+import { buildAgentVerdicts, buildFinalVerdict } from "./resultDisplay";
 
-type AnalysisTab = "mainOutput" | "documentComments" | "icReview" | "fullOutput";
+type AnalysisTopTab = "executiveSummary" | "fullReport";
+type FullReportTab = "mainOutput" | "documentComments" | "icReview" | "fullOutput";
 
 type EvidenceItem = {
   id: string;
@@ -67,10 +69,15 @@ type EvidenceItem = {
   recommendation: string | null;
 };
 
-const analysisTabs: Array<{ id: AnalysisTab; label: string }> = [
-  { id: "mainOutput", label: "Gate Challenger" },
+const analysisTabs: Array<{ id: AnalysisTopTab; label: string }> = [
+  { id: "executiveSummary", label: "Summary" },
+  { id: "fullReport", label: "Full Report" },
+];
+
+const fullReportTabs: Array<{ id: FullReportTab; label: string }> = [
+  { id: "mainOutput", label: "Product Analysis" },
+  { id: "icReview", label: "Financial Analysis" },
   { id: "documentComments", label: "Document comments" },
-  { id: "icReview", label: "IC review" },
   { id: "fullOutput", label: "Full Output" },
 ];
 
@@ -99,7 +106,8 @@ export default function AnalysisDetailPage() {
   const [feedbackComment, setFeedbackComment] = useState("");
   const [feedbackRating, setFeedbackRating] = useState<FeedbackRating>(4);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<AnalysisTab>("mainOutput");
+  const [activeTopTab, setActiveTopTab] = useState<AnalysisTopTab>("executiveSummary");
+  const [activeFullReportTab, setActiveFullReportTab] = useState<FullReportTab>("mainOutput");
   const [runDetailsOpen, setRunDetailsOpen] = useState(false);
   const [isRefreshingAnalysis, setIsRefreshingAnalysis] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
@@ -303,7 +311,8 @@ export default function AnalysisDetailPage() {
         ...(icReviewWorkbook ? { financial_model: icReviewWorkbook } : {}),
       });
       setAnalysis((current) => (current?.id === analysis.id ? { ...current, ic_review_run: run } : current));
-      setActiveTab("icReview");
+      setActiveTopTab("fullReport");
+      setActiveFullReportTab("icReview");
       setIcReviewWorkbook(null);
       setIcReviewWorkbookInputKey((current) => current + 1);
       setIcReviewWorkbookError("");
@@ -347,7 +356,8 @@ export default function AnalysisDetailPage() {
       const detailRun = await createAnalysisDetails(analysis.id);
       setAnalysis((current) => (current?.id === analysis.id ? { ...current, detail_run: detailRun } : current));
       if (isActiveRunStatus(detailRun.status)) {
-        setActiveTab("fullOutput");
+        setActiveTopTab("fullReport");
+        setActiveFullReportTab("fullOutput");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load analysis details");
@@ -459,50 +469,69 @@ export default function AnalysisDetailPage() {
                 <nav className="analysis-tabs" aria-label="Analysis output sections">
                   {analysisTabs.map((tab) => (
                     <button
-                      aria-pressed={activeTab === tab.id}
-                      className={activeTab === tab.id ? "analysis-tab analysis-tab--active" : "analysis-tab"}
+                      aria-pressed={activeTopTab === tab.id}
+                      className={activeTopTab === tab.id ? "analysis-tab analysis-tab--active" : "analysis-tab"}
                       key={tab.id}
                       type="button"
-                      onClick={() => setActiveTab(tab.id)}
+                      onClick={() => setActiveTopTab(tab.id)}
                     >
                       {tab.label}
                     </button>
                   ))}
                 </nav>
 
-                {activeTab === "mainOutput" ? <MainSkillMarkdownPanel analysis={analysis} /> : null}
-                {activeTab === "documentComments" ? (
-                  <DocumentCommentsPanel
-                    documentTitle={analysisDocument?.title || "Source document"}
-                    parsedText={parsedDocumentText}
-                    parsedTextError={parsedDocumentError}
-                    run={analysis.predicted_comment_run}
-                  />
-                ) : null}
-                {activeTab === "icReview" ? (
-                  <IcReviewPanel
-                    analysis={analysis}
-                    providerModels={providerModels}
-                    provider={icReviewProvider}
-                    model={icReviewModel}
-                    outputLanguage={icReviewOutputLanguage}
-                    selectedProviderModel={selectedProviderModel}
-                    workbook={icReviewWorkbook}
-                    workbookInputKey={icReviewWorkbookInputKey}
-                    workbookError={icReviewWorkbookError}
-                    isLaunching={isLaunchingIcReview}
-                    onChangeModel={changeIcReviewModel}
-                    onChangeOutputLanguage={setIcReviewOutputLanguage}
-                    onChangeWorkbook={changeIcReviewWorkbook}
-                    onLaunch={launchIcReview}
-                  />
-                ) : null}
-                {activeTab === "fullOutput" ? (
-                  <FullOutputPanel
-                    analysis={analysis}
-                    isLoadingDetails={isLoadingDetails}
-                    onLoadDetails={loadAnalysisDetails}
-                  />
+                {activeTopTab === "executiveSummary" ? <ResultPanel analysis={analysis} /> : null}
+                {activeTopTab === "fullReport" ? (
+                  <>
+                    <nav className="analysis-tabs" aria-label="Full report sections">
+                      {fullReportTabs.map((tab) => (
+                        <button
+                          aria-pressed={activeFullReportTab === tab.id}
+                          className={activeFullReportTab === tab.id ? "analysis-tab analysis-tab--active" : "analysis-tab"}
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setActiveFullReportTab(tab.id)}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </nav>
+
+                    {activeFullReportTab === "mainOutput" ? <MainSkillMarkdownPanel analysis={analysis} /> : null}
+                    {activeFullReportTab === "documentComments" ? (
+                      <DocumentCommentsPanel
+                        documentTitle={analysisDocument?.title || "Source document"}
+                        parsedText={parsedDocumentText}
+                        parsedTextError={parsedDocumentError}
+                        run={analysis.predicted_comment_run}
+                      />
+                    ) : null}
+                    {activeFullReportTab === "icReview" ? (
+                      <IcReviewPanel
+                        analysis={analysis}
+                        providerModels={providerModels}
+                        provider={icReviewProvider}
+                        model={icReviewModel}
+                        outputLanguage={icReviewOutputLanguage}
+                        selectedProviderModel={selectedProviderModel}
+                        workbook={icReviewWorkbook}
+                        workbookInputKey={icReviewWorkbookInputKey}
+                        workbookError={icReviewWorkbookError}
+                        isLaunching={isLaunchingIcReview}
+                        onChangeModel={changeIcReviewModel}
+                        onChangeOutputLanguage={setIcReviewOutputLanguage}
+                        onChangeWorkbook={changeIcReviewWorkbook}
+                        onLaunch={launchIcReview}
+                      />
+                    ) : null}
+                    {activeFullReportTab === "fullOutput" ? (
+                      <FullOutputPanel
+                        analysis={analysis}
+                        isLoadingDetails={isLoadingDetails}
+                        onLoadDetails={loadAnalysisDetails}
+                      />
+                    ) : null}
+                  </>
                 ) : null}
               </section>
             </div>
@@ -724,6 +753,164 @@ function RunDetailsDialog({ analysis, onClose }: { analysis: AnalysisRecord; onC
       </section>
     </div>
   );
+}
+
+function ResultPanel({ analysis }: { analysis: AnalysisRecord }) {
+  const verdict = buildFinalVerdict(analysis);
+  const agentVerdicts = buildAgentVerdicts(analysis);
+  const shortSummary = analysisShortSummary(analysis);
+  const productMarkdown = resultProductAnalysisMarkdown(analysis);
+  const financialDisplay =
+    analysis.ic_review_run?.status === "completed" && isIcReviewCompactResult(analysis.ic_review_run.structured_output)
+      ? buildIcReviewCompactDisplay(analysis.ic_review_run.structured_output)
+      : null;
+
+  return (
+    <section className="analysis-result-surface" aria-label="Result">
+      <div className="analysis-result-stack">
+        <section className={`analysis-result-verdict analysis-result-verdict--${verdict.tone}`} aria-label="System verdict">
+          <span>System verdict</span>
+          <strong>{verdict.label}</strong>
+          <div className="analysis-result-agent-verdicts" aria-label="Agent verdicts">
+            {agentVerdicts.map((agentVerdict) => (
+              <div className="analysis-result-agent-verdict" key={agentVerdict.label}>
+                <span className="analysis-result-agent-verdict__label">{agentVerdict.label}</span>
+                <span className="analysis-result-agent-verdict__value">
+                  <span
+                    className={`analysis-result-agent-verdict__marker analysis-result-agent-verdict__marker--${agentVerdict.verdict.tone}`}
+                    aria-hidden="true"
+                  />
+                  {agentVerdict.verdict.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="analysis-result-summary" aria-label="Short Summary">
+          <h2>Short Summary</h2>
+          <p>{shortSummary || "No short summary is available for this analysis yet."}</p>
+        </section>
+        <section className="analysis-result-report" aria-label="Summary analysis report">
+          <ResultReportSection title="Продуктовый анализ">
+            {productMarkdown ? (
+              <MarkdownPreview markdown={productMarkdown} className="gc-markdown-preview--narrative" unboxed />
+            ) : (
+              <p className="analysis-muted">No Gate Challenger text output is available for this analysis yet.</p>
+            )}
+          </ResultReportSection>
+          <ResultReportSection title="Финансовый анализ">
+            {financialDisplay ? (
+              <IcReviewTextOutput display={financialDisplay} />
+            ) : (
+              <p className="analysis-muted">No completed IC Review text output is available for this analysis yet.</p>
+            )}
+          </ResultReportSection>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function ResultReportSection({ children, title }: { children: ReactNode; title: string }) {
+  return (
+    <details className="analysis-result-report-section" open>
+      <summary>{title}</summary>
+      <div className="analysis-result-report-section__body">{children}</div>
+    </details>
+  );
+}
+
+function IcReviewTextOutput({ display }: { display: ReturnType<typeof buildIcReviewCompactDisplay> }) {
+  return (
+    <div className="analysis-result-ic-output">
+      <div className="analysis-ic-verdict">
+        <span className={`analysis-verdict analysis-verdict--${icReviewVerdictTone(display.verdict)}`}>{display.verdict}</span>
+        <span>{display.confidence}</span>
+      </div>
+      <section className="analysis-short-summary">
+        <h3>Executive brief</h3>
+        <p>{display.executiveBrief}</p>
+      </section>
+      <div className="analysis-ic-summary-grid">
+        <div className="analysis-metric">
+          <span>Spreadsheet audit status</span>
+          <strong>{display.spreadsheetAudit}</strong>
+        </div>
+        <div className="analysis-metric">
+          <span>Validation summary</span>
+          <strong>{display.validation}</strong>
+        </div>
+      </div>
+      {display.sections.map((section) => (
+        <section className="analysis-ic-section" key={section.title}>
+          <h3>{section.title}</h3>
+          {section.items.length ? (
+            <ul>
+              {section.items.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="analysis-muted">No items reported.</p>
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function resultProductAnalysisMarkdown(analysis: AnalysisRecord): string | null {
+  const sections = mainSkillMarkdownSections(analysis);
+  return productAnalysisMarkdownForSummary(sections.main);
+}
+
+function productAnalysisMarkdownForSummary(markdown: string | null): string | null {
+  return removeProductAnalysisSummaryExcludedSections(truncateGateMarkdownBeforeIcRecommendations(markdown));
+}
+
+function truncateGateMarkdownBeforeIcRecommendations(markdown: string | null): string | null {
+  const value = markdown?.trim();
+  if (!value) {
+    return null;
+  }
+  const stopMatch = /^#{1,6}\s+(?:IC\s+Recommendations|IC\s+Recomendations|IC\s+рекомендации|Рекомендации\s+IC)\b/im.exec(value);
+  if (!stopMatch) {
+    return value;
+  }
+  return value.slice(0, stopMatch.index).trim() || null;
+}
+
+function removeProductAnalysisSummaryExcludedSections(markdown: string | null): string | null {
+  let value = markdown?.trim();
+  if (!value) {
+    return null;
+  }
+
+  const excludedHeading = /^(#{1,6})\s+(?:Рекомендация инвестиционного комитета|Что (?:можно|нужно) улучшить в документе)\s*$/im;
+  let match = excludedHeading.exec(value);
+  while (match) {
+    const headingLevel = match[1].length;
+    const followingText = value.slice(match.index + match[0].length);
+    const nextHeading = findNextMarkdownHeadingAtOrAboveLevel(followingText, headingLevel);
+    const endIndex = nextHeading === null ? value.length : match.index + match[0].length + nextHeading;
+    value = `${value.slice(0, match.index).trimEnd()}\n\n${value.slice(endIndex).trimStart()}`.trim();
+    match = excludedHeading.exec(value);
+  }
+
+  return value || null;
+}
+
+function findNextMarkdownHeadingAtOrAboveLevel(markdown: string, level: number): number | null {
+  const heading = /^#{1,6}\s+.+$/gm;
+  let match = heading.exec(markdown);
+  while (match) {
+    const nextLevel = match[0].match(/^#+/)?.[0].length ?? 6;
+    if (nextLevel <= level) {
+      return match.index;
+    }
+    match = heading.exec(markdown);
+  }
+  return null;
 }
 
 function MainSkillMarkdownPanel({ analysis }: { analysis: AnalysisRecord }) {
@@ -1589,7 +1776,7 @@ function IcReviewRunSummary({
         </div>
       ) : null}
 
-      {run.status === "completed" && compactDisplay ? <IcReviewCompletedResult display={compactDisplay} /> : null}
+      {run.status === "completed" && compactDisplay ? <IcReviewCompletedResult display={compactDisplay} run={run} /> : null}
       {run.status === "completed" && !compactDisplay ? (
         <div className="analysis-alert">IC review completed, but compact result is unavailable.</div>
       ) : null}
@@ -1597,13 +1784,51 @@ function IcReviewRunSummary({
   );
 }
 
-function IcReviewCompletedResult({ display }: { display: ReturnType<typeof buildIcReviewCompactDisplay> }) {
+function IcReviewFullReportDownloads({ run }: { run: AnalysisCheckRunRecord }) {
+  const pdf = findIcReviewArtifact(run, "artifact:legacy_report_pdf");
+  const markdown = findIcReviewArtifact(run, "artifact:legacy_report_markdown");
+
+  if (!pdf && !markdown) {
+    return null;
+  }
+
+  return (
+    <section className="analysis-ic-section analysis-ic-downloads" aria-label="IC review full report downloads">
+      <h3>Скачать полный отчет</h3>
+      <div className="analysis-ic-download-actions">
+        {pdf ? (
+          <a className="analysis-ic-download" href={icReviewArtifactUrl(run.id, "artifact:legacy_report_pdf")}>
+            Скачать PDF
+          </a>
+        ) : null}
+        {markdown ? (
+          <a className="analysis-ic-download" href={icReviewArtifactUrl(run.id, "artifact:legacy_report_markdown")}>
+            Скачать MD
+          </a>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function findIcReviewArtifact(run: AnalysisCheckRunRecord, key: string) {
+  return run.artifacts.find((artifact) => artifact.key === key) ?? null;
+}
+
+function IcReviewCompletedResult({
+  display,
+  run,
+}: {
+  display: ReturnType<typeof buildIcReviewCompactDisplay>;
+  run: AnalysisCheckRunRecord;
+}) {
   return (
     <div className="analysis-ic-result stack">
       <div className="analysis-ic-verdict">
         <span className={`analysis-verdict analysis-verdict--${icReviewVerdictTone(display.verdict)}`}>{display.verdict}</span>
         <span>{display.confidence}</span>
       </div>
+      <IcReviewFullReportDownloads run={run} />
       <section className="analysis-short-summary">
         <h3>Executive brief</h3>
         <p>{display.executiveBrief}</p>
@@ -1749,6 +1974,9 @@ function canRequestAnalysisDetails(analysis: AnalysisRecord): boolean {
   if (analysis.status !== "completed") {
     return false;
   }
+  if (!analysis.run_parameters?.gate_challenger_response_id) {
+    return false;
+  }
   if (!isStagedSummaryAnalysis(analysis)) {
     return false;
   }
@@ -1775,6 +2003,10 @@ function isStagedSummaryAnalysis(analysis: AnalysisRecord): boolean {
   );
 }
 
+function isAnalysisDetailsResponseIdMissing(analysis: AnalysisRecord): boolean {
+  return isStagedSummaryAnalysis(analysis) && !analysis.run_parameters?.gate_challenger_response_id;
+}
+
 function CollapsibleMarkdown({ markdown, title }: { markdown: string; title: string }) {
   return (
     <details className="analysis-markdown-details">
@@ -1796,6 +2028,7 @@ function FullOutputPanel({
   const detailRun = analysis.detail_run;
   const isDetailActive = isActiveRunStatus(analysis.detail_run?.status);
   const canRequestDetails = canRequestAnalysisDetails(analysis);
+  const detailsResponseIdMissing = isAnalysisDetailsResponseIdMissing(analysis);
   const showDetailsButton = canRequestDetails || isDetailActive || isLoadingDetails;
   return (
     <section className="analysis-card stack">
@@ -1820,6 +2053,14 @@ function FullOutputPanel({
           ) : (
             <span>Gate Challenger summary is available. Detailed Layer 1 / Layer 2 will be requested on demand.</span>
           )}
+        </div>
+      ) : null}
+      {!showDetailsButton && detailsResponseIdMissing ? (
+        <div className="analysis-detail-loader">
+          <span>
+            Detailed Layer 1 / Layer 2 cannot be loaded for this run because the Gate Challenger response id was not saved.
+            Re-run the analysis with the Responses API enabled to request lazy details.
+          </span>
         </div>
       ) : null}
       {detailRun?.status === "failed" ? (
@@ -2543,6 +2784,221 @@ const analysisStyles = `
   color: #cbd5e1;
 }
 
+.analysis-result-surface {
+  display: grid;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  align-self: start;
+  box-sizing: border-box;
+  border: 1px solid #d6dee8;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 18px;
+}
+
+.analysis-result-stack {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+}
+
+.analysis-result-verdict {
+  display: grid;
+  min-height: 156px;
+  align-content: center;
+  gap: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  padding: 28px;
+}
+
+.analysis-result-verdict > span {
+  color: #161616;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.analysis-result-verdict strong {
+  color: #161616;
+  font-size: 34px;
+  line-height: 1.08;
+}
+
+.analysis-result-agent-verdicts {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.analysis-result-agent-verdict {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  color: #161616;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.analysis-result-agent-verdict__label {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analysis-result-agent-verdict__value {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.analysis-result-agent-verdict__marker {
+  width: 10px;
+  height: 10px;
+  border: 1px solid rgba(22, 22, 22, 0.18);
+  border-radius: 999px;
+}
+
+.analysis-result-agent-verdict__marker--good {
+  background: #b4cb75;
+}
+
+.analysis-result-agent-verdict__marker--warn {
+  background: #ffce69;
+}
+
+.analysis-result-agent-verdict__marker--bad {
+  background: #ef6d4e;
+}
+
+.analysis-result-verdict--good {
+  border-color: rgba(180, 203, 117, 0.58);
+  background: linear-gradient(135deg, rgba(180, 203, 117, 0.34), rgba(180, 203, 117, 0.18));
+}
+
+.analysis-result-verdict--warn {
+  border-color: rgba(255, 206, 105, 0.6);
+  background: linear-gradient(135deg, rgba(255, 206, 105, 0.34), rgba(255, 206, 105, 0.18));
+}
+
+.analysis-result-verdict--bad {
+  border-color: rgba(239, 109, 78, 0.62);
+  background: linear-gradient(135deg, rgba(239, 109, 78, 0.36), rgba(239, 109, 78, 0.2));
+}
+
+.analysis-result-summary {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  background: #f7f9fb;
+  color: #161616;
+  padding: 22px 24px;
+}
+
+.analysis-result-summary h2 {
+  margin: 0;
+  color: #161616;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.analysis-result-summary p {
+  margin: 0;
+  color: #161616;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.analysis-result-report {
+  display: grid;
+  gap: 14px;
+}
+
+.analysis-result-report-section {
+  overflow: hidden;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #161616;
+}
+
+.analysis-result-report-section summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  cursor: pointer;
+  padding: 16px 18px;
+  color: #161616;
+  font-size: 18px;
+  font-weight: 820;
+  line-height: 1.25;
+}
+
+.analysis-result-report-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.analysis-result-report-section summary::before {
+  content: "›";
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #d6dee8;
+  border-radius: 6px;
+  color: #5b6472;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.analysis-result-report-section[open] summary::before {
+  content: "⌄";
+  border-color: #0e9f6e;
+  background: #0e9f6e;
+  color: #ffffff;
+}
+
+.analysis-result-report-section__body {
+  display: grid;
+  gap: 16px;
+  border-top: 1px solid #e5eaf0;
+  padding: 18px;
+}
+
+.analysis-result-report-section__body > .gc-markdown-preview {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+
+.analysis-result-ic-output {
+  display: grid;
+  gap: 14px;
+}
+
+.analysis-result-ic-output .analysis-short-summary {
+  background: #ffffff;
+}
+
+.analysis-result-ic-output .analysis-short-summary h3,
+.analysis-result-ic-output .analysis-short-summary p {
+  color: #161616;
+}
+
 .analysis-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
@@ -3048,6 +3504,32 @@ const analysisStyles = `
   font-size: 13px;
   line-height: 1.6;
   overflow-wrap: anywhere;
+}
+
+.analysis-ic-download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.analysis-ic-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: 1px solid rgba(94, 234, 212, 0.32);
+  border-radius: 8px;
+  background: rgba(20, 184, 166, 0.16);
+  color: #e2e8f0;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.analysis-ic-download:hover {
+  border-color: rgba(94, 234, 212, 0.52);
+  background: rgba(20, 184, 166, 0.24);
 }
 
 .analysis-empty {
@@ -3878,6 +4360,17 @@ const paperAnalysisOverrides = `
 
 .analysis-ic-section {
   border-top-color: #e5eaf0;
+}
+
+.analysis-ic-download {
+  border-color: #d6dee8;
+  background: #ffffff;
+  color: #075e45;
+}
+
+.analysis-ic-download:hover {
+  border-color: #9bdac7;
+  background: #eaf8f2;
 }
 
 .analysis-card {

@@ -21,6 +21,11 @@ class DocumentType(StrEnum):
     UNKNOWN = "unknown"
 
 
+class DocumentRole(StrEnum):
+    PRIMARY = "primary"
+    FIN_SUMMARY = "fin_summary"
+
+
 GATE_CHALLENGER_DOCUMENT_TYPES = (
     DocumentType.GATE_2,
     DocumentType.STREAM_REVIEW_1,
@@ -46,6 +51,7 @@ class SkillType(StrEnum):
     MAIN_ANALYSIS = "main_analysis"
     PREDICTED_COMMENTS = "predicted_comments"
     ANALYSIS_CHECK = "analysis_check"
+    RESULT_SUMMARY = "result_summary"
     BENCHMARK_JUDGE = "benchmark_judge"
     PARSER_HELPER = "parser_helper"
     DOCUMENT_CLASSIFIER = "document_classifier"

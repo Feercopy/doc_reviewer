@@ -50,18 +50,15 @@ def render_role_prompt(
         "## Context Pack",
         _json_block(pack.for_role(role)),
     ]
-    if pack.workbook_context is not None:
-        sections.extend(
-            [
-                "## Workbook Context",
-                _json_block(pack.workbook_context),
-            ]
-        )
     sections.extend(
         [
             "## Output Contract",
             (
-                "Return only JSON matching `ic-agentic-role-result.schema.json`. "
+                "Return only JSON matching `ic-agentic-role-result.schema.json`. Keep `summary`, `findings`, "
+                "`data_gaps`, and `numbers_used` compact for the web UI, but fill `full_report_materials` "
+                "with report-grade detail for the original IC full report. Include section drafts, tables, "
+                "risks, scenarios, recommendations, and primary/verify notes that can be copied into a "
+                "10-section investment committee report. Do not collapse evidence into generic conclusions. "
                 "Do not include Markdown fences, commentary, or prose outside the JSON object."
             ),
             _json_block(schema),
@@ -95,14 +92,16 @@ def render_synthesis_prompt(
         f"{_json_block(ordered_role_outputs)}\n\n"
         "## Synthesis Requirements\n"
         "- Produce a compact UI result for the product interface.\n"
-        "- Preserve a legacy-compatible JSON interpretation for deterministic post-processing artifacts.\n"
-        "- Do not write direct report prose; the worker will save a text debug artifact from structured data.\n"
+        "- The worker will assemble the full PDF/Markdown report from role `full_report_materials`; do not "
+        "return the full report here.\n"
+        "- Treat the original `/invest-analysis` instructions above as the controlling standard for the compact "
+        "decision logic: arbitration rules, language rules, financial checks, risk map, Data Gaps, "
+        "recommendations, and verdict rationale must be reflected in concise fields.\n"
         "- Russian is the default output language unless the context output_language explicitly says otherwise.\n"
-        "- Return only one JSON object with exactly two top-level keys: `compact_result` and `legacy_report_json`.\n"
-        "- `compact_result` must match `ic-agentic-review-result.schema.json` exactly.\n"
-        "- `legacy_report_json` must use the original legacy report shape with `meta`, `sections`, `scenarios`, "
-        "`formula_issues`, `kpis`, `risks_structured`, and `appendices` when available.\n"
-        "- Do not include Markdown fences, commentary, or prose outside that JSON object.\n\n"
+        "- Return only one JSON object matching `ic-agentic-review-result.schema.json` exactly.\n"
+        "- Keep the result concise for the IC Review tab; do not embed full report sections, appendices, or long tables.\n"
+        "- Use `full_report_materials` only to cross-check consistency and identify the strongest compact findings.\n"
+        "- Do not include Markdown fences, commentary, or prose outside the JSON object.\n\n"
         "## Compact Result Schema\n"
         f"{_json_block(schema)}\n"
     )

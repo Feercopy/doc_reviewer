@@ -6,6 +6,10 @@ import re
 from jsonschema import ValidationError
 
 
+class IcReviewRunCancelled(RuntimeError):
+    pass
+
+
 SAFE_ERROR_CODES = {
     "formula_auditor_failed",
     "ic_review_artifact_path_escapes_run_dir",

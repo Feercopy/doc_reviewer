@@ -21,9 +21,10 @@ import {
 type MarkdownPreviewProps = {
   markdown: string;
   className?: string;
+  unboxed?: boolean;
 };
 
-export function MarkdownPreview({ markdown, className = "" }: MarkdownPreviewProps) {
+export function MarkdownPreview({ markdown, className = "", unboxed = false }: MarkdownPreviewProps) {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   const blocks: ReactNode[] = [];
   let index = 0;
@@ -143,6 +144,15 @@ export function MarkdownPreview({ markdown, className = "" }: MarkdownPreviewPro
     if (shouldInsertParagraphSpacerAfter(paragraph.lines)) {
       blocks.push(<p aria-hidden="true" className="gc-md-paragraph-spacer" key={`paragraph-spacer-${index}`} />);
     }
+  }
+
+  if (unboxed) {
+    return (
+      <>
+        <style>{markdownPreviewStyles}</style>
+        {blocks}
+      </>
+    );
   }
 
   return (

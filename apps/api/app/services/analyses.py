@@ -2,11 +2,12 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.authz.policies import can_delete_analysis, can_read_analysis
 from app.core.config import default_skill_source_snapshot_mode, get_settings
 from app.models.base import utc_now
-from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisDetailRun, PredictedCommentRun
+from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisCheckStep, AnalysisDetailRun, PredictedCommentRun
 from app.models.document import Document
 from app.models.skill import Skill
 from app.models.skill_source import SkillSource
@@ -37,6 +38,11 @@ class AnalysisNotFoundError(ValueError):
 
 class AnalysisPreconditionError(ValueError):
     pass
+
+
+ACTIVE_RUN_STATUSES = {RunStatus.QUEUED.value, RunStatus.RUNNING.value}
+ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY = "analysis_chain_cancel_requested_at"
+ANALYSIS_CHAIN_CANCELLED_BY_USER_ID_KEY = "analysis_chain_cancelled_by_user_id"
 
 
 def create_analysis_for_document(
@@ -201,6 +207,71 @@ def delete_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) ->
     db.commit()
 
 
+def cancel_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) -> Analysis:
+    analysis = get_analysis_for_actor(db=db, actor=actor, analysis_id=analysis_id)
+    cancelled_at = utc_now()
+    cancelled_any = False
+    predicted_runs = _analysis_predicted_comment_runs(db=db, analysis_id=analysis.id)
+    detail_runs = _analysis_detail_runs(db=db, analysis_id=analysis.id)
+    check_runs = _analysis_check_runs(db=db, analysis_id=analysis.id)
+
+    if not _full_analysis_chain_completed(analysis=analysis, predicted_runs=predicted_runs, check_runs=check_runs):
+        run_parameters = dict(analysis.run_parameters or {})
+        if ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY not in run_parameters:
+            run_parameters[ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY] = cancelled_at.isoformat()
+            run_parameters[ANALYSIS_CHAIN_CANCELLED_BY_USER_ID_KEY] = str(actor.id)
+            analysis.run_parameters = run_parameters
+            flag_modified(analysis, "run_parameters")
+            cancelled_any = True
+
+    if analysis.status in ACTIVE_RUN_STATUSES:
+        analysis.status = RunStatus.CANCELLED.value
+        analysis.error_message = "cancelled_by_user"
+        analysis.completed_at = cancelled_at
+        cancelled_any = True
+
+    for predicted_run in predicted_runs:
+        if predicted_run.status in ACTIVE_RUN_STATUSES:
+            predicted_run.status = RunStatus.CANCELLED.value
+            predicted_run.error_message = "cancelled_by_user"
+            predicted_run.completed_at = cancelled_at
+            cancelled_any = True
+
+    for detail_run in detail_runs:
+        if detail_run.status in ACTIVE_RUN_STATUSES:
+            detail_run.status = RunStatus.CANCELLED.value
+            detail_run.error_message = "cancelled_by_user"
+            detail_run.completed_at = cancelled_at
+            cancelled_any = True
+
+    for check_run in check_runs:
+        if check_run.status in ACTIVE_RUN_STATUSES:
+            check_run.status = RunStatus.CANCELLED.value
+            check_run.current_stage = "cancelled"
+            check_run.error_message = "cancelled_by_user"
+            check_run.completed_at = cancelled_at
+            for step in _analysis_check_steps(db=db, check_run_id=check_run.id):
+                if step.status in ACTIVE_RUN_STATUSES:
+                    step.status = RunStatus.CANCELLED.value
+                    step.error_message = "cancelled_by_user"
+                    step.completed_at = cancelled_at
+            cancelled_any = True
+
+    if cancelled_any:
+        record_audit(
+            db=db,
+            actor_id=actor.id,
+            action="analysis.cancelled",
+            entity_type="analysis",
+            entity_id=analysis.id,
+            metadata={"document_id": str(analysis.document_id)},
+        )
+        db.commit()
+        db.refresh(analysis)
+
+    return analysis
+
+
 def read_analysis(*, db: Session, actor: User, analysis: Analysis) -> AnalysisRead:
     skill = db.get(Skill, analysis.skill_id)
     predicted_run = _latest_predicted_comment_run(db=db, analysis_id=analysis.id)
@@ -338,6 +409,44 @@ def _latest_predicted_comment_run(*, db: Session, analysis_id: UUID) -> Predicte
         .order_by(PredictedCommentRun.created_at.desc())
     )
     return db.execute(statement).scalars().first()
+
+
+def _analysis_predicted_comment_runs(*, db: Session, analysis_id: UUID) -> list[PredictedCommentRun]:
+    statement = select(PredictedCommentRun).where(PredictedCommentRun.analysis_id == analysis_id)
+    return list(db.execute(statement).scalars().all())
+
+
+def _analysis_detail_runs(*, db: Session, analysis_id: UUID) -> list[AnalysisDetailRun]:
+    statement = select(AnalysisDetailRun).where(AnalysisDetailRun.analysis_id == analysis_id)
+    return list(db.execute(statement).scalars().all())
+
+
+def _analysis_check_runs(*, db: Session, analysis_id: UUID) -> list[AnalysisCheckRun]:
+    statement = select(AnalysisCheckRun).where(AnalysisCheckRun.analysis_id == analysis_id)
+    return list(db.execute(statement).scalars().all())
+
+
+def _analysis_check_steps(*, db: Session, check_run_id: UUID) -> list[AnalysisCheckStep]:
+    statement = select(AnalysisCheckStep).where(AnalysisCheckStep.check_run_id == check_run_id)
+    return list(db.execute(statement).scalars().all())
+
+
+def _full_analysis_chain_completed(
+    *,
+    analysis: Analysis,
+    predicted_runs: list[PredictedCommentRun],
+    check_runs: list[AnalysisCheckRun],
+) -> bool:
+    latest_predicted_run = max(predicted_runs, key=lambda run: run.created_at, default=None)
+    ic_review_runs = [run for run in check_runs if run.check_type == "ic_agentic_review"]
+    latest_ic_review_run = max(ic_review_runs, key=lambda run: (run.created_at, str(run.id)), default=None)
+    return (
+        analysis.status == RunStatus.COMPLETED.value
+        and latest_predicted_run is not None
+        and latest_predicted_run.status == RunStatus.COMPLETED.value
+        and latest_ic_review_run is not None
+        and latest_ic_review_run.status == RunStatus.COMPLETED.value
+    )
 
 
 def _latest_ic_review_run_read(*, db: Session, actor: User, analysis_id: UUID):

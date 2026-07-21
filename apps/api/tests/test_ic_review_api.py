@@ -589,6 +589,23 @@ def test_non_admin_cannot_download_admin_only_ic_review_artifact_by_key(
     assert response.status_code == 404
 
 
+def test_non_admin_can_download_user_visible_ic_review_artifact_by_key(
+    client,
+    db_session,
+    monkeypatch,
+    tmp_path,
+):
+    _configure_ic_review_dependencies(db_session, monkeypatch, tmp_path)
+    analysis = _create_analysis_for_api(db_session, status=RunStatus.COMPLETED)
+    run = _create_ic_review_run_with_artifact(db_session, analysis, tmp_path, visibility="user")
+    login(client, "author", "secret")
+
+    response = client.get(f"/ic-review-runs/{run.id}/artifacts/raw")
+
+    assert response.status_code == 200
+    assert response.content == b"raw artifact"
+
+
 def test_admin_can_download_db_owned_ic_review_artifact(client, db_session, monkeypatch, tmp_path):
     _configure_ic_review_dependencies(db_session, monkeypatch, tmp_path)
     analysis = _create_analysis_for_api(db_session, status=RunStatus.COMPLETED)

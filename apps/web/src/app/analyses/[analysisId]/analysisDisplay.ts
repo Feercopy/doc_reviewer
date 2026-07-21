@@ -117,8 +117,55 @@ export type LayeredGateLayer2Check = {
   evidence: string | null;
 };
 
+export type ResultRationale = {
+  markdown: string | null;
+  items: ResultRationaleItem[];
+  criticalRisks: string[];
+  dataGaps: string[];
+};
+
+export type ResultRationaleSource = "gate_challenger" | "ic_review";
+
+export type ResultRationaleItem = {
+  title: string;
+  detail: string;
+  sources: ResultRationaleSource[];
+};
+
 export function analysisShortSummary(analysis: SummarySource): string | null {
-  return analysis.summary || summaryFromOutput(analysis.structured_output);
+  return resultShortSummaryFromOutput(analysis.structured_output) || analysis.summary || summaryFromOutput(analysis.structured_output);
+}
+
+export function analysisResultRationale(analysis: Pick<AnalysisRecord, "structured_output">): ResultRationale | null {
+  const result = asRecord(analysis.structured_output?.result);
+  if (!result) {
+    return null;
+  }
+
+  const markdown = asString(result.rationale_markdown);
+  const items = resultRationaleItems(result.rationale_items);
+  const criticalRisks = asStringArray(result.critical_risks);
+  const dataGaps = asStringArray(result.data_gaps);
+  if (!markdown && items.length === 0 && criticalRisks.length === 0 && dataGaps.length === 0) {
+    return null;
+  }
+  return { markdown, items, criticalRisks, dataGaps };
+}
+
+function resultRationaleItems(value: unknown): ResultRationaleItem[] {
+  return asRecordArray(value).flatMap((record) => {
+    const title = asString(record.title);
+    const detail = asString(record.detail);
+    const sources = asStringArray(record.sources).filter(isResultRationaleSource);
+    if (!title || !detail || sources.length === 0) {
+      return [];
+    }
+    return [{ title, detail, sources }];
+  });
+}
+
+function isResultRationaleSource(value: string): value is ResultRationaleSource {
+  return value === "gate_challenger" || value === "ic_review";
 }
 
 export function analysisGateDetailsOutput(
@@ -944,6 +991,11 @@ function summaryFromOutput(output: Record<string, unknown> | null | undefined): 
   );
 }
 
+function resultShortSummaryFromOutput(output: Record<string, unknown> | null | undefined): string | null {
+  const result = asRecord(output?.result);
+  return asString(result?.short_summary);
+}
+
 function findHeadingLine(lines: string[], predicate: (heading: string) => boolean): number {
   return lines.findIndex((line) => predicate(normalizeMarkdownHeading(line)));
 }
@@ -1182,6 +1234,10 @@ function asRecordArray(value: unknown): Record<string, unknown>[] {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(asString).filter((item): item is string => Boolean(item)) : [];
 }
 
 function normalizeCheckStatus(value: unknown): string | null {

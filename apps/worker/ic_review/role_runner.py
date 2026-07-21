@@ -18,16 +18,17 @@ from ic_review.context import ICReviewContext
 from ic_review.context_pack import ICReviewContextPack
 from ic_review.renderer import ROLE_SCHEMA_PATH, SnapshotTextReader, render_role_prompt
 from ic_review.schema_normalization import normalize_schema_bounded_strings
-from providers.base import ProviderRunRequest
+from providers.base import AnalysisProviderResult, ProviderRunRequest
 from providers.registry import get_provider_adapter
 from results.schema_validation import parse_json_output
 
-from .errors import safe_ic_review_error_message
+from .errors import IcReviewRunCancelled, safe_ic_review_error_message
 
 
 IC_REVIEW_PROVIDER_TIMEOUT_SECONDS = 600
 IC_REVIEW_PROVIDER_CONNECT_TIMEOUT_SECONDS = 30
 IC_REVIEW_PROVIDER_MAX_RETRIES = 3
+IC_REVIEW_ROLE_MAX_OUTPUT_TOKENS = 32000
 
 
 def run_role_step(
@@ -84,7 +85,7 @@ def run_role_step(
         step.prompt_fingerprint = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         session.commit()
 
-        request = ProviderRunRequest(
+        result, json_retry = _run_role_provider_with_json_retry(
             provider=provider,
             model=check_run.model,
             api_key=api_key,
@@ -92,8 +93,8 @@ def run_role_step(
             prompt=prompt,
             response_schema=schema,
             run_parameters=effective_run_parameters,
+            role=role,
         )
-        result = get_provider_adapter(provider, effective_run_parameters).run(request)
         provider_raw_output = result.raw_output
         provider_structured_text = result.structured_text
         step.raw_output = result.raw_output or result.structured_text
@@ -101,7 +102,11 @@ def run_role_step(
         step.output_tokens = result.output_tokens
         step.latency_ms = result.latency_ms
         step.estimated_cost = result.estimated_cost
+        if json_retry is not None:
+            step.artifacts = [*list(step.artifacts or []), json_retry]
         session.commit()
+        if _check_run_cancelled(session=session, check_run=check_run, step=step):
+            raise IcReviewRunCancelled("ic_review_cancelled")
 
         payload = parse_json_output(result.structured_text)
         structured = normalize_schema_bounded_strings(payload, schema, schema)
@@ -111,6 +116,8 @@ def run_role_step(
         step.completed_at = utc_now()
         session.commit()
         return structured
+    except IcReviewRunCancelled:
+        raise
     except Exception as exc:
         session.rollback()
         safe_error = safe_ic_review_error_message(exc)
@@ -165,8 +172,97 @@ def _role_run_parameters(
     ):
         parameters["mock_provider_result"] = role_mock_results[role]
     apply_ic_review_provider_defaults(parameters)
+    parameters.setdefault("max_output_tokens", IC_REVIEW_ROLE_MAX_OUTPUT_TOKENS)
     parameters["ic_review_role"] = role
     return parameters
+
+
+def _run_role_provider_with_json_retry(
+    *,
+    provider: Provider,
+    model: str,
+    api_key: str | None,
+    base_url: str | None,
+    prompt: str,
+    response_schema: dict,
+    run_parameters: dict[str, Any],
+    role: str,
+) -> tuple[AnalysisProviderResult, dict[str, Any] | None]:
+    result = _call_role_provider(
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        prompt=prompt,
+        response_schema=response_schema,
+        run_parameters=run_parameters,
+    )
+    try:
+        parse_json_output(result.structured_text)
+    except json.JSONDecodeError as exc:
+        retry_parameters = _role_json_retry_run_parameters(run_parameters=run_parameters, role=role)
+        retry_result = _call_role_provider(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            prompt=_role_json_retry_prompt(prompt=prompt, error=exc),
+            response_schema=response_schema,
+            run_parameters=retry_parameters,
+        )
+        return retry_result, {
+            "key": "role_json_retry",
+            "kind": "metadata",
+            "attempts": 2,
+            "reason": exc.msg,
+            "retry_step": retry_parameters["ic_review_step"],
+        }
+    return result, None
+
+
+def _call_role_provider(
+    *,
+    provider: Provider,
+    model: str,
+    api_key: str | None,
+    base_url: str | None,
+    prompt: str,
+    response_schema: dict,
+    run_parameters: dict[str, Any],
+) -> AnalysisProviderResult:
+    return get_provider_adapter(provider, run_parameters).run(
+        ProviderRunRequest(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            prompt=prompt,
+            response_schema=response_schema,
+            run_parameters=run_parameters,
+        )
+    )
+
+
+def _role_json_retry_run_parameters(*, run_parameters: dict[str, Any], role: str) -> dict[str, Any]:
+    parameters = dict(run_parameters)
+    retry_mock_results = parameters.get("role_json_retry_mock_provider_results")
+    if isinstance(retry_mock_results, dict) and role in retry_mock_results:
+        parameters["mock_provider_result"] = retry_mock_results[role]
+    parameters["ic_review_step"] = f"{role}:json_retry"
+    parameters["max_output_tokens"] = max(int(parameters.get("max_output_tokens") or 0), IC_REVIEW_ROLE_MAX_OUTPUT_TOKENS)
+    return parameters
+
+
+def _role_json_retry_prompt(*, prompt: str, error: json.JSONDecodeError) -> str:
+    return (
+        prompt.rstrip()
+        + "\n\n## JSON Retry Instruction\n"
+        + f"The previous role response was not valid JSON: {error.msg}.\n"
+        + "Regenerate the required role result as exactly one valid JSON object matching "
+        + "`ic-agentic-role-result.schema.json`. Prioritize a complete, closed JSON object over breadth: "
+        + "keep arrays within the schema limits, keep full_report_materials detailed but bounded, and do not "
+        + "include Markdown fences, commentary, or prose outside the JSON object."
+    )
 
 
 def apply_ic_review_provider_defaults(parameters: dict[str, Any]) -> dict[str, Any]:
@@ -174,6 +270,18 @@ def apply_ic_review_provider_defaults(parameters: dict[str, Any]) -> dict[str, A
     parameters.setdefault("connect_timeout_seconds", IC_REVIEW_PROVIDER_CONNECT_TIMEOUT_SECONDS)
     parameters.setdefault("max_retries", IC_REVIEW_PROVIDER_MAX_RETRIES)
     return parameters
+
+
+def _check_run_cancelled(*, session: Session, check_run: AnalysisCheckRun, step: AnalysisCheckStep) -> bool:
+    session.refresh(check_run)
+    if check_run.status != RunStatus.CANCELLED.value:
+        return False
+    session.refresh(step)
+    step.status = RunStatus.CANCELLED.value
+    step.error_message = "cancelled_by_user"
+    step.completed_at = utc_now()
+    session.commit()
+    return True
 
 
 def _load_schema(schema_path: str) -> dict[str, Any]:

@@ -8,6 +8,7 @@ from jsonschema import validate
 
 FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 DEVILS_ADVOCATE_SCHEMA = "devils-advocate-result.schema.json"
+IC_AGENTIC_ROLE_SCHEMA = "ic-agentic-role-result.schema.json"
 SECTION_HEADING_RE = re.compile(r"^\s{0,3}(#{1,2})\s+(.+?)\s*$")
 SUBSECTION_HEADING_RE = re.compile(r"^\s{0,3}#{3,6}\s+(.+?)\s*$")
 IC_DECISION_RE = re.compile(r"^\s*={3,}\s*(IC Decision)\s*={3,}\s*$", re.IGNORECASE)
@@ -17,7 +18,7 @@ ANCHOR_COMMENT_RE = re.compile(r'^\s*[*-]\s+(?:\*|_)?["“]?(.+?)["”]?(?:\*|_)
 
 
 def parse_json_output(structured_text: str) -> Any:
-    return _loads_json_output(_extract_json_text(structured_text))
+    return _parse_json_output(structured_text, depth=0)
 
 
 def parse_and_validate_json_output(*, structured_text: str, schema_path: str) -> dict:
@@ -35,6 +36,93 @@ def _loads_json_output(json_text: str) -> Any:
         if "Invalid control character" not in exc.msg:
             raise
         return json.loads(json_text, strict=False)
+
+
+def _parse_json_output(structured_text: str, *, depth: int) -> Any:
+    payload = _loads_json_output(_extract_json_text(structured_text))
+    return _unwrap_provider_envelope(payload, depth=depth)
+
+
+def _unwrap_provider_envelope(payload: Any, *, depth: int) -> Any:
+    if depth >= 3 or not isinstance(payload, dict):
+        return payload
+
+    parsed = _chat_completion_parsed(payload)
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, str) and parsed.strip():
+        return _parse_json_output(parsed, depth=depth + 1)
+
+    content = _chat_completion_content(payload)
+    if content:
+        return _parse_json_output(content, depth=depth + 1)
+
+    output_text = _responses_output_text(payload)
+    if output_text:
+        return _parse_json_output(output_text, depth=depth + 1)
+
+    return payload
+
+
+def _chat_completion_parsed(payload: dict) -> Any:
+    message = _first_chat_completion_message(payload)
+    if not isinstance(message, dict):
+        return None
+    return message.get("parsed")
+
+
+def _chat_completion_content(payload: dict) -> str:
+    message = _first_chat_completion_message(payload)
+    if not isinstance(message, dict):
+        return ""
+    return _content_text(message.get("content"))
+
+
+def _first_chat_completion_message(payload: dict) -> dict | None:
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        return None
+    message = first_choice.get("message")
+    return message if isinstance(message, dict) else None
+
+
+def _responses_output_text(payload: dict) -> str:
+    output_text = payload.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()
+
+    output = payload.get("output")
+    if not isinstance(output, list):
+        return ""
+    parts: list[str] = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
+        if isinstance(content, list):
+            parts.extend(_content_text(part) for part in content)
+        else:
+            parts.append(_content_text(content))
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, dict):
+        text = content.get("text")
+        if isinstance(text, str):
+            return text.strip()
+        nested_content = content.get("content")
+        if isinstance(nested_content, str):
+            return nested_content.strip()
+        return ""
+    if isinstance(content, list):
+        return "\n".join(part for part in (_content_text(item) for item in content) if part).strip()
+    return ""
 
 
 def _extract_json_text(structured_text: str) -> str:
@@ -55,7 +143,10 @@ def _resolve_schema_path(schema_path: str) -> Path:
 def _normalize_payload_for_schema(*, payload: Any, schema: dict, schema_path: str) -> Any:
     if not isinstance(payload, dict):
         return payload
-    if Path(schema_path).name != DEVILS_ADVOCATE_SCHEMA:
+    schema_name = Path(schema_path).name
+    if schema_name == IC_AGENTIC_ROLE_SCHEMA:
+        payload = _normalize_ic_agentic_role_payload(payload)
+    if schema_name != DEVILS_ADVOCATE_SCHEMA:
         return payload
     markdown = payload.get("native_markdown")
     if not isinstance(markdown, str) or not markdown.strip():
@@ -64,6 +155,20 @@ def _normalize_payload_for_schema(*, payload: Any, schema: dict, schema_path: st
     if not missing_required:
         return payload
     return _normalize_devils_advocate_markdown_payload(payload=payload, markdown=markdown, schema=schema)
+
+
+def _normalize_ic_agentic_role_payload(payload: dict) -> dict:
+    if "primary_verify_notes" not in payload:
+        return payload
+    normalized = dict(payload)
+    primary_verify_notes = normalized.pop("primary_verify_notes")
+    full_report_materials = normalized.get("full_report_materials")
+    if isinstance(full_report_materials, dict) and "primary_verify_notes" not in full_report_materials:
+        normalized["full_report_materials"] = {
+            **full_report_materials,
+            "primary_verify_notes": primary_verify_notes,
+        }
+    return normalized
 
 
 def _normalize_devils_advocate_markdown_payload(*, payload: dict, markdown: str, schema: dict) -> dict:

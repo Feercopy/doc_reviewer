@@ -11,7 +11,7 @@ from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.routers import documents as documents_router
 from app.models.user import User
-from app.schemas.enums import DocumentParseStatus, DocumentType, EntityStatus, Role, UserStatus
+from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus, Role, UserStatus
 from app.security.passwords import hash_password
 
 
@@ -115,20 +115,63 @@ def test_upload_enqueues_parse_job(api_client, db_session, enqueued_parse_jobs):
     assert enqueued_parse_jobs == [response.json()["id"]]
 
 
-def test_rejects_unsupported_file_with_415(api_client, db_session, storage_root):
+def test_upload_accepts_arbitrary_file_format_for_later_processing(api_client, db_session, storage_root, enqueued_parse_jobs):
     create_user(db_session, "author", "secret")
     login(api_client, "author", "secret")
 
     response = upload_document(
         api_client,
         "spreadsheet.xlsx",
-        b"not supported",
+        b"not directly parseable yet",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
-    assert response.status_code == 415
-    assert db_session.query(Document).count() == 0
-    assert list(storage_root.rglob("*")) == []
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["original_filename"] == "spreadsheet.xlsx"
+    assert payload["mime_type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert payload["document_role"] == "primary"
+    assert enqueued_parse_jobs == [payload["id"]]
+    document = db_session.query(Document).one()
+    assert_under_storage_root(document.storage_path, storage_root)
+
+
+def test_upload_can_attach_fin_summary_document_to_primary_document(api_client, db_session, enqueued_parse_jobs):
+    create_user(db_session, "author", "secret")
+    login(api_client, "author", "secret")
+
+    response = api_client.post(
+        "/documents",
+        data={"title": "Gate 2 Defense"},
+        files={
+            "file": ("gate-2.docx", b"main defense", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            "fin_summary_file": (
+                "fin-summary.xlsx",
+                b"financial summary",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["title"] == "Gate 2 Defense"
+    assert payload["document_role"] == "primary"
+    assert payload["linked_fin_summary_document_id"] is not None
+    assert payload["linked_fin_summary_document"]["original_filename"] == "fin-summary.xlsx"
+
+    primary = db_session.get(Document, UUID(payload["id"]))
+    fin_summary = db_session.get(Document, UUID(payload["linked_fin_summary_document_id"]))
+    assert primary.document_role == DocumentRole.PRIMARY.value
+    assert fin_summary.document_role == DocumentRole.FIN_SUMMARY.value
+    assert primary.linked_fin_summary_document_id == fin_summary.id
+    assert enqueued_parse_jobs == [str(primary.id), str(fin_summary.id)]
+
+    documents_response = api_client.get("/documents")
+    assert documents_response.status_code == 200
+    documents = documents_response.json()["documents"]
+    assert [document["original_filename"] for document in documents] == ["gate-2.docx"]
+    assert documents[0]["linked_fin_summary_document"]["original_filename"] == "fin-summary.xlsx"
 
 
 def test_path_traversal_filename_is_sanitized_for_storage(api_client, db_session, storage_root):
