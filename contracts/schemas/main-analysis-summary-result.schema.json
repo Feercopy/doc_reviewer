@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gate-challenger.local/schemas/main-analysis-summary-result.schema.json",
+  "title": "MainAnalysisSummaryResult",
+  "type": "object",
+  "required": [
+    "verdict",
+    "summary",
+    "assessment_markdown",
+    "layer_1_index",
+    "layer_2_index",
+    "details_status",
+    "details_run_id",
+    "revision_required",
+    "revision_reason"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["approve", "approve_with_conditions", "need_evidence", "reject", "unknown"]
+    },
+    "summary": { "type": "string", "minLength": 1 },
+    "assessment_markdown": { "type": "string", "minLength": 1 },
+    "layer_1_index": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/layer_1_index_item" }
+    },
+    "layer_2_index": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/layer_2_index_item" }
+    },
+    "details_status": {
+      "type": "string",
+      "enum": ["not_requested", "queued", "running", "completed", "failed"]
+    },
+    "details_run_id": {
+      "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }]
+    },
+    "revision_required": { "type": "boolean" },
+    "revision_reason": {
+      "anyOf": [{ "type": "string" }, { "type": "null" }]
+    }
+  },
+  "$defs": {
+    "layer_1_index_item": {
+      "type": "object",
+      "required": ["id", "severity", "issue", "evidence_anchor"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "issue": { "type": "string", "minLength": 1 },
+        "evidence_anchor": { "type": "string", "minLength": 1 }
+      }
+    },
+    "layer_2_index_item": {
+      "type": "object",
+      "required": [
+        "id",
+        "parent_layer_1_id",
+        "status",
+        "severity",
+        "question",
+        "answer",
+        "short_evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "parent_layer_1_id": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "enum": ["pass", "partial", "fail", "not_applicable"] },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "question": { "type": "string", "minLength": 1 },
+        "answer": { "type": "string", "enum": ["YES", "PARTIAL", "NO"] },
+        "short_evidence": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

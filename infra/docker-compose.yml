@@ -1,0 +1,129 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-mirror.gcr.io/library/postgres:16-alpine}
+    environment:
+      POSTGRES_DB: gate
+      POSTGRES_USER: gate
+      POSTGRES_PASSWORD: gate
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gate -d gate"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: ${REDIS_IMAGE:-mirror.gcr.io/library/redis:7-alpine}
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-mirror.gcr.io/library/python:3.12-slim}
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+        ALL_PROXY: ${BUILD_ALL_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+    environment:
+      APP_ENV: development
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-replace-with-32-byte-random-value}
+      DATABASE_URL: postgresql+psycopg://gate:gate@postgres:5432/gate
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /var/lib/gate-challenger/storage
+      PUBLIC_API_BASE_URL: http://127.0.0.1:8000
+      HERMES_ENABLED: "false"
+      HERMES_MODE: http
+      HERMES_HTTP_URL: http://127.0.0.1:8787
+      GATE_CHALLENGER_SOURCE_PATH: /external/gate-challenger
+      DEVILS_ADVOCATE_SOURCE_PATH: /external/devils-advocate
+      IC_AGENTIC_REVIEW_SOURCE_PATH: /external/ic-agentic-review
+      OUTBOUND_PROXY_URL: ${OUTBOUND_PROXY_URL:-}
+      ALL_PROXY: ${OUTBOUND_PROXY_URL:-}
+      HTTP_PROXY: ${OUTBOUND_PROXY_URL:-}
+      HTTPS_PROXY: ${OUTBOUND_PROXY_URL:-}
+      all_proxy: ${OUTBOUND_PROXY_URL:-}
+      http_proxy: ${OUTBOUND_PROXY_URL:-}
+      https_proxy: ${OUTBOUND_PROXY_URL:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - storage_data:/var/lib/gate-challenger/storage
+      - "${GATE_CHALLENGER_HOST_PATH:-/Users/iseremenko/Projects/Gate2-challenger}:/external/gate-challenger:ro"
+      - "${DEVILS_ADVOCATE_HOST_PATH:-/Users/iseremenko/Documents/Common GPTs/devils-advocate}:/external/devils-advocate:ro"
+      - "${IC_AGENTIC_REVIEW_HOST_PATH:-/Users/iseremenko/Documents/IC-Agentic-Review}:/external/ic-agentic-review:ro"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: apps/worker/Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-mirror.gcr.io/library/python:3.12-slim}
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+        ALL_PROXY: ${BUILD_ALL_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+    environment:
+      APP_ENV: development
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-replace-with-32-byte-random-value}
+      DATABASE_URL: postgresql+psycopg://gate:gate@postgres:5432/gate
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /var/lib/gate-challenger/storage
+      HERMES_ENABLED: "false"
+      HERMES_MODE: http
+      HERMES_HTTP_URL: http://127.0.0.1:8787
+      GATE_CHALLENGER_SOURCE_PATH: /external/gate-challenger
+      DEVILS_ADVOCATE_SOURCE_PATH: /external/devils-advocate
+      IC_AGENTIC_REVIEW_SOURCE_PATH: /external/ic-agentic-review
+      OUTBOUND_PROXY_URL: ${OUTBOUND_PROXY_URL:-}
+      ALL_PROXY: ${OUTBOUND_PROXY_URL:-}
+      HTTP_PROXY: ${OUTBOUND_PROXY_URL:-}
+      HTTPS_PROXY: ${OUTBOUND_PROXY_URL:-}
+      all_proxy: ${OUTBOUND_PROXY_URL:-}
+      http_proxy: ${OUTBOUND_PROXY_URL:-}
+      https_proxy: ${OUTBOUND_PROXY_URL:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+    volumes:
+      - storage_data:/var/lib/gate-challenger/storage
+      - "${GATE_CHALLENGER_HOST_PATH:-/Users/iseremenko/Projects/Gate2-challenger}:/external/gate-challenger:ro"
+      - "${DEVILS_ADVOCATE_HOST_PATH:-/Users/iseremenko/Documents/Common GPTs/devils-advocate}:/external/devils-advocate:ro"
+      - "${IC_AGENTIC_REVIEW_HOST_PATH:-/Users/iseremenko/Documents/IC-Agentic-Review}:/external/ic-agentic-review:ro"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../apps/web
+      args:
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-mirror.gcr.io/library/node:22-alpine}
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  storage_data:

@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gate-challenger.local/schemas/ic-agentic-role-result.schema.json",
+  "title": "IcAgenticRoleResult",
+  "type": "object",
+  "required": [
+    "role",
+    "section_keys",
+    "summary",
+    "findings",
+    "data_gaps",
+    "numbers_used",
+    "full_report_materials"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "role": { "$ref": "#/$defs/ic_role" },
+    "section_keys": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+    },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 1500 },
+    "findings": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "data_gaps": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+    },
+    "numbers_used": {
+      "type": "array",
+      "maxItems": 30,
+      "items": { "$ref": "#/$defs/number_used" }
+    },
+    "full_report_materials": {
+      "type": "object",
+      "required": ["section_drafts", "tables", "risks", "data_gaps", "recommendations", "scenarios"],
+      "additionalProperties": false,
+      "properties": {
+        "section_drafts": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "$ref": "#/$defs/section_draft" }
+        },
+        "tables": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "$ref": "#/$defs/report_table" }
+        },
+        "risks": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/report_item" }
+        },
+        "data_gaps": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/report_item" }
+        },
+        "recommendations": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/report_item" }
+        },
+        "scenarios": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/report_item" }
+        },
+        "primary_verify_notes": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1500 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ic_role": {
+      "type": "string",
+      "enum": [
+        "ic-financial-auditor",
+        "ic-product-analyst",
+        "ic-market-analyst",
+        "ic-web-researcher",
+        "ic-benchmark-valuation",
+        "ic-team-legal",
+        "ic-tech-dd",
+        "ic-risk-scenario"
+      ]
+    },
+    "finding": {
+      "type": "object",
+      "required": ["title", "severity", "evidence", "recommendation"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "severity": { "type": "string", "enum": ["blocker", "critical", "high", "medium", "info", "data_gap"] },
+        "evidence": { "type": "string", "minLength": 1, "maxLength": 1200 },
+        "recommendation": { "type": "string", "minLength": 1, "maxLength": 800 }
+      }
+    },
+    "number_used": {
+      "type": "object",
+      "required": ["label", "value", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "value": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "source": { "type": "string", "minLength": 1, "maxLength": 240 }
+      }
+    },
+    "section_draft": {
+      "type": "object",
+      "required": ["section_key", "title", "content"],
+      "additionalProperties": false,
+      "properties": {
+        "section_key": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "content": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "evidence_ids": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+        }
+      }
+    },
+    "report_table": {
+      "type": "object",
+      "required": ["title", "markdown"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "markdown": { "type": "string", "minLength": 1, "maxLength": 5000 },
+        "section_key": { "type": "string", "minLength": 1, "maxLength": 80 }
+      }
+    },
+    "report_item": {
+      "type": "object",
+      "required": ["title", "detail"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 2500 },
+        "severity": { "type": "string", "maxLength": 80 },
+        "evidence_ids": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,148 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-mirror.gcr.io/library/postgres:16-alpine}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gate}
+      POSTGRES_USER: ${POSTGRES_USER:-gate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gate} -d ${POSTGRES_DB:-gate}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: ${REDIS_IMAGE:-mirror.gcr.io/library/redis:7-alpine}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-mirror.gcr.io/library/python:3.12-slim}
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+        ALL_PROXY: ${BUILD_ALL_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+    environment:
+      APP_ENV: production
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY is required}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-gate}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-gate}
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /var/lib/gate-challenger/storage
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:?PUBLIC_API_BASE_URL is required}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:?CORS_ALLOW_ORIGINS is required}
+      HERMES_ENABLED: ${HERMES_ENABLED:-false}
+      HERMES_MODE: ${HERMES_MODE:-http}
+      HERMES_HTTP_URL: ${HERMES_HTTP_URL:-http://127.0.0.1:8787}
+      GATE_CHALLENGER_SOURCE_PATH: /external/gate-challenger
+      DEVILS_ADVOCATE_SOURCE_PATH: /external/devils-advocate
+      IC_AGENTIC_REVIEW_SOURCE_PATH: /external/ic-agentic-review
+      SKILL_SOURCE_SNAPSHOT_MODE: ${SKILL_SOURCE_SNAPSHOT_MODE:-production_export}
+      OUTBOUND_PROXY_URL: ${OUTBOUND_PROXY_URL:-}
+      ALL_PROXY: ${OUTBOUND_PROXY_URL:-}
+      HTTP_PROXY: ${OUTBOUND_PROXY_URL:-}
+      HTTPS_PROXY: ${OUTBOUND_PROXY_URL:-}
+      all_proxy: ${OUTBOUND_PROXY_URL:-}
+      http_proxy: ${OUTBOUND_PROXY_URL:-}
+      https_proxy: ${OUTBOUND_PROXY_URL:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+    ports:
+      - "${API_BIND:-127.0.0.1}:${API_PORT:-8000}:8000"
+    volumes:
+      - storage_data:/var/lib/gate-challenger/storage
+      - "${GATE_CHALLENGER_HOST_PATH:?GATE_CHALLENGER_HOST_PATH is required}:/external/gate-challenger:ro"
+      - "${DEVILS_ADVOCATE_HOST_PATH:?DEVILS_ADVOCATE_HOST_PATH is required}:/external/devils-advocate:ro"
+      - "${IC_AGENTIC_REVIEW_HOST_PATH:?IC_AGENTIC_REVIEW_HOST_PATH is required}:/external/ic-agentic-review:ro"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: apps/worker/Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-mirror.gcr.io/library/python:3.12-slim}
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+        ALL_PROXY: ${BUILD_ALL_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+    environment:
+      APP_ENV: production
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY is required}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-gate}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-gate}
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /var/lib/gate-challenger/storage
+      HERMES_ENABLED: ${HERMES_ENABLED:-false}
+      HERMES_MODE: ${HERMES_MODE:-http}
+      HERMES_HTTP_URL: ${HERMES_HTTP_URL:-http://127.0.0.1:8787}
+      GATE_CHALLENGER_SOURCE_PATH: /external/gate-challenger
+      DEVILS_ADVOCATE_SOURCE_PATH: /external/devils-advocate
+      IC_AGENTIC_REVIEW_SOURCE_PATH: /external/ic-agentic-review
+      SKILL_SOURCE_SNAPSHOT_MODE: ${SKILL_SOURCE_SNAPSHOT_MODE:-production_export}
+      OUTBOUND_PROXY_URL: ${OUTBOUND_PROXY_URL:-}
+      ALL_PROXY: ${OUTBOUND_PROXY_URL:-}
+      HTTP_PROXY: ${OUTBOUND_PROXY_URL:-}
+      HTTPS_PROXY: ${OUTBOUND_PROXY_URL:-}
+      all_proxy: ${OUTBOUND_PROXY_URL:-}
+      http_proxy: ${OUTBOUND_PROXY_URL:-}
+      https_proxy: ${OUTBOUND_PROXY_URL:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,api,worker,web}
+    volumes:
+      - storage_data:/var/lib/gate-challenger/storage
+      - "${GATE_CHALLENGER_HOST_PATH:?GATE_CHALLENGER_HOST_PATH is required}:/external/gate-challenger:ro"
+      - "${DEVILS_ADVOCATE_HOST_PATH:?DEVILS_ADVOCATE_HOST_PATH is required}:/external/devils-advocate:ro"
+      - "${IC_AGENTIC_REVIEW_HOST_PATH:?IC_AGENTIC_REVIEW_HOST_PATH is required}:/external/ic-agentic-review:ro"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile.prod
+      args:
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-mirror.gcr.io/library/node:22-alpine}
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?NEXT_PUBLIC_API_BASE_URL is required}
+        NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-/doc-challanger}
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?NEXT_PUBLIC_API_BASE_URL is required}
+      NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-/doc-challanger}
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-3000}:3000"
+    depends_on:
+      - api
+
+  edge:
+    image: ${NGINX_IMAGE:-mirror.gcr.io/library/nginx:1.27-alpine}
+    ports:
+      - "${HTTP_PORT:-8092}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/letsencrypt:/var/www/letsencrypt:ro
+    depends_on:
+      - api
+      - web
+
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:

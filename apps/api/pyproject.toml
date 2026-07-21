@@ -1,0 +1,37 @@
+[project]
+name = "gate-challenger-api"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "pydantic-settings",
+  "sqlalchemy",
+  "psycopg[binary]",
+  "alembic",
+  "passlib[argon2]",
+  "python-multipart",
+  "cryptography",
+  "redis",
+  "rq",
+  "python-docx",
+  "pypdf",
+  "httpx[socks]",
+  "anthropic",
+  "openai",
+  "jsonschema",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx",
+  "pytest",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

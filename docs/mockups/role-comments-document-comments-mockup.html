@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Document Comments Mockup</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --background: #f7f9fb;
+        --foreground: #111827;
+        --muted: #5b6472;
+        --muted-strong: #344054;
+        --line: #e5eaf0;
+        --line-strong: #d6dee8;
+        --panel: #ffffff;
+        --panel-soft: #f7f9fb;
+        --accent: #0e9f6e;
+        --accent-strong: #087d5f;
+        --accent-muted: #eaf8f2;
+        --success: #0e9f6e;
+        --success-bg: #eaf8f2;
+        --warning: #f5b544;
+        --warning-bg: #fff7df;
+        --danger: #c92036;
+        --danger-bg: #fcecee;
+        --info: #1d70b8;
+        --info-bg: #eaf3fb;
+        --shadow: 0 16px 42px rgba(17, 24, 39, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--background);
+        color: var(--foreground);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        font-size: 15px;
+        line-height: 1.5;
+      }
+
+      button {
+        min-height: 38px;
+        border: 1px solid var(--line-strong);
+        border-radius: 7px;
+        background: var(--panel);
+        color: var(--muted-strong);
+        padding: 0 14px;
+        cursor: pointer;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 750;
+      }
+
+      .shell {
+        min-height: 100vh;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        height: 64px;
+        align-items: center;
+        gap: 34px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+        padding: 0 32px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 214px;
+        min-width: 214px;
+        font-weight: 800;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border-radius: 8px;
+        background: var(--accent);
+        color: #fff;
+        font-size: 16px;
+        font-weight: 900;
+      }
+
+      .brand span:last-child {
+        color: var(--foreground);
+        font-size: 18px;
+        font-weight: 700;
+      }
+
+      .nav {
+        display: flex;
+        flex: 1;
+        align-self: stretch;
+        overflow-x: auto;
+      }
+
+      .nav a {
+        display: flex;
+        align-items: center;
+        border-bottom: 3px solid transparent;
+        color: var(--foreground);
+        padding: 3px 18px 0;
+        font-size: 14px;
+        font-weight: 500;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .nav a.active {
+        border-bottom-color: var(--accent);
+        color: #075e45;
+        font-weight: 700;
+      }
+
+      .page {
+        width: min(100%, 1536px);
+        margin: 0 auto;
+        padding: 28px 36px 48px;
+      }
+
+      .hero {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 22px;
+      }
+
+      .hero h1 {
+        margin: 0 0 8px;
+        color: var(--foreground);
+        font-size: 30px;
+        font-weight: 800;
+        line-height: 38px;
+      }
+
+      .date {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .chip {
+        display: inline-flex;
+        min-height: 28px;
+        align-items: center;
+        border-radius: 999px;
+        background: #f2f4f7;
+        color: var(--muted-strong);
+        padding: 0 10px;
+        font-size: 11px;
+        font-weight: 850;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+      }
+
+      .chip.reject {
+        background: var(--danger-bg);
+        color: #a5122a;
+      }
+
+      .chip.done {
+        background: var(--success-bg);
+        color: #075e45;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 8px;
+        height: 52px;
+        margin-bottom: 14px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 6px;
+      }
+
+      .tab {
+        display: inline-flex;
+        align-items: center;
+        border: 0;
+        background: transparent;
+        color: var(--muted-strong);
+        white-space: nowrap;
+      }
+
+      .tab.active {
+        background: var(--accent-muted);
+        color: #075e45;
+      }
+
+      .review-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 420px;
+        gap: 16px;
+        align-items: start;
+      }
+
+      .document-panel,
+      .comments-panel,
+      .comment-card {
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: none;
+      }
+
+      .document-panel {
+        padding: 28px 34px;
+      }
+
+      .document-title {
+        margin-bottom: 24px;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 18px;
+      }
+
+      .document-title h2 {
+        margin: 0 0 8px;
+        font-size: 22px;
+        line-height: 1.25;
+      }
+
+      .document-title p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .doc-section {
+        display: grid;
+        gap: 12px;
+        max-width: 860px;
+      }
+
+      .doc-section + .doc-section {
+        margin-top: 28px;
+      }
+
+      .doc-section h3 {
+        margin: 0;
+        color: var(--foreground);
+        font-size: 17px;
+      }
+
+      .doc-section p,
+      .doc-section li {
+        margin: 0;
+        color: #2f3a49;
+        font-size: 15px;
+        line-height: 1.72;
+      }
+
+      .doc-section ul {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding-left: 22px;
+      }
+
+      .anchor {
+        position: relative;
+        display: inline-block;
+        max-width: 100%;
+        border-radius: 4px;
+        padding: 1px 3px;
+        box-decoration-break: clone;
+        -webkit-box-decoration-break: clone;
+        cursor: pointer;
+        font-weight: 650;
+        line-height: 1.35;
+        scroll-margin-top: 92px;
+        transition:
+          background 160ms ease,
+          box-shadow 160ms ease,
+          outline-color 160ms ease;
+      }
+
+      .anchor::after {
+        display: inline-flex;
+        min-width: 18px;
+        height: 18px;
+        align-items: center;
+        justify-content: center;
+        margin-left: 4px;
+        border-radius: 999px;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 900;
+        vertical-align: 1px;
+        content: attr(data-count);
+      }
+
+      .anchor.reject {
+        background: #fde8eb;
+        color: #8f1024;
+      }
+
+      .anchor.reject::after {
+        background: var(--danger);
+      }
+
+      .anchor.warn {
+        background: #fff1c7;
+        color: #6b3b00;
+      }
+
+      .anchor.warn::after {
+        background: var(--warning);
+        color: #3a2600;
+      }
+
+      .anchor.approve {
+        background: #def7ec;
+        color: #075e45;
+      }
+
+      .anchor.approve::after {
+        background: var(--success);
+      }
+
+      .anchor.active {
+        outline: 2px solid #1d70b8;
+        outline-offset: 2px;
+        box-shadow: 0 0 0 5px rgba(29, 112, 184, 0.12);
+      }
+
+      .comments-panel {
+        position: sticky;
+        top: 82px;
+        max-height: calc(100vh - 104px);
+        overflow: auto;
+        padding: 14px;
+      }
+
+      .comments-header {
+        display: grid;
+        gap: 8px;
+        margin: 0 0 16px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+        padding: 4px 2px 16px;
+      }
+
+      .comments-header h2 {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .comments-header p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .comment-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .comment-card {
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+        cursor: pointer;
+        scroll-margin-top: 92px;
+        transition:
+          border-color 160ms ease,
+          box-shadow 160ms ease,
+          transform 160ms ease;
+      }
+
+      .comment-card.active {
+        border-color: #1d70b8;
+        box-shadow:
+          inset 3px 0 0 #1d70b8,
+          0 0 0 3px rgba(29, 112, 184, 0.12);
+        transform: translateY(-1px);
+      }
+
+      .comment-card:hover {
+        border-color: #b8c5d6;
+      }
+
+      .comment-top {
+        display: grid;
+        grid-template-columns: 42px minmax(0, 1fr);
+        gap: 11px;
+        align-items: start;
+      }
+
+      .avatar {
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border: 3px solid var(--warning);
+        border-radius: 50%;
+        background: #fff;
+        color: var(--muted-strong);
+      }
+
+      .avatar svg {
+        width: 22px;
+        height: 22px;
+        stroke: currentColor;
+        stroke-width: 1.8;
+      }
+
+      .avatar.reject {
+        border-color: var(--danger);
+      }
+
+      .avatar.approve {
+        border-color: var(--success);
+      }
+
+      .identity {
+        min-width: 0;
+      }
+
+      .role-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .role {
+        color: var(--foreground);
+        font-size: 14px;
+        font-weight: 850;
+      }
+
+      .vote {
+        display: inline-flex;
+        min-height: 24px;
+        align-items: center;
+        border-radius: 999px;
+        padding: 0 8px;
+        font-size: 10px;
+        font-weight: 850;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+
+      .vote.reject {
+        background: var(--danger-bg);
+        color: #a5122a;
+      }
+
+      .vote.approve {
+        background: var(--success-bg);
+        color: #075e45;
+      }
+
+      .vote.watch {
+        background: var(--warning-bg);
+        color: #7a4300;
+      }
+
+      .severity {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .comment-body {
+        margin: 0;
+        color: #243041;
+        font-size: 14px;
+        line-height: 1.58;
+      }
+
+      .anchor-quote {
+        display: grid;
+        gap: 4px;
+        margin: 0;
+        border-left: 3px solid var(--line-strong);
+        background: var(--panel-soft);
+        padding: 9px 10px;
+      }
+
+      .anchor-quote strong {
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+
+      .anchor-quote span {
+        color: var(--muted-strong);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      @media (max-width: 1050px) {
+        .page {
+          padding: 22px 18px 36px;
+        }
+
+        .review-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .comments-panel {
+          position: static;
+          max-height: none;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .topbar {
+          gap: 12px;
+          padding: 0 14px;
+        }
+
+        .brand {
+          width: auto;
+          min-width: 0;
+        }
+
+        .brand span:last-child {
+          display: none;
+        }
+
+        .hero {
+          display: grid;
+        }
+
+        .document-panel {
+          padding: 20px 18px;
+        }
+
+        .tabs {
+          overflow-x: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">G</span>
+          <span>Gate Challenger</span>
+        </div>
+        <nav class="nav" aria-label="Primary">
+          <a class="active" href="#">Documents</a>
+          <a href="#">Etalons</a>
+          <a href="#">Benchmarks</a>
+          <a href="#">Settings</a>
+          <a href="#">Admin</a>
+        </nav>
+      </header>
+
+      <main class="page">
+        <section class="hero">
+          <div>
+            <h1>Analysis: Safe Deal Gate 2 defense</h1>
+            <div class="date">June 14, 2026, 15:48</div>
+            <div class="chips">
+              <span class="chip reject">Reject</span>
+              <span class="chip done">Completed</span>
+            </div>
+          </div>
+          <button type="button">Run details</button>
+        </section>
+
+        <nav class="tabs" aria-label="Analysis output sections">
+          <button class="tab" type="button">Gate Challenger</button>
+          <button class="tab active" type="button">Document comments</button>
+          <button class="tab" type="button">Devil's Advocate</button>
+          <button class="tab" type="button">Full Output</button>
+        </nav>
+
+        <div class="review-grid">
+          <article class="document-panel" aria-label="Source document">
+            <header class="document-title">
+              <h2>Safe Deal: снижение контактов до оплаты</h2>
+              <p>Parsed source document with highlighted anchors from expert comments.</p>
+            </header>
+
+            <section class="doc-section">
+              <h3>Problem framing</h3>
+              <p>
+                Цель инициативы - снизить утечки сделок из платформы и повысить долю безопасной оплаты. Команда
+                утверждает, что основной драйвер потерь -
+                <span class="anchor reject active" data-anchor-id="conversion" data-count="2" tabindex="0" onclick="setActiveAnchor('conversion', 'document')">CR contact to payment remains below the target corridor</span>
+                при сохранении текущей структуры флоу и без изменения мотивации продавца.
+              </p>
+              <p>
+                В документе заявлено, что пользовательское сопротивление будет компенсировано подсказками в интерфейсе,
+                но не приведены результаты A/B проверки на ключевых сегментах.
+              </p>
+            </section>
+
+            <section class="doc-section">
+              <h3>Success criteria</h3>
+              <ul>
+                <li>
+                  Запуск считается успешным при росте безопасных оплат и отсутствии снижения активности продавцов.
+                </li>
+                <li>
+                  Экономика масштабирования зависит от того, что
+                  <span class="anchor warn" data-anchor-id="subsidy" data-count="1" tabindex="0" onclick="setActiveAnchor('subsidy', 'document')">subsidy-dependent economics improves after cohort maturity</span>,
+                  однако в модели не показан сценарий после отключения субсидий.
+                </li>
+                <li>
+                  Команда ожидает, что
+                  <span class="anchor approve" data-anchor-id="trust" data-count="1" tabindex="0" onclick="setActiveAnchor('trust', 'document')">buyer trust uplift is visible in retained cohorts</span>
+                  и этот эффект сохранится после первого месяца.
+                </li>
+              </ul>
+            </section>
+
+            <section class="doc-section">
+              <h3>Rollout plan</h3>
+              <p>
+                План внедрения начинается с тестового региона, затем расширяется на федеральный уровень. В документе нет
+                отдельного rollback-триггера для случая, когда продавцы начнут переводить коммуникацию во внешние каналы
+                до оплаты.
+              </p>
+            </section>
+          </article>
+
+          <aside class="comments-panel" aria-label="Expert comments">
+            <header class="comments-header">
+              <h2>Expert comments</h2>
+              <p>4 comments · sorted by document order</p>
+            </header>
+
+            <div class="comment-list">
+              <article class="comment-card active" data-anchor-id="conversion" tabindex="0" onclick="setActiveAnchor('conversion', 'card')">
+                <div class="comment-top">
+                  <div class="avatar reject" aria-hidden="true">
+                    <svg fill="none" viewBox="0 0 24 24">
+                      <circle cx="12" cy="8" r="3.2"></circle>
+                      <path d="M5.8 19c1.1-3.7 3.2-5.6 6.2-5.6s5.1 1.9 6.2 5.6"></path>
+                    </svg>
+                  </div>
+                  <div class="identity">
+                    <div class="role-row">
+                      <span class="role">MP</span>
+                      <span class="vote reject">reject</span>
+                    </div>
+                    <div class="severity">comment severity · critical</div>
+                  </div>
+                </div>
+                <p class="comment-body">
+                  This is not defendable as written: the document names the conversion problem but does not prove that the
+                  proposed mechanism changes seller behavior.
+                </p>
+                <blockquote class="anchor-quote">
+                  <strong>Anchor</strong>
+                  <span>CR contact to payment remains below the target corridor</span>
+                </blockquote>
+              </article>
+
+              <article class="comment-card active" data-anchor-id="conversion" tabindex="0" onclick="setActiveAnchor('conversion', 'card')">
+                <div class="comment-top">
+                  <div class="avatar reject" aria-hidden="true">
+                    <svg fill="none" viewBox="0 0 24 24">
+                      <circle cx="12" cy="8" r="3.2"></circle>
+                      <path d="M5.8 19c1.1-3.7 3.2-5.6 6.2-5.6s5.1 1.9 6.2 5.6"></path>
+                    </svg>
+                  </div>
+                  <div class="identity">
+                    <div class="role-row">
+                      <span class="role">CPO</span>
+                      <span class="vote reject">reject</span>
+                    </div>
+                    <div class="severity">comment severity · high</div>
+                  </div>
+                </div>
+                <p class="comment-body">
+                  The product claim is too broad. Split the hypothesis by buyer/seller segment and show whether friction
+                  increases in high-liquidity categories.
+                </p>
+                <blockquote class="anchor-quote">
+                  <strong>Anchor</strong>
+                  <span>CR contact to payment remains below the target corridor</span>
+                </blockquote>
+              </article>
+
+              <article class="comment-card" data-anchor-id="subsidy" tabindex="0" onclick="setActiveAnchor('subsidy', 'card')">
+                <div class="comment-top">
+                  <div class="avatar" aria-hidden="true">
+                    <svg fill="none" viewBox="0 0 24 24">
+                      <circle cx="12" cy="8" r="3.2"></circle>
+                      <path d="M5.8 19c1.1-3.7 3.2-5.6 6.2-5.6s5.1 1.9 6.2 5.6"></path>
+                    </svg>
+                  </div>
+                  <div class="identity">
+                    <div class="role-row">
+                      <span class="role">TechDir</span>
+                      <span class="vote watch">watch</span>
+                    </div>
+                    <div class="severity">comment severity · medium</div>
+                  </div>
+                </div>
+                <p class="comment-body">
+                  Needs a technical rollback condition. The current plan describes rollout order, but not the stop signal
+                  if communication leakage moves earlier in the funnel.
+                </p>
+                <blockquote class="anchor-quote">
+                  <strong>Anchor</strong>
+                  <span>subsidy-dependent economics improves after cohort maturity</span>
+                </blockquote>
+              </article>
+
+              <article class="comment-card" data-anchor-id="trust" tabindex="0" onclick="setActiveAnchor('trust', 'card')">
+                <div class="comment-top">
+                  <div class="avatar approve" aria-hidden="true">
+                    <svg fill="none" viewBox="0 0 24 24">
+                      <circle cx="12" cy="8" r="3.2"></circle>
+                      <path d="M5.8 19c1.1-3.7 3.2-5.6 6.2-5.6s5.1 1.9 6.2 5.6"></path>
+                    </svg>
+                  </div>
+                  <div class="identity">
+                    <div class="role-row">
+                      <span class="role">VertDir</span>
+                      <span class="vote approve">approve</span>
+                    </div>
+                    <div class="severity">comment severity · low</div>
+                  </div>
+                </div>
+                <p class="comment-body">
+                  The trust direction is plausible. Keep it, but make the proof more explicit and separate retained
+                  cohorts from first-month acquisition effects.
+                </p>
+                <blockquote class="anchor-quote">
+                  <strong>Anchor</strong>
+                  <span>buyer trust uplift is visible in retained cohorts</span>
+                </blockquote>
+              </article>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+    <script>
+      const anchors = Array.from(document.querySelectorAll(".anchor[data-anchor-id]"));
+      const commentCards = Array.from(document.querySelectorAll(".comment-card[data-anchor-id]"));
+
+      function setActiveAnchor(anchorId, source) {
+        anchors.forEach((anchor) => {
+          anchor.classList.toggle("active", anchor.dataset.anchorId === anchorId);
+        });
+
+        const relatedCards = commentCards.filter((card) => card.dataset.anchorId === anchorId);
+        commentCards.forEach((card) => {
+          card.classList.toggle("active", card.dataset.anchorId === anchorId);
+        });
+
+        if (source === "document" && relatedCards[0]) {
+          relatedCards[0].scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+
+        if (source === "card") {
+          const anchor = anchors.find((item) => item.dataset.anchorId === anchorId);
+          if (anchor) {
+            anchor.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }
+      }
+
+      anchors.forEach((anchor) => {
+        anchor.addEventListener("click", () => setActiveAnchor(anchor.dataset.anchorId, "document"));
+        anchor.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setActiveAnchor(anchor.dataset.anchorId, "document");
+          }
+        });
+      });
+
+      commentCards.forEach((card) => {
+        card.addEventListener("click", () => setActiveAnchor(card.dataset.anchorId, "card"));
+        card.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setActiveAnchor(card.dataset.anchorId, "card");
+          }
+        });
+      });
+    </script>
+  </body>
+</html>

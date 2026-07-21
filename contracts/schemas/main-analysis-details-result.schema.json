@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gate-challenger.local/schemas/main-analysis-details-result.schema.json",
+  "title": "MainAnalysisDetailsResult",
+  "type": "object",
+  "required": [
+    "analysis_id",
+    "verdict",
+    "summary",
+    "layer_1_markdown",
+    "layer_1",
+    "layer_2_markdown",
+    "layer_2",
+    "revision_required",
+    "revision_reason"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "analysis_id": { "type": "string", "format": "uuid" },
+    "verdict": {
+      "type": "string",
+      "enum": ["approve", "approve_with_conditions", "need_evidence", "reject", "unknown"]
+    },
+    "summary": { "type": "string", "minLength": 1 },
+    "layer_1_markdown": { "type": "string", "minLength": 1 },
+    "layer_1": { "type": "array", "items": { "$ref": "#/$defs/layer_1_item" } },
+    "layer_2_markdown": { "type": "string", "minLength": 1 },
+    "layer_2": { "type": "array", "items": { "$ref": "#/$defs/layer_2_item" } },
+    "revision_required": { "type": "boolean" },
+    "revision_reason": {
+      "anyOf": [{ "type": "string" }, { "type": "null" }]
+    }
+  },
+  "$defs": {
+    "layer_1_item": {
+      "type": "object",
+      "required": ["id", "severity", "issue", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "issue": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string", "minLength": 1 }
+      }
+    },
+    "layer_2_item": {
+      "type": "object",
+      "required": [
+        "id",
+        "parent_layer_1_id",
+        "status",
+        "severity",
+        "question",
+        "answer",
+        "evidence",
+        "issue"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "parent_layer_1_id": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "enum": ["pass", "partial", "fail", "not_applicable"] },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "question": { "type": "string", "minLength": 1 },
+        "answer": { "type": "string", "enum": ["YES", "PARTIAL", "NO"] },
+        "evidence": { "type": "string", "minLength": 1 },
+        "issue": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

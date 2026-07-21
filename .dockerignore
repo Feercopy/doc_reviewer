@@ -1,0 +1,14 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+*.egg-info
+node_modules
+.next
+storage
+docs
+*.docx
+.env
+.env.*
+!.env.example

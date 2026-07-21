@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Layer Checks Display Mockup</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --panel: #ffffff;
+        --panel-soft: #f9fafb;
+        --border: #d9dee7;
+        --border-strong: #c7ceda;
+        --text: #172033;
+        --muted: #637083;
+        --green: #0f7a4d;
+        --green-bg: #e8f6ef;
+        --amber: #9a6200;
+        --amber-bg: #fff3d6;
+        --red: #b42318;
+        --red-bg: #fde8e6;
+        --blue: #2458c6;
+        --blue-bg: #eaf0ff;
+        --shadow: 0 16px 40px rgba(23, 32, 51, 0.08);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      main {
+        max-width: 1160px;
+        margin: 0 auto;
+        padding: 38px 28px 54px;
+      }
+
+      .page-title {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 18px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 26px;
+        line-height: 1.2;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .summary-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--panel);
+        padding: 8px 12px;
+        color: var(--muted);
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      .workbench {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .workbench-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 18px 20px;
+        border-bottom: 1px solid var(--border);
+        background: linear-gradient(180deg, #ffffff, #fbfcfe);
+      }
+
+      .workbench-header h2 {
+        font-size: 17px;
+        line-height: 1.3;
+        font-weight: 700;
+      }
+
+      .checks-list {
+        display: grid;
+        gap: 0;
+      }
+
+      .layer-group {
+        border-bottom: 1px solid var(--border);
+      }
+
+      .layer-group:last-child {
+        border-bottom: 0;
+      }
+
+      .layer-summary {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        padding: 16px 20px;
+        background: var(--panel);
+      }
+
+      .chevron {
+        display: inline-grid;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .block-title {
+        min-width: 0;
+      }
+
+      .block-title strong {
+        display: block;
+        color: var(--text);
+        font-size: 15px;
+        line-height: 1.35;
+        font-weight: 700;
+      }
+
+      .block-title span {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .badge-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        border-radius: 999px;
+        padding: 4px 9px;
+        font-size: 12px;
+        line-height: 1;
+        font-weight: 700;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .badge.pass {
+        background: var(--green-bg);
+        color: var(--green);
+      }
+
+      .badge.partial {
+        background: var(--amber-bg);
+        color: var(--amber);
+      }
+
+      .badge.fail,
+      .badge.high,
+      .badge.critical {
+        background: var(--red-bg);
+        color: var(--red);
+      }
+
+      .badge.medium {
+        background: var(--amber-bg);
+        color: var(--amber);
+      }
+
+      .badge.info {
+        background: var(--blue-bg);
+        color: var(--blue);
+      }
+
+      .layer-body {
+        padding: 0 20px 20px 60px;
+        background: var(--panel);
+      }
+
+      .finding-card,
+      .question-card {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel-soft);
+      }
+
+      .finding-card {
+        padding: 16px;
+      }
+
+      .section-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.3;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .field-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .field label {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .field p {
+        color: var(--text);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      .layer2-section {
+        margin-top: 16px;
+      }
+
+      .question-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .question-card {
+        overflow: hidden;
+        background: #ffffff;
+      }
+
+      .question-main {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 14px;
+        align-items: start;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .question-main h3 {
+        font-size: 14px;
+        line-height: 1.4;
+        font-weight: 700;
+      }
+
+      .probe {
+        padding: 12px 16px 14px;
+        background: #fbfcfe;
+      }
+
+      .probe-summary {
+        display: grid;
+        grid-template-columns: 22px minmax(0, 1fr) auto;
+        align-items: start;
+        gap: 10px;
+      }
+
+      .probe-summary strong {
+        display: block;
+        font-size: 13px;
+        line-height: 1.45;
+        font-weight: 650;
+      }
+
+      .probe-evidence {
+        margin: 10px 0 0 32px;
+        padding: 12px;
+        border-left: 3px solid var(--blue);
+        border-radius: 0 6px 6px 0;
+        background: var(--blue-bg);
+      }
+
+      .probe-evidence label {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--blue);
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .probe-evidence p {
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .closed-preview {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      @media (max-width: 760px) {
+        main {
+          padding: 22px 14px 34px;
+        }
+
+        .page-title,
+        .workbench-header {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .layer-summary,
+        .question-main,
+        .probe-summary {
+          grid-template-columns: 24px minmax(0, 1fr);
+        }
+
+        .badge-row,
+        .question-main > .badge {
+          justify-content: flex-start;
+          grid-column: 2;
+        }
+
+        .layer-body {
+          padding: 0 14px 16px 48px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="page-title">
+        <div>
+          <h1>Gate Challenger · Detailed checks</h1>
+          <p class="subtitle">Proposed reader view: full Layer 1 checklist with linked Layer 2 checks and expandable evidence.</p>
+        </div>
+        <div class="summary-pill">7 Layer 1 blocks · 6 Layer 2 checks</div>
+      </div>
+
+      <section class="workbench" aria-label="Layer checks mockup">
+        <div class="workbench-header">
+          <div>
+            <h2>Layer 1 checklist</h2>
+            <p class="subtitle">Collapsed rows show the canonical block name and verdict. Open rows reveal findings and checks.</p>
+          </div>
+          <span class="badge info">Gate 2</span>
+        </div>
+
+        <div class="checks-list">
+          <article class="layer-group">
+            <div class="layer-summary">
+              <span class="chevron">⌄</span>
+              <div class="block-title">
+                <strong>Problem Framing and Segments</strong>
+                <span>Target segment, pain, behavior change, and Gate 1 hypothesis framing</span>
+              </div>
+              <div class="badge-row">
+                <span class="badge pass">PASS</span>
+              </div>
+            </div>
+            <div class="layer-body">
+              <div class="finding-card">
+                <div class="section-label">
+                  <span>Layer 1 finding</span>
+                  <span class="badge pass">No material issue</span>
+                </div>
+                <div class="field-grid">
+                  <div class="field">
+                    <label>Issue</label>
+                    <p>No material issue.</p>
+                  </div>
+                  <div class="field">
+                    <label>Evidence</label>
+                    <p>FAQ 1 provides enough context for the target segment and intended behavior change.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="layer2-section">
+                <div class="section-label">
+                  <span>Layer 2 checks</span>
+                  <span>1 linked check</span>
+                </div>
+                <div class="question-list">
+                  <article class="question-card">
+                    <div class="question-main">
+                      <h3>Problem Framing and Significance: Were the Gate 1 Hypotheses Confirmed?</h3>
+                      <span class="badge partial">PARTIAL</span>
+                    </div>
+                    <div class="probe">
+                      <div class="probe-summary">
+                        <span class="chevron">⌄</span>
+                        <strong>Can the reviewer identify the target segment, pain point, and intended behavior change without reconstructing missing logic by inference?</strong>
+                        <span class="badge pass">YES</span>
+                      </div>
+                      <div class="probe-evidence">
+                        <label>Evidence</label>
+                        <p>FAQ 1 names the segment, the pain, and the intended behavior change clearly enough for review.</p>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="layer-group">
+            <div class="layer-summary">
+              <span class="chevron">⌄</span>
+              <div class="block-title">
+                <strong>Solution Quality and Logic</strong>
+                <span>Hypothesis validation, decision logic, and product friction</span>
+              </div>
+              <div class="badge-row">
+                <span class="badge fail">FAIL</span>
+              </div>
+            </div>
+            <div class="layer-body">
+              <div class="finding-card">
+                <div class="section-label">
+                  <span>Layer 1 finding · L1_SOL_01</span>
+                  <span class="badge high">High severity</span>
+                </div>
+                <div class="field-grid">
+                  <div class="field">
+                    <label>Issue</label>
+                    <p>Severe friction in the payment flow leads to conversion leakage from order creation to payment, which violates the core transactional thesis.</p>
+                  </div>
+                  <div class="field">
+                    <label>Evidence</label>
+                    <p>FAQ 2: Target conversion creation to payment is above 53%, while the actual result is 36.7%.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="layer2-section">
+                <div class="section-label">
+                  <span>Layer 2 checks</span>
+                  <span>1 linked check</span>
+                </div>
+                <div class="question-list">
+                  <article class="question-card">
+                    <div class="question-main">
+                      <h3>Payment CJM Friction</h3>
+                      <span class="badge partial">PARTIAL</span>
+                    </div>
+                    <div class="probe">
+                      <div class="probe-summary">
+                        <span class="chevron">›</span>
+                        <strong>Does each central hypothesis use a validation method that actually answers the decision question?</strong>
+                        <span class="badge partial">PARTIAL</span>
+                      </div>
+                      <p class="closed-preview" style="margin: 8px 0 0 32px;">Collapsed by default; opening shows evidence, issue, risk, and recommendation.</p>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="layer-group">
+            <div class="layer-summary">
+              <span class="chevron">›</span>
+              <div class="block-title">
+                <strong>Scope of Work and Implementation Plan</strong>
+                <span>Rollout sequencing, operational constraints, legal and compliance readiness</span>
+              </div>
+              <div class="badge-row">
+                <span class="badge partial">PARTIAL</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="layer-group">
+            <div class="layer-summary">
+              <span class="chevron">›</span>
+              <div class="block-title">
+                <strong>Success Criteria and Metrics</strong>
+                <span>Thresholds, measured results, and decision-grade metric evidence</span>
+              </div>
+              <div class="badge-row">
+                <span class="badge fail">FAIL</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="layer-group">
+            <div class="layer-summary">
+              <span class="chevron">›</span>
+              <div class="block-title">
+                <strong>Traction Model Credibility</strong>
+                <span>Adoption model, subsidies, organic demand, and unit economics</span>
+              </div>
+              <div class="badge-row">
+                <span class="badge fail">FAIL</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="layer-group">
+            <div class="layer-summary">
+              <span class="chevron">›</span>
+              <div class="block-title">
+                <strong>Key Assumptions and Risks Completeness</strong>
+                <span>Scenario failure conditions, risks, and reversal logic</span>
+              </div>
+              <div class="badge-row">
+                <span class="badge fail">FAIL</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="layer-group">
+            <div class="layer-summary">
+              <span class="chevron">›</span>
+              <div class="block-title">
+                <strong>Consistency</strong>
+                <span>Internal contradiction checks across targets, resources, and conclusions</span>
+              </div>
+              <div class="badge-row">
+                <span class="badge partial">PARTIAL</span>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
