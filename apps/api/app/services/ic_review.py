@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.authz.policies import can_read_raw_output
 from app.core.config import default_skill_source_snapshot_mode, get_settings
-from app.models.analysis import AnalysisCheckRun, AnalysisCheckStep
+from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisCheckStep
+from app.models.document import Document
 from app.models.skill import Skill
 from app.models.skill_source import SkillSource
 from app.models.user import User
@@ -96,6 +97,81 @@ def create_ic_review_run_for_analysis(
     run.run_parameters = run_parameters
     db.commit()
     db.refresh(run)
+    return run
+
+
+def create_automatic_ic_review_run_for_analysis(
+    *,
+    db: Session,
+    analysis: Analysis,
+    output_language: str,
+) -> AnalysisCheckRun:
+    if analysis.status != RunStatus.COMPLETED.value:
+        raise AnalysisPreconditionError("Analysis is not completed")
+
+    reusable_run = _reusable_ic_review_run(db=db, analysis_id=analysis.id)
+    if reusable_run is not None:
+        reusable_run.created_for_request = False
+        return reusable_run
+
+    provider = Provider(analysis.provider)
+    _validate_provider_model(db=db, provider=provider, model=analysis.model)
+    skill = _resolve_ic_review_skill(db=db)
+    run = AnalysisCheckRun(
+        analysis_id=analysis.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        check_type=IC_REVIEW_CHECK_TYPE,
+        provider=analysis.provider,
+        model=analysis.model,
+        status=RunStatus.QUEUED.value,
+        current_stage="queued",
+        run_parameters={},
+        artifacts=[],
+        uploaded_workbook_metadata={},
+    )
+    db.add(run)
+    db.flush()
+
+    workbook_metadata: dict = {}
+    spreadsheet_mode = "not_provided"
+    linked_fin_summary_metadata = _linked_fin_summary_metadata(db=db, analysis=analysis)
+    linked_fin_summary_document = linked_fin_summary_metadata.pop("_document", None)
+    if linked_fin_summary_document is not None:
+        linked_fin_summary_metadata["usage"] = "attached"
+        if Path(linked_fin_summary_document.original_filename).suffix.lower() == ".xlsx":
+            try:
+                workbook_metadata = _save_workbook_from_document(
+                    analysis_id=analysis.id,
+                    run_id=run.id,
+                    document=linked_fin_summary_document,
+                )
+                spreadsheet_mode = "uploaded"
+                linked_fin_summary_metadata["usage"] = "workbook_uploaded"
+            except (OSError, UnsupportedWorkbookFileTypeError, IcReviewWorkbookTooLargeError) as exc:
+                linked_fin_summary_metadata["usage"] = "ignored_invalid_xlsx"
+                linked_fin_summary_metadata["error"] = exc.__class__.__name__
+        else:
+            linked_fin_summary_metadata["usage"] = "ignored_non_xlsx"
+
+    run.uploaded_workbook_metadata = workbook_metadata
+    run_parameters = {
+        "output_language": output_language,
+        "spreadsheet_mode": spreadsheet_mode,
+        "launch_mode": "automatic_full_analysis",
+        "skill_source_snapshot": skill_source_snapshot(skill),
+    }
+    if linked_fin_summary_metadata:
+        run_parameters["linked_fin_summary_document"] = linked_fin_summary_metadata
+    try:
+        _attach_source_snapshot(db=db, run=run, skill=skill, run_parameters=run_parameters)
+    except Exception:
+        _cleanup_run_storage(analysis_id=analysis.id, run_id=run.id)
+        raise
+    run.run_parameters = run_parameters
+    db.commit()
+    db.refresh(run)
+    run.created_for_request = True
     return run
 
 
@@ -248,18 +324,76 @@ def _save_workbook(*, analysis_id: UUID, run_id: UUID, upload: UploadFile) -> di
     }
 
 
+def _save_workbook_from_document(*, analysis_id: UUID, run_id: UUID, document: Document) -> dict:
+    original_filename = document.original_filename or "upload.xlsx"
+    source_path = Path(document.storage_path)
+    with source_path.open("rb") as source:
+        _validate_xlsx_stream(source)
+        stored = LocalDocumentStorage(get_settings().storage_root).save_ic_review_workbook(
+            analysis_id=analysis_id,
+            run_id=run_id,
+            original_filename=original_filename,
+            source=source,
+            max_size_bytes=MAX_WORKBOOK_SIZE_BYTES,
+        )
+    return {
+        "filename": original_filename,
+        "safe_filename": stored.safe_original_filename,
+        "size_bytes": stored.size_bytes,
+        "sha256": stored.sha256,
+        "storage_path": str(stored.path),
+        "source_document_id": str(document.id),
+    }
+
+
 def _validate_xlsx_container(upload: UploadFile) -> None:
+    _validate_xlsx_stream(upload.file)
+
+
+def _validate_xlsx_stream(source) -> None:
     try:
-        upload.file.seek(0)
-        with zipfile.ZipFile(upload.file) as archive:
+        source.seek(0)
+        with zipfile.ZipFile(source) as archive:
             names = set(archive.namelist())
     except (zipfile.BadZipFile, OSError) as exc:
         raise UnsupportedWorkbookFileTypeError("Financial model must be a valid .xlsx file") from exc
     finally:
-        upload.file.seek(0)
+        source.seek(0)
 
     if "[Content_Types].xml" not in names or not any(name.startswith("xl/") for name in names):
         raise UnsupportedWorkbookFileTypeError("Financial model must be a valid .xlsx file")
+
+
+def _linked_fin_summary_metadata(*, db: Session, analysis: Analysis) -> dict:
+    document = db.get(Document, analysis.document_id)
+    if document is None or document.linked_fin_summary_document_id is None:
+        return {}
+    linked = db.get(Document, document.linked_fin_summary_document_id)
+    if linked is None:
+        return {}
+    return {
+        "_document": linked,
+        "id": str(linked.id),
+        "original_filename": linked.original_filename,
+        "mime_type": linked.mime_type,
+        "file_size_bytes": linked.file_size_bytes,
+        "parse_status": linked.parse_status,
+    }
+
+
+def _reusable_ic_review_run(*, db: Session, analysis_id: UUID) -> AnalysisCheckRun | None:
+    statement = (
+        select(AnalysisCheckRun)
+        .where(
+            AnalysisCheckRun.analysis_id == analysis_id,
+            AnalysisCheckRun.check_type == IC_REVIEW_CHECK_TYPE,
+            AnalysisCheckRun.status.in_(
+                [RunStatus.QUEUED.value, RunStatus.RUNNING.value, RunStatus.COMPLETED.value]
+            ),
+        )
+        .order_by(AnalysisCheckRun.created_at.desc(), AnalysisCheckRun.id.desc())
+    )
+    return db.execute(statement).scalars().first()
 
 
 def _attach_source_snapshot(*, db: Session, run: AnalysisCheckRun, skill: Skill, run_parameters: dict) -> None:

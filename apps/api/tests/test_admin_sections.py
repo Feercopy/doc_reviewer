@@ -143,15 +143,17 @@ def test_admin_etalons_and_benchmarks_list_all_statuses(client, db_session):
     admin = create_user(db_session, "admin", "secret", Role.ADMIN)
     user = create_user(db_session, "analyst", "secret")
     skills = seed_baseline_skills(db_session)
+    main_skill = _skill_by_name(skills, "gate2_challenger_main_analysis")
+    judge_skill = _skill_by_name(skills, "benchmark_judge")
     active = _etalon_for_user(client, db_session, user, EtalonStatus.ACTIVE)
     draft = _etalon_for_user(client, db_session, user, EtalonStatus.DRAFT)
     benchmark = Benchmark(
         name="Gate 2 baseline",
         description="Admin visible benchmark",
         etalon_ids=[str(active.id)],
-        skill_id=skills[0].id,
-        skill_version=skills[0].version,
-        judge_skill_id=skills[3].id,
+        skill_id=main_skill.id,
+        skill_version=main_skill.version,
+        judge_skill_id=judge_skill.id,
         provider=Provider.OPENAI_COMPATIBLE.value,
         model="gpt-test",
         status=RunStatus.COMPLETED.value,
@@ -378,6 +380,10 @@ def _document_for_user(client, db_session, user, filename: str, document_type: D
     db_session.commit()
     db_session.refresh(document)
     return document
+
+
+def _skill_by_name(skills, name: str):
+    return next(skill for skill in skills if skill.name == name)
 
 
 def _analysis(

@@ -67,6 +67,14 @@ npm --prefix apps/web run test
 docker compose -f infra/docker-compose.yml config
 ```
 
+Python tests can also run in Docker with dev/test dependencies installed in
+separate test images:
+
+```bash
+docker compose --env-file .env -f infra/docker-compose.test.yml run --rm api-test
+docker compose --env-file .env -f infra/docker-compose.test.yml run --rm worker-test
+```
+
 Full MVP acceptance:
 
 ```bash

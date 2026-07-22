@@ -13,6 +13,7 @@ import {
   type ProviderModelOptions,
 } from "@/lib/api/provider-settings";
 import {
+  cancelAnalysisChain,
   createAnalysis,
   deleteDocument,
   getDocument,
@@ -42,10 +43,11 @@ const providerLabels: Record<Provider, string> = {
 };
 
 const outputLanguageOptions: readonly OutputLanguage[] = ["ru", "en"];
+const ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY = "analysis_chain_cancel_requested_at";
 
 function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisRecord[]): WorkflowStep[] {
   const completedAnalyses = analyses
-    .filter((analysis) => analysis.status === "completed")
+    .filter(isFullAnalysisComplete)
     .sort(
       (left, right) =>
         new Date(right.completed_at ?? right.created_at).getTime() -
@@ -53,8 +55,8 @@ function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisRecord[]
     );
   const latestCompletedAnalysis = completedAnalyses[0] ?? null;
   const hasCompletedAnalysis = completedAnalyses.length > 0;
-  const hasRunningAnalysis = analyses.some((analysis) => analysis.status === "queued" || analysis.status === "running");
-  const hasFailedAnalysis = analyses.some((analysis) => analysis.status === "failed");
+  const hasRunningAnalysis = analyses.some(isFullAnalysisInProgress);
+  const hasFailedAnalysis = analyses.some(isFullAnalysisFailed);
   const parseDone = document.parse_status === "completed";
   const parseFailed = document.parse_status === "failed";
 
@@ -90,6 +92,61 @@ function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisRecord[]
       state: hasCompletedAnalysis ? "done" : hasRunningAnalysis ? "active" : hasFailedAnalysis ? "blocked" : "idle",
     },
   ];
+}
+
+function isFullAnalysisComplete(analysis: AnalysisRecord): boolean {
+  return (
+    analysis.status === "completed" &&
+    analysis.predicted_comment_run?.status === "completed" &&
+    analysis.ic_review_run?.status === "completed"
+  );
+}
+
+function isFullAnalysisFailed(analysis: AnalysisRecord): boolean {
+  return (
+    (!isFullAnalysisComplete(analysis) && isAnalysisChainCancelled(analysis)) ||
+    analysis.status === "failed" ||
+    analysis.status === "cancelled" ||
+    analysis.predicted_comment_run?.status === "failed" ||
+    analysis.predicted_comment_run?.status === "cancelled" ||
+    analysis.ic_review_run?.status === "failed" ||
+    analysis.ic_review_run?.status === "cancelled"
+  );
+}
+
+function isFullAnalysisInProgress(analysis: AnalysisRecord): boolean {
+  return !isFullAnalysisComplete(analysis) && !isFullAnalysisFailed(analysis);
+}
+
+function isAnalysisChainCancelled(analysis: AnalysisRecord): boolean {
+  return typeof analysis.run_parameters?.[ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY] === "string";
+}
+
+function getFullAnalysisStatusLabel(analysis: AnalysisRecord): string {
+  if (!isFullAnalysisComplete(analysis) && isAnalysisChainCancelled(analysis)) {
+    return analysis.status === "completed" ? "Analysis stopped after Gate Challenger" : "Analysis stopped";
+  }
+  if (analysis.status === "queued") {
+    return "Gate Challenger queued";
+  }
+  if (analysis.status === "running") {
+    return "Gate Challenger running";
+  }
+  if (analysis.status === "failed" || analysis.status === "cancelled") {
+    return formatLabel(analysis.status);
+  }
+  const predictedStatus = analysis.predicted_comment_run?.status;
+  if (predictedStatus && predictedStatus !== "completed") {
+    return `Devils Advocate ${formatLabel(predictedStatus)}`;
+  }
+  const icStatus = analysis.ic_review_run?.status;
+  if (!icStatus) {
+    return "IC Review queued";
+  }
+  if (icStatus !== "completed") {
+    return `IC Review ${formatLabel(icStatus)}`;
+  }
+  return "Completed";
 }
 
 function getAnalysisTone(status: RunStatus): "good" | "info" | "bad" | "neutral" {
@@ -207,6 +264,7 @@ export default function DocumentDetailPage() {
   const [titleSaving, setTitleSaving] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [cancellingAnalysisId, setCancellingAnalysisId] = useState("");
 
   async function refresh() {
     const nextDocument = await getDocument(documentId);
@@ -262,6 +320,12 @@ export default function DocumentDetailPage() {
   );
   const workflowSteps = useMemo(() => (document ? buildWorkflowSteps(document, analyses) : []), [analyses, document]);
   const parseInProgress = document ? document.parse_status === "queued" || document.parse_status === "running" : false;
+  const visibleAnalyses = useMemo(
+    () => analyses.filter((analysis) => isFullAnalysisComplete(analysis) || isFullAnalysisFailed(analysis)),
+    [analyses],
+  );
+  const pendingFullAnalyses = useMemo(() => analyses.filter(isFullAnalysisInProgress), [analyses]);
+  const hasPendingFullAnalysis = pendingFullAnalyses.length > 0;
 
   useEffect(() => {
     if (configuredProviderModels.length === 0 || configuredProviderModels.some((item) => item.provider === provider)) {
@@ -273,6 +337,16 @@ export default function DocumentDetailPage() {
     setModelEdited(false);
     setModel(getProviderDefaultModel(providerModels, nextProvider));
   }, [provider, providerModels, configuredProviderModels]);
+
+  useEffect(() => {
+    if (!hasPendingFullAnalysis) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      refresh().catch(() => undefined);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [documentId, hasPendingFullAnalysis]);
 
   function changeModel(nextModel: string) {
     setModel(nextModel);
@@ -364,7 +438,7 @@ export default function DocumentDetailPage() {
     setPending(true);
     setError("");
     try {
-      const analysis = await createAnalysis(documentId, {
+      await createAnalysis(documentId, {
         provider,
         model: model.trim(),
         document_type_override: document?.manual_document_type ?? document?.detected_document_type,
@@ -372,11 +446,27 @@ export default function DocumentDetailPage() {
           output_language: outputLanguage,
         },
       });
-      window.location.href = appPath(`/analyses/${analysis.id}`);
+      await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to launch analysis");
     } finally {
       setPending(false);
+    }
+  }
+
+  async function stopAnalysis(analysis: AnalysisRecord) {
+    setCancellingAnalysisId(analysis.id);
+    setError("");
+    try {
+      const updatedAnalysis = await cancelAnalysisChain(analysis.id);
+      setAnalyses((items) =>
+        items.map((item) => (item.id === updatedAnalysis.id ? updatedAnalysis : item)),
+      );
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to stop analysis");
+    } finally {
+      setCancellingAnalysisId("");
     }
   }
 
@@ -528,15 +618,39 @@ export default function DocumentDetailPage() {
 
                   <button
                     className="gc-primary gc-start-analysis"
-                    disabled={pending || document.parse_status !== "completed" || !model.trim() || !selectedProviderModel?.has_key}
+                    disabled={
+                      pending ||
+                      hasPendingFullAnalysis ||
+                      document.parse_status !== "completed" ||
+                      !model.trim() ||
+                      !selectedProviderModel?.has_key
+                    }
                     type="button"
                     onClick={launchAnalysis}
                   >
-                    {pending ? "Starting..." : "▷ Start analysis"}
+                    {pending ? "Starting..." : hasPendingFullAnalysis ? "Full analysis running" : "▷ Start analysis"}
                   </button>
                 </div>
 
-                {analyses.length > 0 ? (
+                {hasPendingFullAnalysis ? (
+                  <div className="gc-analysis-progress" aria-live="polite">
+                    <span aria-hidden="true" />
+                    <div>
+                      <strong>Full analysis is running</strong>
+                      <small>{getFullAnalysisStatusLabel(pendingFullAnalyses[0])}</small>
+                    </div>
+                    <button
+                      className="gc-stop-analysis"
+                      disabled={cancellingAnalysisId === pendingFullAnalyses[0].id}
+                      type="button"
+                      onClick={() => stopAnalysis(pendingFullAnalyses[0])}
+                    >
+                      {cancellingAnalysisId === pendingFullAnalyses[0].id ? "Stopping..." : "Stop Analysis"}
+                    </button>
+                  </div>
+                ) : null}
+
+                {visibleAnalyses.length > 0 ? (
                   <div className="gc-table-scroll">
                     <table className="gc-table">
                       <thead>
@@ -548,14 +662,14 @@ export default function DocumentDetailPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {analyses.map((analysis) => {
+                        {visibleAnalyses.map((analysis) => {
                           const runDate = formatDateStack(analysis.completed_at ?? analysis.created_at);
 
                           return (
                             <tr key={analysis.id}>
                               <td>
                                 <span className={`gc-run-status is-${getAnalysisTone(analysis.status)}`}>
-                                  {formatLabel(analysis.status)}
+                                  {isFullAnalysisComplete(analysis) ? "Full analysis complete" : getFullAnalysisStatusLabel(analysis)}
                                 </span>
                                 <div className={`gc-verdict-line is-${getVerdictTone(analysis.verdict)}`}>
                                   {formatLabel(analysis.verdict)}
@@ -587,7 +701,11 @@ export default function DocumentDetailPage() {
                     </table>
                   </div>
                 ) : (
-                  <div className="gc-empty compact">Analysis history appears here after the first run.</div>
+                  <div className="gc-empty compact">
+                    {hasPendingFullAnalysis
+                      ? "The completed result will appear here after Gate Challenger, Devils Advocate, and IC Review finish."
+                      : "Analysis history appears here after the first completed full run."}
+                  </div>
                 )}
               </section>
             </div>
@@ -1031,6 +1149,75 @@ const documentDetailStyles = `
   margin-bottom: 16px;
 }
 
+.document-detail .gc-analysis-progress {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #b8d8f1;
+  border-radius: 8px;
+  background: #eef7fd;
+  color: #111827;
+  margin-bottom: 16px;
+  padding: 11px 12px;
+}
+
+.document-detail .gc-analysis-progress > span {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  border: 2px solid rgba(29, 112, 184, 0.24);
+  border-top-color: #1d70b8;
+  border-radius: 999px;
+  animation: gc-parse-spin 900ms linear infinite;
+}
+
+.document-detail .gc-analysis-progress div {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 2px;
+}
+
+.document-detail .gc-analysis-progress strong {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 18px;
+}
+
+.document-detail .gc-analysis-progress small {
+  color: #1d70b8;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.document-detail .gc-stop-analysis {
+  display: inline-flex;
+  min-height: 40px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d92d20;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #b42318;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.document-detail .gc-stop-analysis:hover:not(:disabled) {
+  background: #fff1f0;
+}
+
+.document-detail .gc-stop-analysis:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .document-detail .gc-analysis-model-button {
   min-height: 44px;
   min-width: 0;
@@ -1353,6 +1540,10 @@ const documentDetailStyles = `
   .document-detail .gc-parse-spinner {
     animation: none;
   }
+
+  .document-detail .gc-analysis-progress > span {
+    animation: none;
+  }
 }
 
 @media (max-width: 1440px) {
@@ -1452,6 +1643,15 @@ const documentDetailStyles = `
   .document-detail .gc-document-actions,
   .document-detail .gc-analysis-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .document-detail .gc-analysis-progress {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .document-detail .gc-stop-analysis {
+    width: 100%;
   }
 
   .document-detail .gc-language-toggle {

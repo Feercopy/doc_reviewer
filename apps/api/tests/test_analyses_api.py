@@ -1,6 +1,6 @@
 from uuid import UUID, uuid4
 
-from app.models.analysis import Analysis, AnalysisDetailRun, PredictedCommentRun
+from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisDetailRun, PredictedCommentRun
 from app.models.document import Document
 from app.models.provider_key import ProviderKey
 from app.models.skill_source import SkillSource, SkillSourceSnapshot
@@ -488,6 +488,147 @@ def test_document_owner_cannot_delete_analysis_created_by_admin(client, db_sessi
     assert response.status_code == 404
     db_session.refresh(analysis)
     assert analysis.deleted_at is None
+
+
+def test_cancel_analysis_preserves_completed_gate_result_and_cancels_downstream_runs(client, db_session):
+    user = create_user(db_session, "author", "secret")
+    skills = seed_baseline_skills(db_session)
+    document_id = _create_completed_document(client, db_session, user)
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=user.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="need_evidence",
+        summary="Needs evidence",
+        structured_output={"verdict": "need_evidence", "summary": "Needs evidence"},
+        raw_output="raw gate output",
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.flush()
+    predicted = PredictedCommentRun(
+        analysis_id=analysis.id,
+        skill_id=skills[1].id,
+        skill_version=skills[1].version,
+        provider=analysis.provider,
+        model=analysis.model,
+        status=RunStatus.QUEUED.value,
+        run_parameters={},
+    )
+    ic_review = AnalysisCheckRun(
+        analysis_id=analysis.id,
+        skill_id=skills[2].id,
+        skill_version=skills[2].version,
+        check_type="ic_agentic_review",
+        provider=analysis.provider,
+        model=analysis.model,
+        status=RunStatus.RUNNING.value,
+        current_stage="role:ic-financial-auditor",
+        run_parameters={},
+        artifacts=[],
+        uploaded_workbook_metadata={},
+    )
+    db_session.add_all([predicted, ic_review])
+    db_session.commit()
+    login(client, "author", "secret")
+
+    response = client.post(f"/analyses/{analysis.id}/cancel")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["structured_output"] == {"verdict": "need_evidence", "summary": "Needs evidence"}
+    assert payload["predicted_comment_run"]["status"] == "cancelled"
+    assert payload["ic_review_run"]["status"] == "cancelled"
+    db_session.refresh(analysis)
+    db_session.refresh(predicted)
+    db_session.refresh(ic_review)
+    assert analysis.status == RunStatus.COMPLETED.value
+    assert analysis.structured_output == {"verdict": "need_evidence", "summary": "Needs evidence"}
+    assert predicted.status == RunStatus.CANCELLED.value
+    assert ic_review.status == RunStatus.CANCELLED.value
+    assert ic_review.current_stage == "cancelled"
+
+
+def test_cancel_completed_gate_run_records_chain_stop_before_ic_review_exists(client, db_session):
+    user = create_user(db_session, "author", "secret")
+    skills = seed_baseline_skills(db_session)
+    document_id = _create_completed_document(client, db_session, user)
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=user.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="need_evidence",
+        summary="Needs evidence",
+        structured_output={"verdict": "need_evidence", "summary": "Needs evidence"},
+        raw_output="raw gate output",
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.flush()
+    predicted = PredictedCommentRun(
+        analysis_id=analysis.id,
+        skill_id=skills[1].id,
+        skill_version=skills[1].version,
+        provider=analysis.provider,
+        model=analysis.model,
+        status=RunStatus.COMPLETED.value,
+        structured_output={"run_mode": "full_ic_voting"},
+        run_parameters={},
+    )
+    db_session.add(predicted)
+    db_session.commit()
+    login(client, "author", "secret")
+
+    response = client.post(f"/analyses/{analysis.id}/cancel")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["structured_output"] == {"verdict": "need_evidence", "summary": "Needs evidence"}
+    assert payload["ic_review_run"] is None
+    assert payload["run_parameters"]["analysis_chain_cancel_requested_at"]
+    db_session.refresh(analysis)
+    db_session.refresh(predicted)
+    assert analysis.status == RunStatus.COMPLETED.value
+    assert analysis.structured_output == {"verdict": "need_evidence", "summary": "Needs evidence"}
+    assert analysis.run_parameters["analysis_chain_cancel_requested_at"]
+    assert predicted.status == RunStatus.COMPLETED.value
+
+
+def test_cancel_running_analysis_marks_main_run_cancelled(client, db_session):
+    user = create_user(db_session, "author", "secret")
+    skill = seed_baseline_skills(db_session)[0]
+    analysis = Analysis(
+        document_id=_create_completed_document(client, db_session, user),
+        user_id=user.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.RUNNING.value,
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.commit()
+    login(client, "author", "secret")
+
+    response = client.post(f"/analyses/{analysis.id}/cancel")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    db_session.refresh(analysis)
+    assert analysis.status == RunStatus.CANCELLED.value
+    assert analysis.error_message == "cancelled_by_user"
+    assert analysis.completed_at is not None
 
 
 def test_analysis_detail_includes_predicted_comment_run_without_raw_for_non_admin(client, db_session):

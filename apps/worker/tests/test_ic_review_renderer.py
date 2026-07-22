@@ -84,6 +84,7 @@ def test_role_prompt_includes_main_analysis_verdict_and_compact_schema_name():
     assert "need_evidence" in prompt
     assert "ic-agentic-role-result.schema.json" in prompt
     assert "Return only JSON" in prompt
+    assert "full_report_materials" in prompt
 
 
 def test_role_prompt_includes_workbook_context_only_when_workbook_exists():
@@ -98,9 +99,67 @@ def test_role_prompt_includes_workbook_context_only_when_workbook_exists():
         source_snapshot=_snapshot(),
     )
 
-    assert "Workbook Context" not in prompt_without_workbook
-    assert "Workbook Context" in prompt_with_workbook
+    assert '"workbook_context": null' in prompt_without_workbook
+    assert "critical_formula_issues_count" not in prompt_without_workbook
+    assert "workbook_context" in prompt_with_workbook
+    assert "## Workbook Context" not in prompt_with_workbook
     assert "critical_formula_issues_count" in prompt_with_workbook
+
+
+def test_role_prompt_compacts_large_workbook_context():
+    rows = [
+        {
+            "row_number": row_number,
+            "cells": [
+                {
+                    "address": f"{chr(65 + column_index)}{row_number}",
+                    "column": column_index + 1,
+                    "formula": f"=SUM(A{row_number}:B{row_number})" if column_index % 7 == 0 else None,
+                    "value": f"cell_text_{row_number}_{column_index}_" + ("x" * 80),
+                }
+                for column_index in range(30)
+            ],
+        }
+        for row_number in range(1, 81)
+    ]
+    workbook = {
+        "format": "xlsx_bounded_snapshot_v1",
+        "source_filename": "large-model.xlsx",
+        "sheet_count": 4,
+        "sheets": [
+            {
+                "name": f"Sheet {index}",
+                "dimensions": {"max_row": 180, "max_column": 60},
+                "rows_truncated": True,
+                "columns_truncated": True,
+                "rows": rows,
+            }
+            for index in range(4)
+        ],
+    }
+    context = ICReviewContext(
+        document_title="Gate 3: Courier Expansion",
+        document_type="gate_3",
+        parsed_document_text="CAC payback needs proof.",
+        main_analysis_verdict="need_evidence",
+        main_analysis_summary="Unit economics proof is incomplete.",
+        main_analysis_structured_output={"verdict": "need_evidence"},
+        main_analysis_detail_output=None,
+        workbook_extraction_summary=workbook,
+        formula_auditor_summary={"critical_formula_issues_count": 2, "issues": [{"cell": "P&L!B12"}]},
+        output_language="ru",
+    )
+
+    prompt = render_role_prompt(
+        role="ic-financial-auditor",
+        context=context,
+        source_snapshot=_snapshot(),
+    )
+
+    assert len(prompt) < 90_000
+    assert "large-model.xlsx" in prompt
+    assert "## Workbook Context" not in prompt
+    assert prompt.count("workbook_context") == 1
 
 
 def test_context_pack_keeps_traceable_evidence_without_repeating_full_document():
@@ -179,6 +238,7 @@ def test_synthesis_prompt_includes_all_eight_role_outputs_and_compact_schema_nam
             "findings": [],
             "data_gaps": [],
             "numbers_used": [],
+            "full_report_materials": _full_report_materials(role),
         }
         for role in ROLE_ORDER
     }
@@ -193,10 +253,9 @@ def test_synthesis_prompt_includes_all_eight_role_outputs_and_compact_schema_nam
         assert role in prompt
         assert f"Summary for {role}" in prompt
     assert "ic-agentic-review-result.schema.json" in prompt
-    assert "legacy-compatible JSON" in prompt
-    assert "compact_result" in prompt
-    assert "legacy_report_json" in prompt
-    assert "text debug artifact" in prompt
+    assert "worker will assemble the full PDF/Markdown report" in prompt
+    assert "do not return the full report here" in prompt
+    assert "full_report_materials" in prompt
     assert "Russian" in prompt
 
 
@@ -327,6 +386,7 @@ def test_role_run_parameters_add_provider_timeouts_and_preserve_overrides():
     assert defaulted["timeout_seconds"] == 600
     assert defaulted["connect_timeout_seconds"] == 30
     assert defaulted["max_retries"] == 3
+    assert defaulted["max_output_tokens"] == 32000
     assert defaulted["ic_review_role"] == "ic-product-analyst"
     assert overridden["timeout_seconds"] == 240
     assert overridden["connect_timeout_seconds"] == 15
@@ -406,6 +466,65 @@ def test_run_role_step_role_mock_overrides_global_mock(tmp_path):
         assert step.status == RunStatus.COMPLETED.value
         assert step.raw_output == "role raw"
         assert step.latency_ms == 2
+    finally:
+        db.close()
+
+
+def test_run_role_step_retries_invalid_json_once(tmp_path):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        role_result = _role_result("ic-financial-auditor")
+        check_run = _check_run(
+            analysis_id=analysis.id,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": '{"role": "ic-financial-auditor", "summary": "unterminated',
+                    "raw_output": "first invalid role raw",
+                    "input_tokens": 101,
+                    "output_tokens": 12000,
+                    "latency_ms": 303,
+                },
+                "role_json_retry_mock_provider_results": {
+                    "ic-financial-auditor": {
+                        "structured_text": json.dumps(role_result),
+                        "raw_output": "retry role raw",
+                        "input_tokens": 111,
+                        "output_tokens": 222,
+                        "latency_ms": 333,
+                    }
+                },
+            },
+        )
+        db.add_all([analysis, check_run])
+        db.commit()
+
+        structured = run_role_step(
+            session=db,
+            check_run=check_run,
+            analysis=analysis,
+            role="ic-financial-auditor",
+            context=_context(workbook=True),
+            source_snapshot=_snapshot(),
+            storage=LocalDocumentStorage(tmp_path / "storage"),
+        )
+
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        assert structured == role_result
+        assert step.status == RunStatus.COMPLETED.value
+        assert step.raw_output == "retry role raw"
+        assert step.input_tokens == 111
+        assert step.output_tokens == 222
+        assert step.latency_ms == 333
+        assert step.artifacts == [
+            {
+                "key": "role_json_retry",
+                "kind": "metadata",
+                "attempts": 2,
+                "reason": "Unterminated string starting at",
+                "retry_step": "ic-financial-auditor:json_retry",
+            }
+        ]
     finally:
         db.close()
 
@@ -564,4 +683,30 @@ def _role_result(role: str) -> dict:
         ],
         "data_gaps": ["Retention cohort by segment"],
         "numbers_used": [{"label": "Retention", "value": "unknown", "source": "Gate Challenger"}],
+        "full_report_materials": _full_report_materials(role),
+    }
+
+
+def _full_report_materials(role: str) -> dict:
+    return {
+        "section_drafts": [
+            {
+                "section_key": "section_5",
+                "title": "Product metrics",
+                "content": f"Detailed report material for {role}. Cohort proof is incomplete.",
+                "evidence_ids": ["doc-001"],
+            }
+        ],
+        "tables": [
+            {
+                "section_key": "section_5",
+                "title": "Metrics",
+                "markdown": "| Metric | Value |\n|---|---|\n| Retention | unknown |",
+            }
+        ],
+        "risks": [{"title": "Missing cohort proof", "detail": "Retention cohorts are absent.", "severity": "data_gap"}],
+        "data_gaps": [{"title": "Retention cohort", "detail": "Need retention cohort by segment."}],
+        "recommendations": [{"title": "Provide cohort table", "detail": "Add cohort table before IC decision."}],
+        "scenarios": [{"title": "Base", "detail": "Base case remains unverified until retention data is provided."}],
+        "primary_verify_notes": [f"{role} provides detailed source material."],
     }

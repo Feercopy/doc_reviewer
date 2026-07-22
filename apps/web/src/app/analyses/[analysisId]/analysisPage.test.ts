@@ -39,22 +39,50 @@ describe("analysis result page", () => {
     expect(layer2Source).not.toContain("evidenceDisplayLabel");
   });
 
-  it("adds document comments and IC review as focused tabs before Full Output", () => {
+  it("splits analysis output into Summary and nested Full Report tabs", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    const tabsSource = pageSource.slice(
+    const topTabsSource = pageSource.slice(
       pageSource.indexOf("const analysisTabs"),
+      pageSource.indexOf("const fullReportTabs"),
+    );
+    const fullReportTabsSource = pageSource.slice(
+      pageSource.indexOf("const fullReportTabs"),
       pageSource.indexOf("const feedbackRatings"),
     );
 
-    expect(tabsSource).toContain('{ id: "documentComments", label: "Document comments" }');
-    expect(tabsSource).toContain('{ id: "icReview", label: "IC review" }');
-    expect(tabsSource.indexOf("Gate Challenger")).toBeLessThan(tabsSource.indexOf("Document comments"));
-    expect(tabsSource.indexOf("Document comments")).toBeLessThan(tabsSource.indexOf("IC review"));
-    expect(tabsSource.indexOf("IC review")).toBeLessThan(tabsSource.indexOf("Full Output"));
-    expect(tabsSource).not.toContain('id: "devilsAdvocate"');
+    expect(topTabsSource).toContain('{ id: "executiveSummary", label: "Summary" }');
+    expect(topTabsSource).toContain('{ id: "fullReport", label: "Full Report" }');
+    expect(topTabsSource).not.toContain("Gate Challenger");
+    expect(topTabsSource).not.toContain("Document comments");
+    expect(fullReportTabsSource).toContain('{ id: "mainOutput", label: "Product Analysis" }');
+    expect(fullReportTabsSource).toContain('{ id: "icReview", label: "Financial Analysis" }');
+    expect(fullReportTabsSource).toContain('{ id: "documentComments", label: "Document comments" }');
+    expect(fullReportTabsSource).toContain('{ id: "fullOutput", label: "Full Output" }');
+    expect(fullReportTabsSource.indexOf("Product Analysis")).toBeLessThan(fullReportTabsSource.indexOf("Financial Analysis"));
+    expect(fullReportTabsSource.indexOf("Financial Analysis")).toBeLessThan(fullReportTabsSource.indexOf("Document comments"));
+    expect(fullReportTabsSource.indexOf("Document comments")).toBeLessThan(fullReportTabsSource.indexOf("Full Output"));
+    expect(fullReportTabsSource).not.toContain('id: "devilsAdvocate"');
+    expect(pageSource).toContain('const [activeTopTab, setActiveTopTab] = useState<AnalysisTopTab>("executiveSummary")');
+    expect(pageSource).toContain('const [activeFullReportTab, setActiveFullReportTab] = useState<FullReportTab>("mainOutput")');
+    expect(pageSource).toContain("function ResultPanel");
+    expect(pageSource).toContain('activeTopTab === "executiveSummary"');
+    expect(pageSource).toContain('activeTopTab === "fullReport"');
+    expect(pageSource).toContain("const shortSummary = analysisShortSummary(analysis)");
+    expect(pageSource).toContain("const agentVerdicts = buildAgentVerdicts(analysis)");
+    expect(pageSource).toContain('className="analysis-result-agent-verdicts"');
+    expect(pageSource).toContain("analysis-result-agent-verdict__marker");
+    expect(pageSource).toContain("<h2>Short Summary</h2>");
+    expect(pageSource).toContain("analysis-result-summary");
+    expect(pageSource).toContain("analysis-result-report");
+    expect(pageSource).toContain("function ResultReportSection");
+    expect(pageSource).toContain('title="Продуктовый анализ"');
+    expect(pageSource).toContain('title="Финансовый анализ"');
+    expect(pageSource).toContain("resultProductAnalysisMarkdown(analysis)");
+    expect(pageSource).toContain("truncateGateMarkdownBeforeIcRecommendations");
+    expect(pageSource).toContain("function IcReviewTextOutput");
     expect(pageSource).toContain("function DocumentCommentsPanel");
     expect(pageSource).toContain("function IcReviewPanel");
-    expect(pageSource).toContain('activeTab === "icReview"');
+    expect(pageSource).toContain('activeFullReportTab === "icReview"');
     expect(pageSource).not.toContain("Show in document");
     expect(pageSource).not.toContain("Copy anchor");
     expect(pageSource).not.toContain("All severity");
@@ -125,12 +153,14 @@ describe("analysis result page", () => {
 
   it("renders the short summary text across the full summary card width", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const shortSummaryParagraphRule = /^\.analysis-short-summary p \{[\s\S]*?\n\}/m.exec(pageSource)?.[0] || "";
     const shortSummaryParagraphStyles = pageSource.slice(
-      pageSource.indexOf(".analysis-short-summary p"),
+      pageSource.indexOf(shortSummaryParagraphRule),
       pageSource.indexOf(".analysis-detail-checks h3"),
     );
 
     expect(pageSource).toContain("<h3>Short summary</h3>");
+    expect(shortSummaryParagraphRule).toContain("width: 100%");
     expect(shortSummaryParagraphStyles).toContain("width: 100%");
     expect(shortSummaryParagraphStyles).not.toContain("max-width");
   });
@@ -209,6 +239,15 @@ describe("analysis result page", () => {
     expect(icPanelSource).toContain('run.status === "failed"');
     expect(icPanelSource).toContain("IC review failed:");
     expect(icPanelSource).toContain("run.error_message");
+    expect(icPanelSource).toContain("function IcReviewFullReportDownloads");
+    expect(icPanelSource).toContain('"artifact:legacy_report_pdf"');
+    expect(icPanelSource).toContain('"artifact:legacy_report_markdown"');
+    expect(icPanelSource).toContain("Скачать полный отчет");
+    expect(icPanelSource).toContain("Скачать PDF");
+    expect(icPanelSource).toContain("Скачать MD");
+    expect(icPanelSource.indexOf("<IcReviewFullReportDownloads run={run} />")).toBeLessThan(
+      icPanelSource.indexOf("<h3>Executive brief</h3>"),
+    );
     expect(icPanelSource).toContain('const setupControlsDisabled = analysis.status !== "completed" || isLaunching || runIsActive');
     expect(icPanelSource).toContain("const launchDisabled = launchAvailability.disabled || runIsActive");
     expect(icPanelSource).toContain("{!runIsActive ? (");
@@ -247,9 +286,12 @@ describe("analysis result page", () => {
     expect(pageSource).toContain("createAnalysisDetails");
     expect(pageSource).toContain("async function loadAnalysisDetails");
     expect(fullOutputSource).toContain("Load detailed Layer 1 / Layer 2");
+    expect(fullOutputSource).toContain("isAnalysisDetailsResponseIdMissing(analysis)");
+    expect(fullOutputSource).toContain("Gate Challenger response id was not saved");
     expect(fullOutputSource).toContain("analysis.detail_run?.status");
     expect(fullOutputSource).toContain("<DetailedGateChecksOutput analysis={analysis} />");
     expect(fullOutputSource).toContain("Detail run failed");
+    expect(pageSource).toContain("!analysis.run_parameters?.gate_challenger_response_id");
   });
 
   it("lets analysis tabs wrap on narrow screens without clipping Full Output", () => {
@@ -277,5 +319,77 @@ describe("analysis result page", () => {
     expect(pageSource).toContain(".analysis-feedback-submit {\n  width: 100%;\n  min-height: 44px;");
     expect(pageSource).toContain(".analysis-ic-workbook-upload {\n  position: relative;\n  display: flex;");
     expect(pageSource).toContain("min-height: 56px;");
+  });
+
+  it("styles the Result short summary block like Gate Challenger short summary with dark text", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const summaryStyles = pageSource.slice(
+      pageSource.indexOf(".analysis-result-summary {"),
+      pageSource.indexOf(".analysis-layout {"),
+    );
+    const gateSummaryStyles = pageSource.slice(
+      pageSource.indexOf(".analysis-short-summary {", pageSource.indexOf("const paperAnalysisOverrides")),
+      pageSource.indexOf(".analysis-section-heading", pageSource.indexOf("const paperAnalysisOverrides")),
+    );
+
+    expect(gateSummaryStyles).toContain("background: #f7f9fb;");
+    expect(summaryStyles).toContain("border: 1px solid #e5eaf0;");
+    expect(summaryStyles).toContain("background: #f7f9fb;");
+    expect(summaryStyles).toContain("color: #161616;");
+    expect(summaryStyles).toContain(".analysis-result-summary h2");
+    expect(summaryStyles).toContain(".analysis-result-summary p");
+  });
+
+  it("wraps Result blocks in a white auto-sized surface", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const resultSurfaceStyles = pageSource.slice(
+      pageSource.indexOf(".analysis-result-surface {"),
+      pageSource.indexOf(".analysis-result-stack {"),
+    );
+
+    expect(pageSource).toContain('<section className="analysis-result-surface" aria-label="Result">');
+    expect(resultSurfaceStyles).toContain("display: grid;");
+    expect(resultSurfaceStyles).toContain("width: 100%;");
+    expect(resultSurfaceStyles).toContain("height: auto;");
+    expect(resultSurfaceStyles).toContain("background: #ffffff;");
+  });
+
+  it("renders Summary analysis output as two collapsible report blocks", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const resultPanelSource = pageSource.slice(
+      pageSource.indexOf("function ResultPanel"),
+      pageSource.indexOf("function MainSkillMarkdownPanel"),
+    );
+
+    expect(resultPanelSource).toContain('<ResultReportSection title="Продуктовый анализ">');
+    expect(resultPanelSource).toContain('<ResultReportSection title="Финансовый анализ">');
+    expect(resultPanelSource).toContain("<details className=\"analysis-result-report-section\" open>");
+    expect(resultPanelSource).toContain("productAnalysisMarkdownForSummary(sections.main)");
+    expect(resultPanelSource).toContain("removeProductAnalysisSummaryExcludedSections");
+    expect(resultPanelSource).toContain("Рекомендация инвестиционного комитета");
+    expect(resultPanelSource).toContain("Что (?:можно|нужно) улучшить в документе");
+    expect(resultPanelSource).toContain("<IcReviewTextOutput display={financialDisplay} />");
+    expect(resultPanelSource).not.toContain("IcReviewFullReportDownloads");
+    expect(pageSource).toContain(".analysis-result-report-section__body > .gc-markdown-preview");
+  });
+
+  it("styles Summary report disclosure controls and financial brief as requested", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const reportSectionStyles = pageSource.slice(
+      pageSource.indexOf(".analysis-result-report-section {"),
+      pageSource.indexOf(".analysis-result-report-section__body {"),
+    );
+    const financialBriefStyles = pageSource.slice(
+      pageSource.indexOf(".analysis-result-ic-output .analysis-short-summary {"),
+      pageSource.indexOf(".analysis-layout {"),
+    );
+
+    expect(reportSectionStyles).toContain("background: #ffffff;");
+    expect(reportSectionStyles).toContain("font-weight: 900;");
+    expect(reportSectionStyles).toContain("border-color: #0e9f6e;");
+    expect(reportSectionStyles).toContain("background: #0e9f6e;");
+    expect(reportSectionStyles).toContain("color: #ffffff;");
+    expect(financialBriefStyles).toContain("background: #ffffff;");
+    expect(financialBriefStyles).toContain("color: #161616;");
   });
 });

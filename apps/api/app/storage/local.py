@@ -132,6 +132,11 @@ class LocalDocumentStorage:
         if run_dir.exists():
             shutil.rmtree(run_dir)
 
+    def delete_document_dir(self, *, owner_id: UUID, document_id: UUID) -> None:
+        document_dir = self._ensure_under_root(self.storage_root / "documents" / str(owner_id) / str(document_id))
+        if document_dir.exists():
+            shutil.rmtree(document_dir)
+
     def save_parsed_artifact(self, *, owner_id: UUID, document_id: UUID, parsed_text: str) -> Path:
         parsed_path = self.parsed_artifact_path(owner_id=owner_id, document_id=document_id)
         parsed_path.parent.mkdir(parents=True, exist_ok=True)

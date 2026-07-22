@@ -15,9 +15,11 @@ from app.schemas.enums import DocumentParseStatus, DocumentType
 from app.services.document_jobs import ParseDocumentEnqueue, enqueue_parse_document
 from app.services.documents import (
     DocumentNotFoundError,
+    DocumentReparseNotSupportedError,
     DocumentTooLargeError,
     UnsupportedDocumentFileTypeError,
-    create_document_from_upload,
+    cleanup_uploaded_document_bundle,
+    create_uploaded_document_bundle,
     delete_document_for_actor,
     get_document_for_actor,
     list_documents_for_actor,
@@ -41,6 +43,7 @@ def get_parse_document_enqueue() -> ParseDocumentEnqueue:
 @router.post("", response_model=DocumentRead, status_code=status.HTTP_201_CREATED)
 def create_document(
     file: Annotated[UploadFile, File()],
+    fin_summary_file: Annotated[UploadFile | None, File()] = None,
     title: Annotated[str | None, Form()] = None,
     manual_document_type: Annotated[DocumentType | None, Form()] = None,
     db: Session = Depends(get_db),
@@ -49,16 +52,25 @@ def create_document(
     enqueue: ParseDocumentEnqueue = Depends(get_parse_document_enqueue),
 ) -> Document:
     try:
-        document = create_document_from_upload(
+        bundle = create_uploaded_document_bundle(
             db=db,
             actor=current_user,
             storage=storage,
-            upload=file,
+            primary_upload=file,
+            fin_summary_upload=fin_summary_file,
             title=title,
             manual_document_type=manual_document_type,
         )
-        enqueue(document.id)
-        return document
+        try:
+            for document_id in bundle.enqueued_document_ids:
+                enqueue(document_id)
+        except Exception as exc:
+            cleanup_uploaded_document_bundle(db=db, storage=storage, primary_document_id=bundle.primary_document.id)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to enqueue document parsing",
+            ) from exc
+        return bundle.primary_document
     except UnsupportedDocumentFileTypeError as exc:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
@@ -176,6 +188,8 @@ def reparse_document(
         document = reset_document_for_reparse(db=db, actor=current_user, document_id=document_id)
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found") from exc
+    except DocumentReparseNotSupportedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     enqueue(document.id)
     return document

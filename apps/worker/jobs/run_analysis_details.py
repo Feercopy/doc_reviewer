@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from uuid import UUID
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -36,16 +37,21 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
             "worker_job_started",
             extra={"job_type": "run_analysis_details", "entity_id": str(detail_uuid), "status": "running"},
         )
-        detail_run = session.get(AnalysisDetailRun, detail_uuid)
+        detail_run = _claim_queued_detail_run(session=session, detail_uuid=detail_uuid)
         if detail_run is None:
-            raise ValueError(f"Analysis detail run {detail_run_id} not found")
+            existing = session.get(AnalysisDetailRun, detail_uuid)
+            if existing is None:
+                raise ValueError(f"Analysis detail run {detail_run_id} not found")
+            if existing.status == RunStatus.CANCELLED.value:
+                worker_logger.info(
+                    "worker_job_cancelled",
+                    extra={"job_type": "run_analysis_details", "entity_id": str(detail_uuid), "status": "cancelled"},
+                )
+            return
         analysis = session.get(Analysis, detail_run.analysis_id)
         if analysis is None:
             raise RuntimeError("analysis_context_missing")
 
-        detail_run.status = RunStatus.RUNNING.value
-        detail_run.started_at = utc_now()
-        detail_run.error_message = None
         _set_summary_details_status(analysis=analysis, status=RunStatus.RUNNING.value, detail_run=detail_run)
         session.commit()
 
@@ -82,41 +88,59 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
         result = get_provider_adapter(provider, detail_run.run_parameters).run_response(request)
         provider_raw_output = result.raw_output
         provider_structured_text = result.structured_text
+        if _detail_run_cancelled(session=session, detail_run=detail_run):
+            worker_logger.info(
+                "worker_job_cancelled",
+                extra={"job_type": "run_analysis_details", "entity_id": str(detail_uuid), "status": "cancelled"},
+            )
+            return
         structured = parse_and_validate_json_output(
             structured_text=result.structured_text,
             schema_path=DETAILS_SCHEMA_PATH,
         )
 
-        detail_run.previous_response_id = str(previous_response_id)
-        detail_run.response_id = result.provider_metadata.get("response_id")
-        detail_run.structured_output = structured
-        detail_run.raw_output = result.raw_output
-        detail_run.input_tokens = result.input_tokens
-        detail_run.output_tokens = result.output_tokens
-        detail_run.latency_ms = result.latency_ms
-        detail_run.estimated_cost = result.estimated_cost
-        detail_run.status = RunStatus.COMPLETED.value
-        detail_run.completed_at = utc_now()
-        _set_summary_details_status(analysis=analysis, status=RunStatus.COMPLETED.value, detail_run=detail_run)
-        session.commit()
+        if not _complete_detail_run_if_running(
+            session=session,
+            detail_run=detail_run,
+            analysis=analysis,
+            previous_response_id=str(previous_response_id),
+            response_id=result.provider_metadata.get("response_id"),
+            structured=structured,
+            raw_output=result.raw_output,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            latency_ms=result.latency_ms,
+            estimated_cost=result.estimated_cost,
+        ):
+            worker_logger.info(
+                "worker_job_cancelled",
+                extra={"job_type": "run_analysis_details", "entity_id": str(detail_uuid), "status": "cancelled"},
+            )
+            return
         worker_logger.info(
             "worker_job_completed",
             extra={"job_type": "run_analysis_details", "entity_id": str(detail_uuid), "status": "completed"},
         )
     except Exception as exc:
         session.rollback()
+        if not _fail_detail_run_if_active(
+            session=session,
+            detail_uuid=detail_uuid,
+            exc=exc,
+            provider_raw_output=provider_raw_output,
+            provider_structured_text=provider_structured_text,
+        ):
+            existing = session.get(AnalysisDetailRun, detail_uuid)
+            if existing is None:
+                raise
+            worker_logger.info(
+                "worker_job_cancelled",
+                extra={"job_type": "run_analysis_details", "entity_id": str(detail_uuid), "status": existing.status},
+            )
+            return
         failed = session.get(AnalysisDetailRun, detail_uuid)
         if failed is None:
             raise
-        failed.status = RunStatus.FAILED.value
-        failed.error_message = str(exc)
-        if provider_raw_output is not None and failed.raw_output is None:
-            failed.raw_output = provider_raw_output or provider_structured_text
-        failed.completed_at = utc_now()
-        analysis = session.get(Analysis, failed.analysis_id)
-        if analysis is not None:
-            _set_summary_details_status(analysis=analysis, status=RunStatus.FAILED.value, detail_run=failed)
-        session.commit()
         worker_logger.info(
             "worker_job_failed",
             extra={
@@ -133,6 +157,98 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
 
 def _get_provider_key(session: Session, provider: Provider) -> ProviderKey | None:
     return get_shared_provider_key(db=session, provider=provider)
+
+
+def _claim_queued_detail_run(*, session: Session, detail_uuid: UUID) -> AnalysisDetailRun | None:
+    result = session.execute(
+        update(AnalysisDetailRun)
+        .where(AnalysisDetailRun.id == detail_uuid, AnalysisDetailRun.status == RunStatus.QUEUED.value)
+        .values(status=RunStatus.RUNNING.value, started_at=utc_now(), error_message=None)
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        return None
+    session.commit()
+    return session.get(AnalysisDetailRun, detail_uuid)
+
+
+def _detail_run_cancelled(*, session: Session, detail_run: AnalysisDetailRun) -> bool:
+    session.refresh(detail_run)
+    return detail_run.status == RunStatus.CANCELLED.value
+
+
+def _complete_detail_run_if_running(
+    *,
+    session: Session,
+    detail_run: AnalysisDetailRun,
+    analysis: Analysis,
+    previous_response_id: str,
+    response_id: str | None,
+    structured: dict,
+    raw_output: str,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    latency_ms: int | None,
+    estimated_cost,
+) -> bool:
+    result = session.execute(
+        update(AnalysisDetailRun)
+        .where(AnalysisDetailRun.id == detail_run.id, AnalysisDetailRun.status == RunStatus.RUNNING.value)
+        .values(
+            previous_response_id=previous_response_id,
+            response_id=response_id,
+            structured_output=structured,
+            raw_output=raw_output,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=latency_ms,
+            estimated_cost=estimated_cost,
+            status=RunStatus.COMPLETED.value,
+            completed_at=utc_now(),
+        )
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        session.refresh(detail_run)
+        return False
+    _set_summary_details_status(analysis=analysis, status=RunStatus.COMPLETED.value, detail_run=detail_run)
+    session.commit()
+    session.refresh(detail_run)
+    return True
+
+
+def _fail_detail_run_if_active(
+    *,
+    session: Session,
+    detail_uuid: UUID,
+    exc: Exception,
+    provider_raw_output: str | None,
+    provider_structured_text: str | None,
+) -> bool:
+    failed = session.get(AnalysisDetailRun, detail_uuid)
+    if failed is None:
+        return False
+    raw_output = failed.raw_output
+    if provider_raw_output is not None and raw_output is None:
+        raw_output = provider_raw_output or provider_structured_text
+    result = session.execute(
+        update(AnalysisDetailRun)
+        .where(AnalysisDetailRun.id == detail_uuid, AnalysisDetailRun.status.in_([RunStatus.QUEUED.value, RunStatus.RUNNING.value]))
+        .values(
+            status=RunStatus.FAILED.value,
+            error_message=str(exc),
+            raw_output=raw_output,
+            completed_at=utc_now(),
+        )
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        return False
+    analysis = session.get(Analysis, failed.analysis_id)
+    if analysis is not None:
+        _set_summary_details_status(analysis=analysis, status=RunStatus.FAILED.value, detail_run=failed)
+    session.commit()
+    return True
 
 
 def _resolve_schema_path(schema_path: str) -> Path:

@@ -17,6 +17,7 @@ venv/
 
 node_modules/
 .npm-cache/
+.pnpm-store/
 .next/
 out/
 dist/
@@ -27,6 +28,8 @@ playwright-report/
 
 /storage/
 /repro/
+tmp/
+output/
 docs/handoffs/
 .local/
 *.log

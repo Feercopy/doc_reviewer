@@ -149,7 +149,17 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["formula_audit", "legacy_report_json", "legacy_report_text", "legacy_audit_xlsx", "validation_report", "script_log", "other"]
+          "enum": [
+            "formula_audit",
+            "legacy_report_json",
+            "legacy_report_markdown",
+            "legacy_report_pdf",
+            "legacy_report_text",
+            "legacy_audit_xlsx",
+            "validation_report",
+            "script_log",
+            "other"
+          ]
         },
         "filename": { "type": "string", "minLength": 1, "maxLength": 255 },
         "summary": { "type": "string", "maxLength": 500 }

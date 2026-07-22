@@ -47,15 +47,50 @@ def test_completed_run_without_workbook_skips_spreadsheet_audit_and_persists_art
             "failures_count": 0,
         }
         assert calls["workbook_path"] is None
-        assert [step.step_name for step in steps] == list(ROLE_ORDER)
-        assert all(step.raw_output == f"raw {step.step_name}" for step in steps)
+        assert [step.step_name for step in steps] == [*list(ROLE_ORDER), "result_short_summary", "result_rationale"]
+        role_steps = [step for step in steps if step.step_type == "role"]
+        result_steps = [step for step in steps if step.step_type == "result_synthesis"]
+        assert all(step.raw_output == f"raw {step.step_name}" for step in role_steps)
+        assert {step.step_name for step in result_steps} == {"result_short_summary", "result_rationale"}
+        assert all(step.prompt_artifact_path for step in result_steps)
+        assert all(step.raw_output for step in result_steps)
+        assert all(step.structured_output for step in result_steps)
+        assert all(
+            any(artifact.get("key") == "effective_run_parameters" for artifact in step.artifacts)
+            for step in result_steps
+        )
         assert check_run.run_parameters["synthesis_prompt_artifact_path"].endswith("/prompts/synthesis.txt")
         assert check_run.run_parameters["synthesis_prompt_fingerprint"]
         artifact_keys = {artifact["key"] for artifact in check_run.artifacts}
         assert "script:json_postprocess:stdout" in artifact_keys
-        assert "artifact:legacy_report_text" in artifact_keys
-        assert "artifact:legacy_report_pdf" not in artifact_keys
+        assert "script:pdf_generator:stdout" in artifact_keys
+        assert "artifact:legacy_report_markdown" in artifact_keys
+        assert "artifact:legacy_report_pdf" in artifact_keys
         assert "artifact:validation_report" in artifact_keys
+        pdf_artifact = next(artifact for artifact in check_run.artifacts if artifact["key"] == "artifact:legacy_report_pdf")
+        markdown_artifact = next(
+            artifact for artifact in check_run.artifacts if artifact["key"] == "artifact:legacy_report_markdown"
+        )
+        assert pdf_artifact["visibility"] == "user"
+        assert markdown_artifact["visibility"] == "user"
+        db.refresh(records["analysis"])
+        assert records["analysis"].structured_output["result"]["short_summary"] == _result_short_summary_text()
+        assert records["analysis"].structured_output["result"]["short_summary_status"] == "completed"
+        assert (
+            records["analysis"].structured_output["result"]["short_summary_metadata"]["skill"]["name"]
+            == "result_summary_synthesis"
+        )
+        assert records["analysis"].structured_output["result"]["short_summary_metadata"]["trace_step_id"]
+        assert records["analysis"].structured_output["result"]["rationale_markdown"] == _result_rationale_markdown()
+        assert records["analysis"].structured_output["result"]["rationale_items"] == _result_rationale_items()
+        assert records["analysis"].structured_output["result"]["critical_risks"] == ["Hiring scale-up may precede proof."]
+        assert records["analysis"].structured_output["result"]["data_gaps"] == ["No current A/B delta for uplift."]
+        assert records["analysis"].structured_output["result"]["rationale_status"] == "completed"
+        assert (
+            records["analysis"].structured_output["result"]["rationale_metadata"]["skill"]["name"]
+            == "result_rationale_synthesis"
+        )
+        assert records["analysis"].structured_output["result"]["rationale_metadata"]["trace_step_id"]
     finally:
         db.close()
 
@@ -90,7 +125,7 @@ def test_completed_run_persists_context_pack_and_avoids_full_document_repetition
         assert "CAC payback is 19 months" in json.dumps(context_pack, ensure_ascii=False)
         assert "FULL_RAW_DOCUMENT_SENTINEL" not in first_role_prompt
         assert "FULL_RAW_DOCUMENT_SENTINEL" not in synthesis_prompt
-        assert len(first_role_prompt) < len(f"{evidence}\n\n{raw_tail}") * 0.8
+        assert len(first_role_prompt) < 12_000
     finally:
         db.close()
 
@@ -130,6 +165,7 @@ def test_synthesis_run_parameters_add_provider_timeouts_and_preserve_overrides()
     assert defaulted["timeout_seconds"] == 600
     assert defaulted["connect_timeout_seconds"] == 30
     assert defaulted["max_retries"] == 3
+    assert defaulted["max_output_tokens"] == 12000
     assert defaulted["ic_review_step"] == "synthesis"
     assert overridden["timeout_seconds"] == 240
     assert overridden["connect_timeout_seconds"] == 20
@@ -393,18 +429,28 @@ def test_excel_or_validation_failure_marks_spreadsheet_audit_failed(tmp_path, mo
         db.close()
 
 
-def test_legacy_report_json_missing_required_shape_fails_before_scripts(tmp_path, monkeypatch):
+def test_invalid_compact_synthesis_shape_fails_before_scripts(tmp_path, monkeypatch):
     db = _create_session()
     calls: dict[str, object] = {}
     try:
-        records = _seed_run(db, tmp_path, monkeypatch=monkeypatch, workbook=False, legacy_report={"meta": {}})
+        records = _seed_run(
+            db,
+            tmp_path,
+            monkeypatch=monkeypatch,
+            workbook=False,
+            synthesis_mock_provider_result={
+                "structured_text": json.dumps({"compact_result": {"bad": True}, "legacy_report_json": _legacy_report()}),
+                "raw_output": "invalid compact",
+                "latency_ms": 1,
+            },
+        )
         _patch_script_pipeline(monkeypatch, calls, validation_text="should not run\n")
 
         run_ic_agentic_review(str(records["check_run"].id), db=db)
 
         db.refresh(records["check_run"])
         assert records["check_run"].status == RunStatus.FAILED.value
-        assert "invalid_synthesis_wrapper" in records["check_run"].error_message
+        assert "schema_validation_failed" in records["check_run"].error_message
         assert "workbook_path" not in calls
     finally:
         db.close()
@@ -449,8 +495,8 @@ def test_legacy_scenarios_list_is_normalized_for_original_scripts(tmp_path, monk
         db.refresh(records["check_run"])
         persisted_legacy = json.loads(calls["legacy_report_json_path"].read_text(encoding="utf-8"))
         assert records["check_run"].status == RunStatus.COMPLETED.value
-        assert records["check_run"].legacy_output["scenarios"] == {}
-        assert persisted_legacy["scenarios"] == {}
+        assert records["check_run"].legacy_output["scenarios"]
+        assert persisted_legacy["scenarios"]
     finally:
         db.close()
 
@@ -480,7 +526,57 @@ def test_overlong_compact_strings_are_trimmed_before_validation(tmp_path, monkey
         db.close()
 
 
-def test_malformed_legacy_array_type_fails_before_scripts(tmp_path, monkeypatch):
+def test_synthesis_invalid_json_retries_once_without_rerunning_roles(tmp_path, monkeypatch):
+    db = _create_session()
+    calls: dict[str, object] = {}
+    try:
+        records = _seed_run(
+            db,
+            tmp_path,
+            monkeypatch=monkeypatch,
+            workbook=False,
+            synthesis_mock_provider_result={
+                "structured_text": '{"compact_result": {"executive_brief": "unterminated',
+                "raw_output": "first invalid synthesis raw",
+                "input_tokens": 101,
+                "output_tokens": 202,
+                "latency_ms": 303,
+            },
+            synthesis_json_retry_mock_provider_result={
+                "structured_text": json.dumps(
+                    {
+                        "compact_result": _compact_result(workbook=False),
+                        "legacy_report_json": _legacy_report(),
+                    }
+                ),
+                "raw_output": "retry synthesis raw",
+                "input_tokens": 111,
+                "output_tokens": 222,
+                "latency_ms": 333,
+            },
+        )
+        _patch_script_pipeline(monkeypatch, calls, validation_text="validation ok\n")
+
+        run_ic_agentic_review(str(records["check_run"].id), db=db)
+
+        db.refresh(records["check_run"])
+        steps = db.execute(select(AnalysisCheckStep).order_by(AnalysisCheckStep.created_at)).scalars().all()
+
+        assert records["check_run"].status == RunStatus.COMPLETED.value
+        assert records["check_run"].raw_output == "retry synthesis raw"
+        assert records["check_run"].run_parameters["synthesis_json_retry"] == {
+            "attempts": 2,
+            "reason": "Unterminated string starting at",
+            "retry_step": "synthesis:json_retry",
+        }
+        role_steps = [step for step in steps if step.step_type == "role"]
+        assert [step.step_name for step in role_steps] == list(ROLE_ORDER)
+        assert [step.status for step in role_steps] == [RunStatus.COMPLETED.value] * len(ROLE_ORDER)
+    finally:
+        db.close()
+
+
+def test_malformed_legacy_wrapper_is_ignored_and_report_is_assembled_from_roles(tmp_path, monkeypatch):
     db = _create_session()
     calls: dict[str, object] = {}
     try:
@@ -494,9 +590,11 @@ def test_malformed_legacy_array_type_fails_before_scripts(tmp_path, monkeypatch)
         run_ic_agentic_review(str(records["check_run"].id), db=db)
 
         db.refresh(records["check_run"])
-        assert records["check_run"].status == RunStatus.FAILED.value
-        assert "invalid_synthesis_wrapper" in records["check_run"].error_message
-        assert "workbook_path" not in calls
+        persisted_legacy = json.loads(calls["legacy_report_json_path"].read_text(encoding="utf-8"))
+        assert records["check_run"].status == RunStatus.COMPLETED.value
+        assert isinstance(persisted_legacy["formula_issues"], list)
+        assert "Detailed full-report material" in persisted_legacy["sections"]["section_4"]["content"]
+        assert "workbook_path" in calls
     finally:
         db.close()
 
@@ -515,6 +613,19 @@ def test_synthesis_wrapper_schema_hoists_compact_result_defs_for_provider_refs()
     assert unresolved_refs == []
     assert "finding" in root_defs
     assert "finding" in review_schema["$defs"]
+
+
+def test_legacy_kpis_are_pairs_for_original_excel_audit():
+    compact_result = _compact_result(workbook=True)
+    compact_result["key_numbers"] = [
+        {"label": "NPV", "value": "12.3", "unit": "m RUB", "source": "model"},
+        {"label": "IRR", "value": "24%", "unit": "", "source": ""},
+    ]
+
+    assert job._legacy_kpis_from_compact(compact_result) == [
+        ["NPV", "12.3 m RUB | Source: model"],
+        ["IRR", "24%"],
+    ]
 
 
 def _create_session():
@@ -551,6 +662,8 @@ def _seed_run(
     invalid_role_payload: tuple[str, dict] | None = None,
     legacy_report: dict | None = None,
     compact_result: dict | None = None,
+    synthesis_mock_provider_result: dict | None = None,
+    synthesis_json_retry_mock_provider_result: dict | None = None,
     parsed_document_text: str = "The document claims break-even by month six.",
 ) -> dict:
     storage_root = tmp_path / "storage"
@@ -624,6 +737,32 @@ def _seed_run(
         runtime_mode="snapshot_required",
         status=EntityStatus.ACTIVE.value,
     )
+    result_summary_skill = Skill(
+        id=uuid4(),
+        name="result_summary_synthesis",
+        description="Result summary",
+        version="baseline",
+        skill_type=SkillType.RESULT_SUMMARY.value,
+        supported_document_types=[DocumentType.GATE_3.value],
+        source_type=SkillSourceType.INLINE_PROMPT.value,
+        prompt_text="Combine Gate Challenger recommendations and IC Review executive brief.",
+        result_schema_path="contracts/schemas/result-short-summary.schema.json",
+        runtime_mode="inline",
+        status=EntityStatus.ACTIVE.value,
+    )
+    result_rationale_skill = Skill(
+        id=uuid4(),
+        name="result_rationale_synthesis",
+        description="Result rationale",
+        version="baseline",
+        skill_type=SkillType.RESULT_SUMMARY.value,
+        supported_document_types=[DocumentType.GATE_3.value],
+        source_type=SkillSourceType.INLINE_PROMPT.value,
+        prompt_text="Combine Gate Challenger rationale and IC Review top findings.",
+        result_schema_path="contracts/schemas/result-rationale.schema.json",
+        runtime_mode="inline",
+        status=EntityStatus.ACTIVE.value,
+    )
     analysis = Analysis(
         id=uuid4(),
         document_id=document.id,
@@ -635,7 +774,16 @@ def _seed_run(
         status=RunStatus.COMPLETED.value,
         verdict="need_evidence",
         summary="Unit economics proof is incomplete.",
-        structured_output={"verdict": "need_evidence", "summary": "Needs proof."},
+        structured_output={
+            "verdict": "need_evidence",
+            "summary": "Needs proof.",
+            "assessment_markdown": (
+                "Оценка документа\n\n"
+                "Почему оценка именно такая:\n"
+                "- The case lacks proof for unit economics and rollout readiness.\n\n"
+                "Рекомендация: request more evidence."
+            ),
+        },
         run_parameters={"output_language": "ru"},
     )
     detail_run = AnalysisDetailRun(
@@ -648,6 +796,56 @@ def _seed_run(
         raw_output="raw detail",
     )
     snapshot_dir = _write_snapshot(tmp_path)
+    synthesis_result = synthesis_mock_provider_result or {
+        "structured_text": json.dumps(
+            {
+                "compact_result": compact_result if compact_result is not None else _compact_result(workbook=workbook),
+                "legacy_report_json": legacy_report if legacy_report is not None else _legacy_report(),
+            }
+        ),
+        "raw_output": "raw synthesis output",
+        "input_tokens": 101,
+        "output_tokens": 202,
+        "latency_ms": 303,
+    }
+    run_parameters = {
+        "output_language": "ru",
+        "source_snapshot_artifact_path": str(snapshot_dir),
+        "role_mock_provider_results": _role_provider_results(
+            failing_role=failing_role,
+            invalid_role_payload=invalid_role_payload,
+        ),
+        "synthesis_mock_provider_result": synthesis_result,
+        "result_summary_mock_provider_result": {
+            "structured_text": json.dumps(
+                {
+                    "run_mode": "result_short_summary",
+                    "short_summary": _result_short_summary_text(),
+                }
+            ),
+            "raw_output": "raw result summary output",
+            "input_tokens": 11,
+            "output_tokens": 22,
+            "latency_ms": 33,
+        },
+        "result_rationale_mock_provider_result": {
+            "structured_text": json.dumps(
+                {
+                    "run_mode": "result_rationale",
+                    "rationale_markdown": _result_rationale_markdown(),
+                    "rationale_items": _result_rationale_items(),
+                    "critical_risks": ["Hiring scale-up may precede proof."],
+                    "data_gaps": ["No current A/B delta for uplift."],
+                }
+            ),
+            "raw_output": "raw result rationale output",
+            "input_tokens": 44,
+            "output_tokens": 55,
+            "latency_ms": 66,
+        },
+    }
+    if synthesis_json_retry_mock_provider_result is not None:
+        run_parameters["synthesis_json_retry_mock_provider_result"] = synthesis_json_retry_mock_provider_result
     check_run = AnalysisCheckRun(
         id=uuid4(),
         analysis_id=analysis.id,
@@ -657,26 +855,7 @@ def _seed_run(
         provider=Provider.OPENAI_COMPATIBLE.value,
         model="gpt-test",
         status=RunStatus.QUEUED.value,
-        run_parameters={
-            "output_language": "ru",
-            "source_snapshot_artifact_path": str(snapshot_dir),
-            "role_mock_provider_results": _role_provider_results(
-                failing_role=failing_role,
-                invalid_role_payload=invalid_role_payload,
-            ),
-            "synthesis_mock_provider_result": {
-                "structured_text": json.dumps(
-                    {
-                        "compact_result": compact_result if compact_result is not None else _compact_result(workbook=workbook),
-                        "legacy_report_json": legacy_report if legacy_report is not None else _legacy_report(),
-                    }
-                ),
-                "raw_output": "raw synthesis output",
-                "input_tokens": 101,
-                "output_tokens": 202,
-                "latency_ms": 303,
-            },
-        },
+        run_parameters=run_parameters,
         artifacts=[],
         uploaded_workbook_metadata={},
     )
@@ -709,7 +888,20 @@ def _seed_run(
         artifact_path=str(snapshot_dir),
     )
 
-    db.add_all([admin, user, provider_key, document, main_skill, check_skill, analysis, detail_run, check_run, snapshot_row])
+    db.add_all([
+        admin,
+        user,
+        provider_key,
+        document,
+        main_skill,
+        check_skill,
+        result_summary_skill,
+        result_rationale_skill,
+        analysis,
+        detail_run,
+        check_run,
+        snapshot_row,
+    ])
     db.commit()
     return {
         "analysis": analysis,
@@ -785,6 +977,32 @@ def _role_result(role: str) -> dict:
         "findings": [],
         "data_gaps": [],
         "numbers_used": [],
+        "full_report_materials": _full_report_materials(role),
+    }
+
+
+def _full_report_materials(role: str) -> dict:
+    return {
+        "section_drafts": [
+            {
+                "section_key": "section_4",
+                "title": "Financial model",
+                "content": f"Detailed full-report material from {role}.",
+                "evidence_ids": ["doc-001"],
+            }
+        ],
+        "tables": [
+            {
+                "section_key": "section_4",
+                "title": "P&L",
+                "markdown": "| Metric | Value |\n|---|---|\n| EBITDA | unknown |",
+            }
+        ],
+        "risks": [{"title": "Evidence gap", "detail": "Evidence remains incomplete.", "severity": "critical"}],
+        "data_gaps": [{"title": "Metric proof", "detail": "Need measured metric proof."}],
+        "recommendations": [{"title": "Keep gated", "detail": "Keep approval gated until evidence is provided."}],
+        "scenarios": [{"title": "Base", "detail": "Base case depends on unverified assumptions."}],
+        "primary_verify_notes": [f"{role} provides full-report source material."],
     }
 
 
@@ -801,7 +1019,15 @@ def _compact_result(*, workbook: bool) -> dict:
         "verdict": "CONDITIONAL",
         "executive_brief": brief,
         "confidence": 0.72,
-        "top_findings": [],
+        "top_findings": [
+            {
+                "title": "Unit economics proof gap",
+                "severity": "critical",
+                "summary": "The case depends on rollout economics that are not yet proven.",
+                "evidence": "The IC review found missing cohort evidence and model assumptions.",
+                "recommendation": "Keep the approval gated until proof and model reconciliation are complete.",
+            }
+        ],
         "key_numbers": [],
         "spreadsheet_audit": {
             "status": "completed" if workbook else "not_provided",
@@ -810,8 +1036,8 @@ def _compact_result(*, workbook: bool) -> dict:
             "critical_formula_issues_count": 0,
             "source_filename": "model.xlsx" if workbook else None,
         },
-        "critical_risks": [],
-        "data_gaps": [],
+        "critical_risks": ["Hiring scale-up may precede proof."],
+        "data_gaps": ["No current A/B delta for uplift."],
         "required_actions": [],
         "questions_for_team": [],
         "role_summaries": [
@@ -832,6 +1058,33 @@ def _compact_result(*, workbook: bool) -> dict:
         },
         "artifacts": [],
     }
+
+
+def _result_short_summary_text() -> str:
+    return (
+        "Gate Challenger and IC Review converge on a conditional decision: the case has a coherent opportunity, "
+        "but approval should wait until the team closes evidence gaps, validates unit economics, and documents "
+        "risk mitigations needed for an IC-ready launch."
+    )
+
+
+def _result_rationale_markdown() -> str:
+    return (
+        "Оценка остается условной, потому что Gate Challenger уже фиксирует недостаточную доказанность "
+        "unit economics и rollout readiness, а IC Review усиливает этот вывод: top finding показывает, что "
+        "масштабирование зависит от еще не подтвержденных экономических допущений. Поэтому полный approval "
+        "нельзя выдавать до закрытия cohort evidence, reconciled model assumptions и owner-specific mitigations."
+    )
+
+
+def _result_rationale_items() -> list[dict]:
+    return [
+        {
+            "title": "Главный uplift не доказан текущей фактической дельтой.",
+            "detail": "Gate Challenger and IC Review both point to missing uplift evidence.",
+            "sources": ["gate_challenger", "ic_review"],
+        }
+    ]
 
 
 def _legacy_report() -> dict:
@@ -900,6 +1153,7 @@ def _patch_script_pipeline(monkeypatch, calls: dict[str, object], *, validation_
         logs_dir.mkdir(parents=True, exist_ok=True)
         artifacts_dir.mkdir(parents=True, exist_ok=True)
         script_names = ["json_postprocess", "validate_report"]
+        script_names.insert(1, "pdf_generator")
         if kwargs["workbook_path"] is not None:
             if kwargs.get("formula_audit_json_path") is None:
                 script_names.insert(0, "formula_auditor")
@@ -930,11 +1184,14 @@ def _patch_script_pipeline(monkeypatch, calls: dict[str, object], *, validation_
         validation_report.write_text(validation_text, encoding="utf-8")
         postprocessed = artifacts_dir / "postprocessed_legacy_report.json"
         postprocessed.write_text("{}", encoding="utf-8")
-        legacy_text = artifacts_dir / "legacy_report.txt"
-        legacy_text.write_text("legacy report text", encoding="utf-8")
+        legacy_markdown = artifacts_dir / "legacy_report.md"
+        legacy_markdown.write_text("# legacy report", encoding="utf-8")
+        legacy_pdf = artifacts_dir / "legacy_report.pdf"
+        legacy_pdf.write_bytes(b"%PDF-1.4\n")
         artifacts = {
             "postprocessed_json": str(postprocessed),
-            "legacy_report_text": str(legacy_text),
+            "legacy_report_markdown": str(legacy_markdown),
+            "legacy_report_pdf": str(legacy_pdf),
             "validation_report": str(validation_report),
         }
         if kwargs["workbook_path"] is not None:
