@@ -15,6 +15,7 @@ from app.schemas.enums import DocumentParseStatus, DocumentType
 from app.services.document_jobs import ParseDocumentEnqueue, enqueue_parse_document
 from app.services.documents import (
     DocumentNotFoundError,
+    DocumentReparseNotSupportedError,
     DocumentTooLargeError,
     UnsupportedDocumentFileTypeError,
     cleanup_uploaded_document_bundle,
@@ -187,6 +188,8 @@ def reparse_document(
         document = reset_document_for_reparse(db=db, actor=current_user, document_id=document_id)
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found") from exc
+    except DocumentReparseNotSupportedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     enqueue(document.id)
     return document

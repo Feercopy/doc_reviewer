@@ -495,6 +495,34 @@ def test_reparse_resets_parse_state_and_enqueues_job(api_client, db_session, enq
     assert document.parse_error is None
 
 
+def test_reparse_rejects_fin_summary_without_enqueuing_generic_parser(api_client, db_session, enqueued_parse_jobs):
+    create_user(db_session, "author", "secret")
+    login(api_client, "author", "secret")
+    upload = api_client.post(
+        "/documents",
+        files={
+            "file": ("gate-2.docx", b"main defense", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            "fin_summary_file": (
+                "fin-summary.xlsx",
+                valid_xlsx_bytes(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        },
+    )
+    assert upload.status_code == 201
+    fin_summary_id = UUID(upload.json()["linked_fin_summary_document_id"])
+    enqueued_parse_jobs.clear()
+
+    response = api_client.post(f"/documents/{fin_summary_id}/reparse")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Fin Summary workbooks do not use document parsing"
+    assert enqueued_parse_jobs == []
+    fin_summary = db_session.get(Document, fin_summary_id)
+    assert fin_summary.parse_status == DocumentParseStatus.COMPLETED.value
+    assert fin_summary.parse_error is None
+
+
 def test_rejects_oversized_upload_with_413(api_client, db_session):
     create_user(db_session, "author", "secret")
     login(api_client, "author", "secret")

@@ -70,7 +70,7 @@ Out of MVP:
 9. [09-frontend-ui.md](./09-frontend-ui.md) - frontend pages and workflows.
 10. [10-admin-observability-testing.md](./10-admin-observability-testing.md) - admin sections, audit logs, operational testing.
 11. [11-gate2-etalon-benchmark-layers.md](./11-gate2-etalon-benchmark-layers.md) - Gate Challenger etalon and benchmark layer extensions.
-12. [12-ic-agentic-review-check.md](./12-ic-agentic-review-check.md) - optional manually launched IC Agentic Review check inside completed analyses.
+12. [12-ic-agentic-review-check.md](./12-ic-agentic-review-check.md) - automatically launched IC Agentic Review with manual relaunch and downloadable full reports.
 
 ## Delivery Sequence
 
@@ -107,7 +107,7 @@ Exit criteria:
 - [ ] Implement `05-skills-providers-secrets.md`.
 - [ ] Implement `06-analysis-worker-results-feedback.md`.
 - [ ] Implement analysis screens from `09-frontend-ui.md`.
-- [ ] Implement optional manually launched IC Agentic Review checks from
+- [ ] Implement automatically launched IC Agentic Review checks with manual relaunch from
   `12-ic-agentic-review-check.md` after the core analysis runtime is stable.
 
 Exit criteria:
@@ -116,7 +116,7 @@ Exit criteria:
 - user launches analysis;
 - worker persists structured output and raw output;
 - second predicted-comments skill runs after the main analysis;
-- user can manually launch IC Agentic Review from a completed analysis and see a compact result;
+- IC Agentic Review starts after a completed analysis, can be relaunched manually, and exposes a compact result plus downloadable Markdown/PDF reports;
 - user can leave feedback.
 
 ### Phase 4: Etalons and Benchmarks

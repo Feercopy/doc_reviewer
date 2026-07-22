@@ -42,6 +42,10 @@ class DocumentNotFoundError(ValueError):
     pass
 
 
+class DocumentReparseNotSupportedError(ValueError):
+    pass
+
+
 class UploadedDocumentBundle:
     def __init__(self, primary_document: Document, enqueued_document_ids: list[UUID]) -> None:
         self.primary_document = primary_document
@@ -405,6 +409,8 @@ def attach_fin_summary_document(
 
 def reset_document_for_reparse(*, db: Session, actor: User, document_id: UUID) -> Document:
     document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
+    if document.document_role == DocumentRole.FIN_SUMMARY.value:
+        raise DocumentReparseNotSupportedError("Fin Summary workbooks do not use document parsing")
     document.parse_status = DocumentParseStatus.QUEUED.value
     document.detected_document_type = DocumentType.UNKNOWN.value
     document.document_type_confidence = None

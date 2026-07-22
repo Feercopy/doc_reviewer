@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a manually launched IC Agentic Review tab inside a completed product analysis, with optional `.xlsx` financial-model audit and reproducible raw, prompt, script, validation, and compact result artifacts.
+**Goal:** Automatically launch IC Agentic Review after a product analysis completes, retain manual relaunch controls, use an optional linked or run-uploaded `.xlsx` financial model, and preserve reproducible raw, prompt, script, validation, compact-result, Markdown, and PDF artifacts.
 
-**Architecture:** IC Agentic Review is a separate auxiliary analysis run, not part of the main Gate Challenger run and not a predicted-comments run. The frontend exposes a dedicated analysis tab where the user launches the check after the product analysis has completed, optionally attaching one `.xlsx` model. The worker runs one RQ job that calls the provider directly for each original IC role prompt and a synthesis prompt, then runs the original deterministic scripts from a snapshotted `IC-Agentic-Review` source; the UI renders only a compact structured result.
+**Architecture:** IC Agentic Review is a separate auxiliary analysis run, not a predicted-comments run. After Gate Challenger completes, the main worker creates and enqueues the IC run and reuses the primary document's linked Fin Summary when present. The dedicated analysis tab still supports manual launch or relaunch with one optional `.xlsx` model. One RQ job calls the provider directly for each original IC role prompt and a synthesis prompt, then runs the original deterministic scripts from a snapshotted `IC-Agentic-Review` source. The compact structured result remains the primary UI, with generated Markdown and PDF reports available as user downloads.
 
 **Tech Stack:** FastAPI, SQLAlchemy, Alembic, Pydantic, RQ, Redis, existing provider adapters, JSON Schema, Next.js, TypeScript, Python subprocess with no shell, `openpyxl`, `reportlab`, `scipy`, `numpy`.
 
@@ -16,17 +16,16 @@ This plan implements a middle version between a text-only MVP and full multi-mat
 
 Included:
 
-- Manual launch from a new `IC review` tab on `/analyses/{analysisId}`.
-- Launch is allowed only when the main product analysis status is `completed`.
-- One optional `.xlsx` upload at launch time.
+- Automatic launch after the main product analysis reaches `completed`, with manual launch or relaunch retained in the `IC review` tab.
+- One optional linked Fin Summary `.xlsx` from document upload, or one `.xlsx` supplied during manual launch.
 - If `.xlsx` is present, run spreadsheet extraction, `formula_auditor.py`, and `excel_audit.py`.
 - If `.xlsx` is absent, mark spreadsheet audit as `not_provided` and skip spreadsheet checks.
 - Run the original eight IC role prompts as direct provider calls inside one worker job, not as Claude Code subagents.
 - Persist raw output for every role call.
 - Persist synthesis prompt and synthesis raw output.
 - Persist postprocess log, validation report, and deterministic script artifacts.
-- Render a compact UI-native result, not the long PDF report.
-- Preserve legacy-compatible JSON, generated debug text, and XLSX as internal reproducibility artifacts when scripts produce them.
+- Render a compact UI-native result as the primary view and expose generated Markdown and PDF reports as user downloads.
+- Preserve legacy-compatible JSON, raw/script artifacts, and XLSX outputs as internal reproducibility artifacts when scripts produce them.
 
 Not included:
 
@@ -34,7 +33,7 @@ Not included:
 - Multiple financial models per IC review run.
 - `.xls`, `.xlsm`, `.csv`, or Google Sheets import.
 - Live web browsing for `ic-web-researcher`; the role receives only document, main-analysis, and uploaded workbook context.
-- Scheduled or automatic IC review runs.
+- Scheduled IC review runs outside the automatic post-analysis chain.
 - Reusing Claude Code Agent/subagent infrastructure.
 
 ## External Source
@@ -207,7 +206,8 @@ New storage layout:
 {STORAGE_ROOT}/ic-review/{analysis_id}/{run_id}/scripts/{script_name}.stderr.txt
 {STORAGE_ROOT}/ic-review/{analysis_id}/{run_id}/artifacts/formula_audit.json
 {STORAGE_ROOT}/ic-review/{analysis_id}/{run_id}/artifacts/postprocessed_legacy_report.json
-{STORAGE_ROOT}/ic-review/{analysis_id}/{run_id}/artifacts/legacy_report.txt
+{STORAGE_ROOT}/ic-review/{analysis_id}/{run_id}/artifacts/legacy_report.md
+{STORAGE_ROOT}/ic-review/{analysis_id}/{run_id}/artifacts/legacy_report.pdf
 {STORAGE_ROOT}/ic-review/{analysis_id}/{run_id}/artifacts/legacy_audit.xlsx
 {STORAGE_ROOT}/ic-review/{analysis_id}/{run_id}/artifacts/validation_report.txt
 ```
@@ -238,30 +238,28 @@ New storage layout:
 
 ## Runtime Flow
 
-1. User opens completed analysis.
-2. User switches to `IC review` tab.
-3. Tab shows latest IC review run if one exists.
-4. If no active run exists, user can launch a new run.
-5. User optionally selects one `.xlsx` file.
-6. API validates analysis access and completed main status.
-7. API creates `analysis_check_runs` row with `check_type=ic_agentic_review`.
-8. API stores uploaded workbook under `STORAGE_ROOT`.
-9. API snapshots the `IC-Agentic-Review` source and links it to the check run.
-10. API enqueues `run_ic_agentic_review`.
-11. Worker prepares document context from parsed document text and completed main-analysis structured output.
-12. If workbook exists, worker extracts a bounded workbook text summary and runs `formula_auditor.py`.
-13. Worker renders and runs the eight role prompts through the existing provider adapter.
-14. Worker stores each role prompt, raw output, structured output, token counts, latency, and errors.
-15. Worker renders synthesis prompt and calls the provider.
-16. Worker stores synthesis prompt, raw synthesis output, compact result, and legacy-compatible JSON.
-17. Worker runs deterministic scripts from the source snapshot:
+1. Gate Challenger completes the main analysis.
+2. The worker creates and enqueues an `analysis_check_runs` row with `check_type=ic_agentic_review`.
+3. If the primary document has a linked Fin Summary, the API copies the validated `.xlsx` into run-owned storage and records its provenance.
+4. The user opens the completed analysis and the `IC review` tab shows the latest automatic run.
+5. If no reusable run exists or a relaunch is needed, the user can start a manual run and optionally select one `.xlsx` file.
+6. The API validates analysis access and completed main status for manual launches.
+7. The API snapshots the `IC-Agentic-Review` source and links it to the check run.
+8. The API enqueues `run_ic_agentic_review`; enqueue failures transition the run to `failed`.
+9. Worker prepares document context from parsed document text and completed main-analysis structured output.
+10. If workbook exists, worker extracts a bounded workbook text summary and runs `formula_auditor.py`.
+11. Worker renders and runs the eight role prompts through the existing provider adapter.
+12. Worker stores each role prompt, raw output, structured output, token counts, latency, and errors.
+13. Worker renders synthesis prompt and calls the provider.
+14. Worker stores synthesis prompt, raw synthesis output, compact result, and legacy-compatible JSON.
+15. Worker runs deterministic scripts from the source snapshot:
     - `json_postprocess.py`
-    - save `legacy_report.txt` debug text from the postprocessed JSON
+    - generate `legacy_report.md` and `legacy_report.pdf` from the postprocessed JSON
     - `excel_audit.py` only when `.xlsx` is provided
     - `validate_report.py`
-18. Worker stores script stdout, stderr, generated artifacts, and validation report.
-19. Worker marks run `completed` when compact result validates and scripts finish without `FAIL`.
-20. Worker marks run `failed` when compact result cannot be validated, source snapshot is unavailable, provider key is missing, or a required deterministic script fails.
+16. Worker stores script stdout, stderr, generated artifacts, and validation report.
+17. Worker marks run `completed` when compact result validates and scripts finish without `FAIL`.
+18. Worker marks run `failed` when compact result cannot be validated, source snapshot is unavailable, provider key is missing, or a required deterministic script fails.
 
 ## Tasks
 
@@ -442,8 +440,8 @@ Expected: IC review API tests pass.
 
 Acceptance:
 
-- IC review is manually launched and gated on completed product analysis.
-- Workbook upload is scoped to the IC review run, not to general document upload.
+- IC review is automatically launched after completed product analysis, while manual launch remains gated on completed status.
+- The automatic run can reuse a linked Fin Summary workbook; manual launch can still upload a run-scoped workbook.
 - Uploaded workbook paths are protected by database ownership checks.
 
 ### Task 5: Worker Workbook Parser And Script Runner
@@ -470,7 +468,8 @@ Acceptance:
 - [ ] Implement script calls:
   - `formula_auditor.py <xlsx> --json --output <formula_audit.json>`
   - `json_postprocess.py <legacy_report.json>`
-  - Save `<legacy_report.txt>` from `<postprocessed_json>` as a debug artifact instead of generating PDF.
+  - Generate `<legacy_report.md>` deterministically from `<postprocessed_json>`.
+  - `pdf_generator.py --json <postprocessed_json> --output <legacy_report.pdf>`
   - `excel_audit.py --source <xlsx> --data <postprocessed_json> --formula-json <formula_audit.json> --output <legacy_audit.xlsx>`
   - `validate_report.py --json <postprocessed_json> --excel <legacy_audit.xlsx>` when workbook exists.
 - [ ] For no-workbook runs, skip `formula_auditor.py` and `excel_audit.py`, then run `validate_report.py --json <postprocessed_json>`.
@@ -578,7 +577,7 @@ Acceptance:
 - [ ] Set `current_stage=postprocess`.
 - [ ] Run `json_postprocess.py` and update legacy artifact path.
 - [ ] Set `current_stage=legacy_artifacts`.
-- [ ] Save `legacy_report.txt` debug text from the postprocessed JSON.
+- [ ] Save user-visible `legacy_report.md` and `legacy_report.pdf` from the postprocessed JSON.
 - [ ] If workbook exists, run `excel_audit.py`.
 - [ ] Set `current_stage=validation`.
 - [ ] Run `validate_report.py` and parse counts of `[FAIL]` and `[!]`.
@@ -661,7 +660,7 @@ Acceptance:
 
 - [ ] Add tab id `icReview` with label `IC review`.
 - [ ] Disable launch controls when main analysis status is not `completed`.
-- [ ] Show a compact empty state explaining that IC review starts manually after product analysis completion.
+- [ ] Show automatic queued/running state after product analysis completion and retain a compact manual launch fallback when no reusable run exists.
 - [ ] Add provider/model selection using the same configured model list already used on document detail.
 - [ ] Add output language selection.
 - [ ] Add `.xlsx` file input with client-side extension check.
@@ -693,7 +692,7 @@ Expected: analysis page tests pass.
 
 Acceptance:
 
-- IC review is discoverable inside the analysis page, but never starts automatically.
+- IC review starts automatically after the main analysis completes; manual launch remains available as a fallback or relaunch path.
 - The user can upload `.xlsx` directly on the tab.
 - The UI stays concise and does not render the legacy PDF report as primary output.
 
@@ -741,12 +740,12 @@ Acceptance:
 
 ## Implementation Notes
 
-- Do not change the main document upload supported file list for this plan. `.xlsx` belongs only to IC review launch.
+- Keep `.xlsx` forbidden as the primary document. It may be attached only as a linked Fin Summary or uploaded to a manual IC review run.
 - Do not reuse `predicted_comment_runs`; IC review is not predicted comments.
 - Do not call model providers from the frontend.
 - Do not trust artifact paths from the frontend.
 - Do not store raw private document text in the `IC-Agentic-Review` source repository.
-- Do not display legacy PDF as the main result. The compact schema is the product UI contract.
+- Do not display the generated PDF as the main result. The compact schema is the primary product UI contract; Markdown and PDF are downloadable artifacts.
 - Do not create commits unless the user explicitly asks.
 
 ## Self-Review
@@ -754,8 +753,8 @@ Acceptance:
 Spec coverage:
 
 - Separate tab inside completed analysis: Task 10.
-- Manual launch only after product analysis completes: Tasks 4 and 10.
-- Optional `.xlsx` upload/parser/audit on the tab: Tasks 4, 5, 7, and 10.
+- Automatic launch after product analysis completes, with manual fallback: Tasks 4 and 10.
+- Optional linked or run-uploaded `.xlsx` parser/audit: Tasks 4, 5, 7, and 10.
 - No workbook means no spreadsheet checks: Tasks 5, 7, and 10.
 - Same original deterministic workflow scripts: Task 5 and Task 7.
 - Unified worker flow without subagents: Task 6 and Task 7.

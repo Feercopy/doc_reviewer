@@ -21,6 +21,15 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Close the final PR #3 follow-up before merge: reject `reparse` for linked
+  Fin Summary workbooks with `409` so `.xlsx` can never re-enter the generic
+  document parser, add regression coverage that preserves the completed
+  workbook state without enqueueing a job, and update the canonical IC Review
+  plan for the accepted automatic launch, manual relaunch, linked workbook,
+  and user-visible Markdown/PDF behavior. Verified focused document upload
+  tests (`21 passed`), full API tests (`191 passed`), worker tests (`154
+  passed`), web tests (`138 passed`), production web build, Docker Compose
+  config, and `git diff --check`.
 - [x] Address follow-up PR #3 blockers from 2026-07-21 re-review: linked Fin Summary `.xlsx` uploads are no longer enqueued into the generic document parser and are stored as completed workbook artifacts for IC Review use, while the cancellation regression fixture now includes required provider-result latency metadata. Verified syntax, `git diff --check`, focused API upload tests (`18 passed`), focused worker details tests (`2 passed`), full worker suite (`146 passed`), and full API suite (`185 passed`).
 - [x] Address PR #3 review blockers except the explicitly accepted scope item
   about automatic IC Review/user-visible PDF: restored primary upload extension
