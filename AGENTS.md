@@ -73,6 +73,18 @@ Canonical external skill sources:
   tools.
 - Use `.env.example` for non-secret configuration templates only.
 
+## Code Review Rules
+
+- Flag changes that weaken authorization, artifact ownership checks, secret
+  handling, or the frontend/backend/worker boundaries defined above.
+- Flag persisted analyses, findings, benchmarks, or feedback that lose their
+  traceability to source artifacts, skill snapshots, provider/model metadata,
+  run parameters, structured output, or permitted raw output.
+- Flag contract or database changes that omit the matching shared schema,
+  Alembic migration, compatibility handling, or focused regression coverage.
+- Flag production workflow changes that broaden token or SSH privileges, expose
+  secrets, deploy an unverified commit, or bypass health checks and rollback.
+
 ## Infrastructure Access
 
 - When root access is required for `178.250.159.250`, use the SSH identity

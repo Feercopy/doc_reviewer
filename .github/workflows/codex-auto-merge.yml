@@ -1,0 +1,536 @@
+name: Merge after clean Codex review
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  issue_comment:
+    types:
+      - created
+  pull_request_review:
+    types:
+      - submitted
+  workflow_run:
+    workflows:
+      - Verify and deploy production
+    types:
+      - completed
+
+permissions: {}
+
+jobs:
+  record-review-head:
+    name: Record the exact review target
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Record the full PR head SHA in trusted metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if ! printf '%s\n' "$REVIEW_HEAD_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "GitHub did not provide a full PR head SHA."
+            exit 1
+          fi
+
+          marker="<!-- codex-review-head:$REVIEW_HEAD_SHA -->"
+          existing_marker="$(
+            gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+              --paginate \
+              --jq ".[] | select(
+                .user.login == \"github-actions[bot]\" and
+                .user.id == 41898282 and
+                .user.type == \"Bot\" and
+                .body == \"$marker\"
+              ) | .id" \
+              | head -n 1
+          )"
+
+          if [ -z "$existing_marker" ]; then
+            gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+              --method POST \
+              -f body="$marker" \
+              >/dev/null
+          fi
+
+  capture-clean-review:
+    name: Bind the clean review to an exact SHA
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request != null &&
+      github.event.comment.user.login == 'chatgpt-codex-connector[bot]' &&
+      github.event.comment.user.id == 199175422 &&
+      github.event.comment.user.type == 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    outputs:
+      clean: ${{ steps.review_state.outputs.clean }}
+    steps:
+      - name: Resolve the abbreviated Codex SHA through trusted head records
+        id: review_state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          CODEX_REVIEW_BODY: ${{ github.event.comment.body }}
+        run: |
+          case "$CODEX_REVIEW_BODY" in
+            "Codex Review: Didn't find any major issues."*) ;;
+            *)
+              echo "The Codex comment is not a clean review result."
+              blocked_head_prefix="$(
+                printf '%s\n' "$CODEX_REVIEW_BODY" \
+                  | sed -nE 's/^\*\*Reviewed commit:\*\* `([0-9a-f]{7,40})`$/\1/p' \
+                  | head -n 1
+              )"
+
+              if [ -z "$blocked_head_prefix" ]; then
+                echo "The non-clean Codex comment does not identify its reviewed commit."
+                echo "clean=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+
+              blocked_heads=()
+              for _ in $(seq 1 12); do
+                readarray -t recorded_heads < <(
+                  gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+                    --paginate \
+                    --jq '.[] | select(
+                      .user.login == "github-actions[bot]" and
+                      .user.id == 41898282 and
+                      .user.type == "Bot" and
+                      (.body | test("^<!-- codex-review-head:[0-9a-f]{40} -->$"))
+                    ) | .body' \
+                    | sed -nE 's/^<!-- codex-review-head:([0-9a-f]{40}) -->$/\1/p' \
+                    | sort -u
+                )
+
+                blocked_heads=()
+                for recorded_head in "${recorded_heads[@]}"; do
+                  case "$recorded_head" in
+                    "$blocked_head_prefix"*) blocked_heads+=("$recorded_head") ;;
+                  esac
+                done
+
+                if [ "${#blocked_heads[@]}" -ne 0 ]; then
+                  break
+                fi
+                sleep 5
+              done
+
+              if [ "${#blocked_heads[@]}" -ne 1 ]; then
+                echo "The abbreviated blocked SHA does not map to one trusted full head SHA."
+                exit 1
+              fi
+
+              blocked_head_sha="${blocked_heads[0]}"
+              stale_marker="<!-- codex-clean-head:$blocked_head_sha -->"
+              readarray -t stale_marker_ids < <(
+                gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+                  --paginate \
+                  --jq ".[] | select(
+                    .user.login == \"github-actions[bot]\" and
+                    .user.id == 41898282 and
+                    .user.type == \"Bot\" and
+                    .body == \"$stale_marker\"
+                  ) | .id"
+              )
+              for marker_id in "${stale_marker_ids[@]}"; do
+                gh api "repos/$GH_REPO/issues/comments/$marker_id" --method DELETE
+              done
+              echo "clean=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          reviewed_head_prefix="$(
+            printf '%s\n' "$CODEX_REVIEW_BODY" \
+              | sed -nE 's/^\*\*Reviewed commit:\*\* `([0-9a-f]{7,40})`$/\1/p' \
+              | head -n 1
+          )"
+
+          if [ -z "$reviewed_head_prefix" ]; then
+            echo "The clean Codex comment does not identify its reviewed commit."
+            exit 1
+          fi
+
+          matching_heads=()
+          for _ in $(seq 1 12); do
+            readarray -t recorded_heads < <(
+              gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+                --paginate \
+                --jq '.[] | select(
+                  .user.login == "github-actions[bot]" and
+                  .user.id == 41898282 and
+                  .user.type == "Bot" and
+                  (.body | test("^<!-- codex-review-head:[0-9a-f]{40} -->$"))
+                ) | .body' \
+                | sed -nE 's/^<!-- codex-review-head:([0-9a-f]{40}) -->$/\1/p' \
+                | sort -u
+            )
+
+            matching_heads=()
+            for recorded_head in "${recorded_heads[@]}"; do
+              case "$recorded_head" in
+                "$reviewed_head_prefix"*) matching_heads+=("$recorded_head") ;;
+              esac
+            done
+
+            if [ "${#matching_heads[@]}" -ne 0 ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [ "${#matching_heads[@]}" -ne 1 ]; then
+            echo "The abbreviated Codex SHA does not map to one trusted full head SHA."
+            exit 1
+          fi
+
+          reviewed_head_sha="${matching_heads[0]}"
+          current_head_sha="$(
+            gh pr view "$PR_NUMBER" \
+              --repo "$GH_REPO" \
+              --json headRefOid,isDraft \
+              --jq 'select(.isDraft == false) | .headRefOid'
+          )"
+
+          if [ "$current_head_sha" != "$reviewed_head_sha" ]; then
+            echo "The pull request changed after the clean Codex review."
+            exit 1
+          fi
+
+          clean_marker="<!-- codex-clean-head:$reviewed_head_sha -->"
+          gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+            --method POST \
+            -f body="$clean_marker" \
+            >/dev/null
+
+          echo "clean=true" >> "$GITHUB_OUTPUT"
+
+  invalidate-non-clean-review:
+    name: Invalidate an older clean result after findings
+    if: >-
+      github.event_name == 'pull_request_review' &&
+      github.event.review.user.login == 'chatgpt-codex-connector[bot]' &&
+      github.event.review.user.id == 199175422 &&
+      github.event.review.user.type == 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Remove clean authorization for the reviewed commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEWED_HEAD_SHA: ${{ github.event.review.commit_id }}
+        run: |
+          if ! printf '%s\n' "$REVIEWED_HEAD_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "Codex review did not provide a full commit SHA."
+            exit 1
+          fi
+
+          clean_marker="<!-- codex-clean-head:$REVIEWED_HEAD_SHA -->"
+          readarray -t marker_ids < <(
+            gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+              --paginate \
+              --jq ".[] | select(
+                .user.login == \"github-actions[bot]\" and
+                .user.id == 41898282 and
+                .user.type == \"Bot\" and
+                .body == \"$clean_marker\"
+              ) | .id"
+          )
+
+          for marker_id in "${marker_ids[@]}"; do
+            gh api "repos/$GH_REPO/issues/comments/$marker_id" --method DELETE
+          done
+
+  merge-clean-codex-review:
+    name: Merge clean Codex-reviewed PR
+    needs:
+      - capture-clean-review
+    if: >-
+      always() &&
+      (
+        needs.capture-clean-review.outputs.clean == 'true' ||
+        (
+          github.event_name == 'workflow_run' &&
+          github.event.workflow_run.event == 'pull_request' &&
+          github.event.workflow_run.conclusion == 'success'
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      checks: read
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Find an exact clean-reviewed current head
+        id: clean_head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMENT_PR_NUMBER: ${{ github.event.issue.number }}
+          WORKFLOW_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          pr_number="${COMMENT_PR_NUMBER:-$WORKFLOW_PR_NUMBER}"
+          if ! printf '%s\n' "$pr_number" | grep -Eq '^[0-9]+$'; then
+            echo "No pull request is associated with this event."
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          current_head_sha="$(
+            gh pr view "$pr_number" \
+              --repo "$GH_REPO" \
+              --json headRefOid,isDraft,state \
+              --jq 'select(.isDraft == false and .state == "OPEN") | .headRefOid'
+          )"
+
+          if [ -z "$current_head_sha" ]; then
+            echo "The pull request is draft, closed, or has no readable head."
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          clean_marker="<!-- codex-clean-head:$current_head_sha -->"
+          trusted_clean_marker="$(
+            gh api "repos/$GH_REPO/issues/$pr_number/comments" \
+              --paginate \
+              --jq ".[] | select(
+                .user.login == \"github-actions[bot]\" and
+                .user.id == 41898282 and
+                .user.type == \"Bot\" and
+                .body == \"$clean_marker\"
+              ) | .id" \
+              | head -n 1
+          )"
+
+          if [ -z "$trusted_clean_marker" ]; then
+            echo "The current head has no trusted clean-review record."
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+          echo "reviewed_head_sha=$current_head_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Require successful release verification
+        id: verification
+        if: steps.clean_head.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.clean_head.outputs.pr_number }}
+        run: |
+          checks_json="$(
+            gh pr checks "$PR_NUMBER" \
+              --repo "$GH_REPO" \
+              --required \
+              --json name,bucket \
+              2>/dev/null || true
+          )"
+
+          verify_bucket="$(
+            printf '%s\n' "$checks_json" \
+              | jq -r '[.[] | select(.name == "Verify release")][-1].bucket // "missing"'
+          )"
+
+          case "$verify_bucket" in
+            pass)
+              echo "passed=true" >> "$GITHUB_OUTPUT"
+              ;;
+            pending)
+              echo "Release verification is still pending; workflow_run will retry."
+              echo "passed=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Required check 'Verify release' is missing or unsuccessful: $verify_bucket"
+              exit 1
+              ;;
+          esac
+
+      - name: Revalidate, schedule deployment, and merge
+        id: merge
+        if: steps.verification.outputs.passed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.clean_head.outputs.pr_number }}
+          REVIEWED_HEAD_SHA: ${{ steps.clean_head.outputs.reviewed_head_sha }}
+        run: |
+          revalidate_latest_codex_result() {
+            comments_json="$(
+              gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" --paginate --slurp
+            )"
+            reviews_json="$(
+              gh api "repos/$GH_REPO/pulls/$PR_NUMBER/reviews" --paginate --slurp
+            )"
+            events_json="$(
+              gh api "repos/$GH_REPO/issues/$PR_NUMBER/events" --paginate --slurp
+            )"
+
+            latest_clean_at="$(
+              printf '%s\n' "$comments_json" \
+                | jq -r --arg head "$REVIEWED_HEAD_SHA" '
+                    add
+                    | map(select(
+                        .user.login == "chatgpt-codex-connector[bot]" and
+                        .user.id == 199175422 and
+                        .user.type == "Bot" and
+                        (.body | startswith("Codex Review: Didn\u0027t find any major issues.")) and
+                        (.body | test("\\*\\*Reviewed commit:\\*\\* `[0-9a-f]{7,40}`"))
+                      ))
+                    | map(. + {
+                        reviewed_prefix: (
+                          .body
+                          | capture("\\*\\*Reviewed commit:\\*\\* `(?<sha>[0-9a-f]{7,40})`")
+                          | .sha
+                        )
+                      })
+                    | map(select(.reviewed_prefix as $prefix | $head | startswith($prefix)))
+                    | map(.created_at)
+                    | max // empty
+                  '
+            )"
+
+            trusted_clean_marker_count="$(
+              printf '%s\n' "$comments_json" \
+                | jq -r --arg marker "<!-- codex-clean-head:$REVIEWED_HEAD_SHA -->" '
+                    add
+                    | map(select(
+                        .user.login == "github-actions[bot]" and
+                        .user.id == 41898282 and
+                        .user.type == "Bot" and
+                        .body == $marker
+                      ))
+                    | length
+                  '
+            )"
+
+            latest_non_clean_comment_at="$(
+              printf '%s\n' "$comments_json" \
+                | jq -r --arg head "$REVIEWED_HEAD_SHA" '
+                    add
+                    | map(select(
+                        .user.login == "chatgpt-codex-connector[bot]" and
+                        .user.id == 199175422 and
+                        .user.type == "Bot" and
+                        (.body | startswith("Codex Review: Didn\u0027t find any major issues.") | not) and
+                        (.body | test("\\*\\*Reviewed commit:\\*\\* `[0-9a-f]{7,40}`"))
+                      ))
+                    | map(. + {
+                        reviewed_prefix: (
+                          .body
+                          | capture("\\*\\*Reviewed commit:\\*\\* `(?<sha>[0-9a-f]{7,40})`")
+                          | .sha
+                        )
+                      })
+                    | map(select(.reviewed_prefix as $prefix | $head | startswith($prefix)))
+                    | map(.created_at)
+                    | max // empty
+                  '
+            )"
+
+            latest_findings_at="$(
+              printf '%s\n' "$reviews_json" \
+                | jq -r --arg head "$REVIEWED_HEAD_SHA" '
+                    add
+                    | map(select(
+                        .user.login == "chatgpt-codex-connector[bot]" and
+                        .user.id == 199175422 and
+                        .user.type == "Bot" and
+                        .commit_id == $head
+                      ))
+                    | map(.submitted_at)
+                    | max // empty
+                  '
+            )"
+
+            if [ -n "$latest_non_clean_comment_at" ] && \
+              { [ -z "$latest_findings_at" ] || [[ "$latest_findings_at" < "$latest_non_clean_comment_at" ]]; }; then
+              latest_findings_at="$latest_non_clean_comment_at"
+            fi
+
+            latest_reopen_at="$(
+              printf '%s\n' "$events_json" \
+                | jq -r 'add | map(select(.event == "reopened")) | map(.created_at) | max // empty'
+            )"
+
+            if [ -z "$latest_clean_at" ]; then
+              echo "No trusted clean Codex result exists for the current head."
+              return 1
+            fi
+
+            if [ "$trusted_clean_marker_count" -lt 1 ]; then
+              echo "The clean Codex authorization marker was invalidated."
+              return 1
+            fi
+
+            if [ -n "$latest_findings_at" ] && \
+              [[ "$latest_clean_at" < "$latest_findings_at" || "$latest_clean_at" == "$latest_findings_at" ]]; then
+              echo "A newer Codex review contains findings."
+              return 1
+            fi
+
+            if [ -n "$latest_reopen_at" ] && \
+              [[ "$latest_clean_at" < "$latest_reopen_at" || "$latest_clean_at" == "$latest_reopen_at" ]]; then
+              echo "The pull request was reopened after its clean Codex review."
+              return 1
+            fi
+          }
+
+          sleep 15
+          revalidate_latest_codex_result
+          sleep 5
+          revalidate_latest_codex_result
+          current_head_sha="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json headRefOid --jq '.headRefOid')"
+
+          if [ "$current_head_sha" != "$REVIEWED_HEAD_SHA" ]; then
+            echo "The pull request changed after Codex review; waiting for a fresh review."
+            exit 1
+          fi
+
+          gh workflow run deploy-production.yml \
+            --repo "$GH_REPO" \
+            --ref main \
+            -f pull_request_number="$PR_NUMBER" \
+            -f reviewed_head_sha="$REVIEWED_HEAD_SHA"
+
+          gh pr merge "$PR_NUMBER" \
+            --repo "$GH_REPO" \
+            --squash \
+            --match-head-commit "$REVIEWED_HEAD_SHA"
+
+          merge_commit_sha="$(
+            gh pr view "$PR_NUMBER" \
+              --repo "$GH_REPO" \
+              --json mergeCommit \
+              --jq '.mergeCommit.oid'
+          )"
+
+          if [ -z "$merge_commit_sha" ] || [ "$merge_commit_sha" = "null" ]; then
+            echo "GitHub did not return the merge commit SHA."
+            exit 1
+          fi
+
+          echo "merge_commit_sha=$merge_commit_sha" >> "$GITHUB_OUTPUT"

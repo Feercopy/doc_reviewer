@@ -21,6 +21,24 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] Automate clean Codex-reviewed PR merges: enabled repository-wide
+  automatic and exhaustive Codex reviews on every PR update, and added a
+  least-privilege workflow that records every full PR head SHA as trusted
+  metadata, resolves Codex's abbreviated clean-review SHA only when it maps to
+  exactly one recorded head, and squash-merges only that unchanged commit after
+  the required `Verify release` check passes. A later Codex review with findings
+  invalidates an earlier clean marker, marker creation races receive a bounded
+  retry, and pending checks are retried from the verification workflow's
+  completion event instead of a long watcher. Write permissions are scoped per
+  job; immediately before merge, the workflow revalidates that no newer Codex
+  review/comment findings or PR reopen event supersedes the clean result and
+  that its trusted authorization marker still exists. Non-clean comments
+  invalidate only their own uniquely resolved full commit SHA. The workflow
+  verifies the exact Codex GitHub App identity, performs its last revalidation
+  in the same step as the guarded merge, and durably queues deployment before
+  merging; the deployment workflow reconciles the resulting merge commit and
+  uses a concurrency group separate from PR verification. Activation is pending
+  PR merge and successful GitHub Actions completion.
 - [x] Automate production releases after verified merges to `main`: added a
   GitHub Actions verification/deploy workflow, release-tagged production images,
   a root-owned server deployer with a restricted SSH entrypoint, immutable

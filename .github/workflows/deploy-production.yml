@@ -8,22 +8,114 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact main commit to verify and deploy
+        required: false
+        type: string
+      pull_request_number:
+        description: PR to reconcile after a token-driven merge
+        required: false
+        type: string
+      reviewed_head_sha:
+        description: Exact reviewed PR head expected before merge
+        required: false
+        type: string
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
-  group: gate-challenger-production
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('gate-challenger-pr-{0}', github.event.pull_request.number) || 'gate-challenger-production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  resolve-release:
+    name: Resolve exact release commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      release_sha: ${{ steps.release.outputs.release_sha }}
+    steps:
+      - name: Resolve direct or reconciled release SHA
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_SHA: ${{ github.sha }}
+          INPUT_RELEASE_SHA: ${{ inputs.release_sha }}
+          INPUT_PR_NUMBER: ${{ inputs.pull_request_number }}
+          INPUT_REVIEWED_HEAD_SHA: ${{ inputs.reviewed_head_sha }}
+        run: |
+          if [ -n "$INPUT_RELEASE_SHA" ]; then
+            if ! printf '%s\n' "$INPUT_RELEASE_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+              echo "release_sha must be a full commit SHA."
+              exit 1
+            fi
+            echo "release_sha=$INPUT_RELEASE_SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -n "$INPUT_PR_NUMBER" ] || [ -n "$INPUT_REVIEWED_HEAD_SHA" ]; then
+            if ! printf '%s\n' "$INPUT_PR_NUMBER" | grep -Eq '^[0-9]+$' || \
+              ! printf '%s\n' "$INPUT_REVIEWED_HEAD_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+              echo "PR reconciliation requires a PR number and full reviewed head SHA."
+              exit 1
+            fi
+
+            for _ in $(seq 1 60); do
+              pr_json="$(
+                gh pr view "$INPUT_PR_NUMBER" \
+                  --repo "$GH_REPO" \
+                  --json headRefOid,state,mergeCommit
+              )"
+              current_head_sha="$(printf '%s\n' "$pr_json" | jq -r '.headRefOid')"
+              state="$(printf '%s\n' "$pr_json" | jq -r '.state')"
+
+              if [ "$current_head_sha" != "$INPUT_REVIEWED_HEAD_SHA" ]; then
+                echo "The pull request head changed before deployment reconciliation."
+                exit 1
+              fi
+
+              if [ "$state" = "MERGED" ]; then
+                merge_commit_sha="$(printf '%s\n' "$pr_json" | jq -r '.mergeCommit.oid')"
+                if ! printf '%s\n' "$merge_commit_sha" | grep -Eq '^[0-9a-f]{40}$'; then
+                  echo "GitHub did not return the merged commit SHA."
+                  exit 1
+                fi
+                echo "release_sha=$merge_commit_sha" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+
+              if [ "$state" = "CLOSED" ]; then
+                echo "The pull request closed without merging."
+                exit 1
+              fi
+
+              sleep 10
+            done
+
+            echo "The pull request did not merge within the reconciliation window."
+            exit 1
+          fi
+
+          if ! printf '%s\n' "$EVENT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "GitHub did not provide a full event SHA."
+            exit 1
+          fi
+          echo "release_sha=$EVENT_SHA" >> "$GITHUB_OUTPUT"
+
   verify:
     name: Verify release
+    needs: resolve-release
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Check out the exact release commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.resolve-release.outputs.release_sha }}
 
       - name: Validate deployment scripts
         run: |
@@ -58,7 +150,9 @@ jobs:
 
   deploy:
     name: Deploy production
-    needs: verify
+    needs:
+      - resolve-release
+      - verify
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -79,6 +173,7 @@ jobs:
       - name: Deploy the verified commit
         env:
           PROD_HOST: ${{ secrets.PROD_HOST }}
+          RELEASE_SHA: ${{ needs.resolve-release.outputs.release_sha }}
         run: |
           ssh \
             -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
@@ -87,4 +182,4 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/deploy-ssh/known_hosts" \
             "gate-deploy@$PROD_HOST" \
-            "deploy $GITHUB_SHA"
+            "deploy $RELEASE_SHA"
