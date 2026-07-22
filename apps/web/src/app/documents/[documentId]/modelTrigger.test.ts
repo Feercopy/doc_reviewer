@@ -85,4 +85,23 @@ describe("document detail analysis controls", () => {
 
     expect(source).toContain("document_type_override: document?.manual_document_type ?? document?.detected_document_type");
   });
+
+  it("keeps the blocked analysis marker circular like the ready marker", () => {
+    const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
+    const markerStyles = source.slice(
+      source.indexOf(".document-detail .gc-step span {"),
+      source.indexOf(".document-detail .gc-step.is-active span {"),
+    );
+    const blockedMarkerStyles = source.slice(
+      source.indexOf(".document-detail .gc-step.is-blocked span {"),
+      source.indexOf(".document-detail .gc-step.is-active {"),
+    );
+
+    expect(markerStyles).toContain("width: 11px;");
+    expect(markerStyles).toContain("height: 11px;");
+    expect(markerStyles).toContain("flex: 0 0 11px;");
+    expect(markerStyles).toContain("border-radius: 999px;");
+    expect(blockedMarkerStyles).toContain("background: #c92036;");
+    expect(blockedMarkerStyles).not.toContain("border-radius:");
+  });
 });

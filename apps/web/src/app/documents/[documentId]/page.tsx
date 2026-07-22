@@ -986,7 +986,6 @@ const documentDetailStyles = `
 }
 
 .document-detail .gc-step.is-blocked span {
-  border-radius: 2px;
   background: #c92036;
 }
 

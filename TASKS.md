@@ -21,7 +21,7 @@ Primary plan index:
 
 ## Current Focus
 
-- [~] Automate production releases after verified merges to `main`: added a
+- [x] Automate production releases after verified merges to `main`: added a
   GitHub Actions verification/deploy workflow, release-tagged production images,
   a root-owned server deployer with a restricted SSH entrypoint, immutable
   release directories, serialized deploys, pre-migration PostgreSQL backups,
@@ -34,8 +34,10 @@ Primary plan index:
   `git diff --check`, full API (`196 passed`) and worker (`155 passed`) suites,
   full web tests (`139 passed`), production web build, production Alembic head,
   internal/public health responses, public login `200`, and unchanged running
-  containers. Activation and the first workflow-driven release are pending PR
-  merge and successful GitHub Actions completion.
+  containers. Required `Verify release` for an up-to-date `main`, squash-merged
+  PR #4 as `cf1882f`, and completed the first workflow-driven production release:
+  release verification passed in 3m09s and the restricted server deploy with
+  migrations, skill refresh, health checks, and release switch passed in 2m05s.
 - [x] Release merged PR #3 plus the integrated local runtime updates to
   production: pushed `main` through `06ad76b`, exported Gate Challenger source
   `bfe1ee2`, backed up the previous deployment under
