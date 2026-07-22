@@ -21,6 +21,7 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Address follow-up PR #3 blockers from 2026-07-21 re-review: linked Fin Summary `.xlsx` uploads are no longer enqueued into the generic document parser and are stored as completed workbook artifacts for IC Review use, while the cancellation regression fixture now includes required provider-result latency metadata. Verified syntax, `git diff --check`, focused API upload tests (`18 passed`), focused worker details tests (`2 passed`), full worker suite (`146 passed`), and full API suite (`185 passed`).
 - [x] Address PR #3 review blockers except the explicitly accepted scope item
   about automatic IC Review/user-visible PDF: restored primary upload extension
   allowlist while allowing only valid `.xlsx` Fin Summary attachments, made

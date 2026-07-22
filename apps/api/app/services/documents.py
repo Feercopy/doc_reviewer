@@ -200,10 +200,7 @@ def create_uploaded_document_bundle(
         db.refresh(primary_document)
         return UploadedDocumentBundle(
             primary_document=primary_document,
-            enqueued_document_ids=[
-                primary_document.id,
-                *([fin_summary_document.id] if fin_summary_document is not None else []),
-            ],
+            enqueued_document_ids=[primary_document.id],
         )
     except Exception:
         db.rollback()
@@ -480,6 +477,11 @@ def _build_document(
     extension: str,
     stored_file,
 ) -> Document:
+    parse_status = (
+        DocumentParseStatus.COMPLETED.value
+        if document_role == DocumentRole.FIN_SUMMARY
+        else DocumentParseStatus.QUEUED.value
+    )
     return Document(
         id=document_id,
         owner_id=actor.id,
@@ -489,7 +491,7 @@ def _build_document(
         file_size_bytes=stored_file.size_bytes,
         file_hash_sha256=stored_file.sha256,
         storage_path=str(stored_file.path),
-        parse_status=DocumentParseStatus.QUEUED.value,
+        parse_status=parse_status,
         detected_document_type=DocumentType.UNKNOWN.value,
         manual_document_type=manual_document_type.value if manual_document_type else None,
         document_role=document_role.value,

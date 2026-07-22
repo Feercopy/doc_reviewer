@@ -175,14 +175,18 @@ def test_upload_can_attach_fin_summary_document_to_primary_document(api_client, 
     fin_summary = db_session.get(Document, UUID(payload["linked_fin_summary_document_id"]))
     assert primary.document_role == DocumentRole.PRIMARY.value
     assert fin_summary.document_role == DocumentRole.FIN_SUMMARY.value
+    assert primary.parse_status == DocumentParseStatus.QUEUED.value
+    assert fin_summary.parse_status == DocumentParseStatus.COMPLETED.value
+    assert fin_summary.parse_error is None
     assert primary.linked_fin_summary_document_id == fin_summary.id
-    assert enqueued_parse_jobs == [str(primary.id), str(fin_summary.id)]
+    assert enqueued_parse_jobs == [str(primary.id)]
 
     documents_response = api_client.get("/documents")
     assert documents_response.status_code == 200
     documents = documents_response.json()["documents"]
     assert [document["original_filename"] for document in documents] == ["gate-2.docx"]
     assert documents[0]["linked_fin_summary_document"]["original_filename"] == "fin-summary.xlsx"
+    assert documents[0]["linked_fin_summary_document"]["parse_status"] == DocumentParseStatus.COMPLETED.value
 
 
 def test_upload_rejects_invalid_fin_summary_without_primary_or_storage_artifacts(
@@ -213,7 +217,7 @@ def test_upload_rejects_invalid_fin_summary_without_primary_or_storage_artifacts
     assert not any(path.is_file() for path in storage_root.rglob("*"))
 
 
-def test_upload_cleans_primary_and_fin_summary_when_second_enqueue_fails(
+def test_upload_cleans_primary_and_fin_summary_when_primary_enqueue_fails(
     client,
     db_session,
     storage_root,
@@ -222,8 +226,7 @@ def test_upload_cleans_primary_and_fin_summary_when_second_enqueue_fails(
 
     def flaky_enqueue(document_id):
         enqueued.append(str(document_id))
-        if len(enqueued) == 2:
-            raise RuntimeError("redis unavailable")
+        raise RuntimeError("redis unavailable")
 
     app.dependency_overrides[documents_router.get_parse_document_enqueue] = lambda: flaky_enqueue
     try:
@@ -245,7 +248,7 @@ def test_upload_cleans_primary_and_fin_summary_when_second_enqueue_fails(
 
         assert response.status_code == 500
         assert response.json()["detail"] == "Failed to enqueue document parsing"
-        assert len(enqueued) == 2
+        assert len(enqueued) == 1
         assert db_session.query(Document).count() == 0
         assert db_session.query(AuditLog).count() == 0
         assert not any(path.is_file() for path in storage_root.rglob("*"))

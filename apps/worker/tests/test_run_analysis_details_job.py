@@ -187,6 +187,7 @@ def test_run_analysis_details_does_not_overwrite_cancelled_status_after_provider
                     "structured_text": json.dumps(_details_output(str(analysis.id))),
                     "raw_output": "raw detail responses",
                     "provider_metadata": {"response_id": "resp-detail-1"},
+                    "latency_ms": 100,
                 },
             },
         )
