@@ -21,6 +21,15 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Release merged PR #3 plus the integrated local runtime updates to
+  production: pushed `main` through `06ad76b`, exported Gate Challenger source
+  `bfe1ee2`, backed up the previous deployment under
+  `/opt/gate-challenger/backups/release-06ad76b-20260722085456`, built fresh
+  API/worker/web images, applied Alembic migration `202607140001`, refreshed
+  eight baseline skills, and recreated the application and edge containers.
+  Verified all services running, Alembic at head, internal and public API health
+  responses, public login HTTP `200`, the canonical benchmark judge prompt in
+  the API container, and clean startup logs.
 - [x] Integrate merged PR #3 with the pending local Gate Challenger/runtime
   updates without dropping either change set: fast-forwarded from `212387e` to
   merge commit `4b83db4`, resolved benchmark seed/test and task-log conflicts,
