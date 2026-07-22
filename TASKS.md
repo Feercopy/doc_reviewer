@@ -21,6 +21,21 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] Automate production releases after verified merges to `main`: added a
+  GitHub Actions verification/deploy workflow, release-tagged production images,
+  a root-owned server deployer with a restricted SSH entrypoint, immutable
+  release directories, serialized deploys, pre-migration PostgreSQL backups,
+  Alembic/skill refresh, internal/public health checks, and application rollback.
+  Installed the server bootstrap without restarting production, added a read-only
+  repository deploy key, configured the `production` environment with a `main`
+  branch rule and rotated secrets, protected `main` behind pull requests and
+  resolved conversations, rejected a disallowed SSH command, and passed a no-op
+  preflight for `ac708f3`. Verified shell/YAML syntax, production Compose config,
+  `git diff --check`, full API (`196 passed`) and worker (`155 passed`) suites,
+  full web tests (`139 passed`), production web build, production Alembic head,
+  internal/public health responses, public login `200`, and unchanged running
+  containers. Activation and the first workflow-driven release are pending PR
+  merge and successful GitHub Actions completion.
 - [x] Release merged PR #3 plus the integrated local runtime updates to
   production: pushed `main` through `06ad76b`, exported Gate Challenger source
   `bfe1ee2`, backed up the previous deployment under

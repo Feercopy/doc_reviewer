@@ -24,6 +24,7 @@ services:
       retries: 20
 
   api:
+    image: ${GATE_API_IMAGE:-infra-api}
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
@@ -71,6 +72,7 @@ services:
         condition: service_healthy
 
   worker:
+    image: ${GATE_WORKER_IMAGE:-infra-worker}
     build:
       context: ..
       dockerfile: apps/worker/Dockerfile
@@ -114,6 +116,7 @@ services:
         condition: service_healthy
 
   web:
+    image: ${GATE_WEB_IMAGE:-infra-web}
     build:
       context: ../apps/web
       dockerfile: Dockerfile.prod

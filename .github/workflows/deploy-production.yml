@@ -1,0 +1,90 @@
+name: Verify and deploy production
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-challenger-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out the exact release commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Validate deployment scripts
+        run: |
+          bash -n deploy/server/gate-challenger-deploy
+          bash -n deploy/server/gate-challenger-deploy-entrypoint
+
+      - name: Run API tests
+        run: docker compose -f infra/docker-compose.test.yml run --rm api-test
+
+      - name: Run worker tests
+        run: docker compose -f infra/docker-compose.test.yml run --rm worker-test
+
+      - name: Run web tests and production build
+        run: |
+          docker build --target builder --tag gate-challenger-web-ci --file apps/web/Dockerfile.prod apps/web
+          docker run --rm \
+            --env PRODUCTION_DEPLOY_REPO_ROOT=/workspace \
+            --volume "$PWD:/workspace:ro" \
+            gate-challenger-web-ci npm run test
+
+      - name: Validate production Compose configuration
+        env:
+          APP_SECRET_KEY: ci-only-not-a-production-secret
+          POSTGRES_PASSWORD: ci-only-not-a-production-secret
+          PUBLIC_API_BASE_URL: https://example.invalid/doc-challanger/api
+          NEXT_PUBLIC_API_BASE_URL: https://example.invalid/doc-challanger/api
+          CORS_ALLOW_ORIGINS: https://example.invalid
+          GATE_CHALLENGER_HOST_PATH: /tmp/gate-challenger
+          DEVILS_ADVOCATE_HOST_PATH: /tmp/devils-advocate
+          IC_AGENTIC_REVIEW_HOST_PATH: /tmp/ic-agentic-review
+        run: docker compose -f infra/docker-compose.prod.yml config --quiet
+
+  deploy:
+    name: Deploy production
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://iseremenko.ru/doc-challanger/login
+    steps:
+      - name: Configure restricted production SSH access
+        env:
+          PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 "$RUNNER_TEMP/deploy-ssh"
+          printf '%s\n' "$PROD_SSH_KEY" > "$RUNNER_TEMP/deploy-ssh/id_ed25519"
+          printf '%s\n' "$PROD_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/deploy-ssh/id_ed25519" "$RUNNER_TEMP/deploy-ssh/known_hosts"
+
+      - name: Deploy the verified commit
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+        run: |
+          ssh \
+            -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/deploy-ssh/known_hosts" \
+            "gate-deploy@$PROD_HOST" \
+            "deploy $GITHUB_SHA"

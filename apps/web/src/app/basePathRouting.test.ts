@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const repoSource = (path: string) => readFileSync(join(process.cwd(), "..", "..", path), "utf8");
+const repoRoot = process.env.PRODUCTION_DEPLOY_REPO_ROOT ?? join(process.cwd(), "..", "..");
+const repoSource = (path: string) => readFileSync(join(repoRoot, path), "utf8");
 const webSource = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 
 describe("base path routing", () => {

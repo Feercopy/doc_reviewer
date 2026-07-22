@@ -1,0 +1,254 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly base_dir="/opt/gate-challenger"
+readonly repository_dir="$base_dir/repository.git"
+readonly releases_dir="$base_dir/releases"
+readonly shared_dir="$base_dir/shared"
+readonly current_path="$base_dir/current"
+readonly backup_root="$base_dir/backups"
+readonly deploy_lock="$base_dir/deploy.lock"
+readonly repository_url="git@github.com:Ilya-eremenko/doc_reviewer.git"
+readonly github_identity="/etc/gate-challenger/github-deploy-key"
+readonly github_known_hosts="/etc/gate-challenger/github-known-hosts"
+readonly public_api_health="https://iseremenko.ru/doc-challanger/api/health"
+readonly public_login="https://iseremenko.ru/doc-challanger/login"
+
+release_sha=""
+release_dir=""
+previous_dir=""
+switched_release="false"
+relocated_current="false"
+
+log() {
+  printf '[deploy] %s\n' "$*"
+}
+
+die() {
+  printf '[deploy] ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+validate_sha() {
+  [[ "$1" =~ ^[0-9a-f]{40}$ ]] || die "invalid commit SHA"
+}
+
+git_with_deploy_key() {
+  GIT_SSH_COMMAND="ssh -i $github_identity -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$github_known_hosts" git "$@"
+}
+
+prepare_repository() {
+  install -d -m 0750 "$releases_dir" "$shared_dir" "$backup_root"
+
+  if [[ ! -d "$repository_dir" ]]; then
+    log "creating the read-only production repository cache"
+    git_with_deploy_key clone --mirror "$repository_url" "$repository_dir"
+  fi
+
+  git_with_deploy_key --git-dir="$repository_dir" remote set-url origin "$repository_url"
+  git_with_deploy_key --git-dir="$repository_dir" fetch --prune origin \
+    '+refs/heads/main:refs/remotes/origin/main'
+
+  local main_sha
+  main_sha="$(git --git-dir="$repository_dir" rev-parse refs/remotes/origin/main)"
+  [[ "$main_sha" == "$release_sha" ]] || die "requested SHA is not the current origin/main ($main_sha)"
+}
+
+prepare_shared_environment() {
+  local shared_env="$shared_dir/infra.env"
+
+  if [[ ! -f "$shared_env" ]]; then
+    [[ -f "$current_path/infra/.env" ]] || die "production infra/.env is missing"
+    install -m 0600 "$current_path/infra/.env" "$shared_env"
+    log "moved production configuration into shared storage"
+  fi
+}
+
+materialize_release() {
+  release_dir="$releases_dir/$release_sha"
+
+  if [[ -d "$release_dir" ]]; then
+    [[ -f "$release_dir/.release-commit" ]] || die "existing release directory is incomplete"
+    [[ "$(tr -d '\n' < "$release_dir/.release-commit")" == "$release_sha" ]] \
+      || die "existing release directory has the wrong commit marker"
+    [[ -L "$release_dir/infra/.env" ]] || die "existing release does not use shared production configuration"
+    return
+  else
+    install -d -m 0750 "$release_dir"
+    git --git-dir="$repository_dir" archive "$release_sha" | tar -x -C "$release_dir"
+  fi
+
+  [[ ! -e "$release_dir/infra/.env" ]] || die "release unexpectedly contains infra/.env"
+  ln -s "$shared_dir/infra.env" "$release_dir/infra/.env"
+  printf '%s\n' "$release_sha" > "$release_dir/.release-commit"
+}
+
+set_release_images() {
+  local version="$1"
+  export GATE_API_IMAGE="gate-challenger-api:$version"
+  export GATE_WORKER_IMAGE="gate-challenger-worker:$version"
+  export GATE_WEB_IMAGE="gate-challenger-web:$version"
+}
+
+compose_for() {
+  local target="$1"
+  shift
+  docker compose \
+    --project-name infra \
+    --env-file "$target/infra/.env" \
+    --file "$target/infra/docker-compose.prod.yml" \
+    "$@"
+}
+
+release_version_for() {
+  local target="$1"
+  if [[ -f "$target/.release-commit" ]]; then
+    tr -d '\n' < "$target/.release-commit"
+  else
+    printf 'bootstrap\n'
+  fi
+}
+
+health_check() {
+  local attempts=30
+  local attempt
+
+  for ((attempt = 1; attempt <= attempts; attempt += 1)); do
+    if curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8000/health >/dev/null \
+      && curl --fail --silent --show-error --max-time 10 "$public_api_health" >/dev/null \
+      && curl --fail --silent --show-error --max-time 10 "$public_login" >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+
+  return 1
+}
+
+point_current_at() {
+  local target="$1"
+  local next_link="$base_dir/.current-next"
+  ln -s "$target" "$next_link"
+  mv -Tf "$next_link" "$current_path"
+}
+
+capture_previous_release() {
+  if [[ -L "$current_path" ]]; then
+    previous_dir="$(readlink -f "$current_path")"
+    return
+  fi
+
+  [[ -d "$current_path" ]] || die "current production release is missing"
+  previous_dir="$releases_dir/bootstrap-$(date -u +%Y%m%dT%H%M%SZ)"
+  mv "$current_path" "$previous_dir"
+  relocated_current="true"
+  [[ -f "$previous_dir/infra/.env" ]] || die "bootstrap release infra/.env is missing"
+  install -m 0600 "$previous_dir/infra/.env" "$shared_dir/infra.env"
+  rm "$previous_dir/infra/.env"
+  ln -s "$shared_dir/infra.env" "$previous_dir/infra/.env"
+}
+
+backup_database() {
+  local backup_dir="$backup_root/release-$release_sha-$(date -u +%Y%m%dT%H%M%SZ)"
+  install -d -m 0700 "$backup_dir"
+  printf '%s\n' "$release_sha" > "$backup_dir/release-commit"
+  compose_for "$release_dir" exec -T postgres \
+    sh -c 'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
+    > "$backup_dir/postgres.dump"
+  [[ -s "$backup_dir/postgres.dump" ]] || die "database backup is empty"
+  log "database backup created at $backup_dir/postgres.dump"
+}
+
+rollback_release() {
+  local failed_line="$1"
+  trap - ERR
+  printf '[deploy] ERROR: deployment failed near line %s\n' "$failed_line" >&2
+
+  if [[ "$relocated_current" == "true" && "$switched_release" == "false" \
+    && -n "$previous_dir" && -d "$previous_dir" ]]; then
+    point_current_at "$previous_dir"
+    log "restored the previous active release pointer"
+  fi
+
+  if [[ "$switched_release" == "true" && -n "$previous_dir" && -d "$previous_dir" ]]; then
+    log "rolling application containers back to $previous_dir"
+    point_current_at "$previous_dir"
+    set_release_images "$(release_version_for "$previous_dir")"
+    compose_for "$previous_dir" up -d --no-deps --force-recreate api worker web edge
+    if health_check; then
+      log "application rollback passed health checks"
+    else
+      printf '[deploy] ERROR: rollback health check also failed\n' >&2
+    fi
+  else
+    log "active application containers were not changed"
+  fi
+
+  printf '[deploy] Database migrations are not automatically downgraded.\n' >&2
+  exit 1
+}
+
+deploy_release() {
+  log "validating production Compose configuration for $release_sha"
+  set_release_images "$release_sha"
+  compose_for "$release_dir" config --quiet
+
+  log "building release images"
+  compose_for "$release_dir" build api worker web
+
+  log "backing up PostgreSQL"
+  backup_database
+
+  log "applying database migrations"
+  compose_for "$release_dir" run --rm --no-deps api alembic upgrade head
+
+  log "refreshing baseline skills"
+  compose_for "$release_dir" run --rm --no-deps api python -m app.seeds.skills
+
+  capture_previous_release
+  point_current_at "$release_dir"
+  switched_release="true"
+
+  log "recreating application and edge containers"
+  compose_for "$release_dir" up -d --no-deps --force-recreate api worker web edge
+
+  log "waiting for internal and public health checks"
+  health_check || return 1
+
+  log "production now runs $release_sha"
+}
+
+preflight_release() {
+  set_release_images "$release_sha"
+  compose_for "$release_dir" config --quiet
+  log "preflight passed for current origin/main $release_sha"
+}
+
+main() {
+  local mode="deploy"
+  if [[ "${1:-}" == "--preflight" ]]; then
+    mode="preflight"
+    shift
+  fi
+
+  release_sha="${1:-}"
+  validate_sha "$release_sha"
+  [[ -r "$github_identity" ]] || die "GitHub deploy identity is missing"
+  [[ -r "$github_known_hosts" ]] || die "GitHub known_hosts file is missing"
+
+  exec 9>"$deploy_lock"
+  flock -n 9 || die "another production deployment is already running"
+
+  trap 'rollback_release "$LINENO"' ERR
+  prepare_repository
+  prepare_shared_environment
+  materialize_release
+
+  if [[ "$mode" == "preflight" ]]; then
+    preflight_release
+  else
+    deploy_release
+  fi
+}
+
+main "$@"
