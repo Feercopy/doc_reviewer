@@ -4211,6 +4211,29 @@ const paperAnalysisOverrides = `
   box-shadow: none;
 }
 
+.analysis-modal .analysis-chip {
+  min-width: 0;
+  color: #344054;
+  overflow-wrap: anywhere;
+}
+
+.analysis-modal .analysis-chip span {
+  color: #5b6472;
+}
+
+.analysis-modal .analysis-chip strong {
+  color: #111827;
+  overflow-wrap: anywhere;
+}
+
+.analysis-modal .analysis-trace__title {
+  color: #087d5f;
+}
+
+.analysis-modal .analysis-details summary {
+  color: #1d70b8;
+}
+
 .analysis-hero {
   margin-bottom: 22px;
   padding: 0;

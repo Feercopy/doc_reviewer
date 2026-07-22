@@ -144,6 +144,26 @@ def test_parse_docx_ignores_word_revision_and_field_nodes(tmp_path, monkeypatch)
     assert "PAGE" not in parsed
 
 
+def test_parse_docx_preserves_headers_footers_comments_and_textboxes(tmp_path, monkeypatch):
+    monkeypatch.setattr(docling_parser, "is_docling_available", lambda: False)
+    path = tmp_path / "secondary-parts.docx"
+    _write_docx_with_secondary_parts(path)
+
+    parsed = parse_file_to_document(path)
+
+    assert "Body decision text" in parsed.plain_text
+    assert "Text box appendix evidence" in parsed.plain_text
+    assert "## DOCX header: header1.xml" in parsed.plain_text
+    assert "Quarterly defense header" in parsed.plain_text
+    assert "## DOCX footer: footer1.xml" in parsed.plain_text
+    assert "Confidential footer note" in parsed.plain_text
+    assert "## DOCX comments: comments.xml" in parsed.plain_text
+    assert "Comment 0 by Reviewer" in parsed.plain_text
+    assert "Comment requires capacity proof" in parsed.plain_text
+    assert any(block.type == "comment" for block in parsed.blocks)
+    assert parsed.parser.options["includes"] == ["body", "tables", "headers", "footers", "comments"]
+
+
 def test_parse_docx_uses_builtin_parser_when_docling_available(tmp_path, monkeypatch):
     path = tmp_path / "structured.docx"
     _write_structured_docx(path)
@@ -348,6 +368,71 @@ def _write_structured_docx(path: Path) -> None:
         archive.writestr("word/styles.xml", styles_xml)
         archive.writestr("word/numbering.xml", numbering_xml)
         archive.writestr("word/_rels/document.xml.rels", relationships_xml)
+
+
+def _write_docx_with_secondary_parts(path: Path) -> None:
+    content_types_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+  <Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>
+  <Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>
+</Types>
+"""
+    root_rels_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>
+"""
+    document_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document
+  xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+  xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+  <w:body>
+    <w:p><w:r><w:t>Body decision text</w:t></w:r></w:p>
+    <w:p>
+      <w:r>
+        <w:drawing>
+          <wps:wsp>
+            <wps:txbx>
+              <wps:txbxContent>
+                <w:p><w:r><w:t>Text box appendix evidence</w:t></w:r></w:p>
+              </wps:txbxContent>
+            </wps:txbx>
+          </wps:wsp>
+        </w:drawing>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>
+"""
+    header_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p><w:r><w:t>Quarterly defense header</w:t></w:r></w:p>
+</w:hdr>
+"""
+    footer_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p><w:r><w:t>Confidential footer note</w:t></w:r></w:p>
+</w:ftr>
+"""
+    comments_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:comment w:id="0" w:author="Reviewer">
+    <w:p><w:r><w:t>Comment requires capacity proof</w:t></w:r></w:p>
+  </w:comment>
+</w:comments>
+"""
+    with ZipFile(path, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", content_types_xml)
+        archive.writestr("_rels/.rels", root_rels_xml)
+        archive.writestr("word/document.xml", document_xml)
+        archive.writestr("word/header1.xml", header_xml)
+        archive.writestr("word/footer1.xml", footer_xml)
+        archive.writestr("word/comments.xml", comments_xml)
 
 
 def _rewrite_main_content_type(path: Path, *, from_value: str, to_value: str) -> None:

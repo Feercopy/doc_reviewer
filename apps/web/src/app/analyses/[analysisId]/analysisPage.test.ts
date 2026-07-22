@@ -15,6 +15,18 @@ describe("analysis result page", () => {
     expect(mainPanelSource).not.toContain("analysis.model");
   });
 
+  it("keeps run details metadata readable in the Paper light theme", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const paperOverrides = pageSource.slice(pageSource.indexOf("const paperAnalysisOverrides"));
+
+    expect(paperOverrides).toContain(".analysis-modal .analysis-chip span");
+    expect(paperOverrides).toContain(".analysis-modal .analysis-chip strong");
+    expect(paperOverrides).toContain("color: #111827;");
+    expect(paperOverrides).toContain("overflow-wrap: anywhere;");
+    expect(paperOverrides).toContain(".analysis-modal .analysis-trace__title");
+    expect(paperOverrides).toContain(".analysis-modal .analysis-details summary");
+  });
+
   it("does not render a normal Layer 1 finding card for no-material PASS blocks", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 

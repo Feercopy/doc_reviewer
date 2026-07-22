@@ -43,10 +43,13 @@ def test_gate2_challenger_renderer_frames_external_skill_with_schema_and_documen
     assert "layer_1_markdown" in prompt
     assert "do not add Title, Impact, or Recommendation subblocks" in prompt
     assert "layer_1: structured copy of every Layer 1 item with id, severity, issue, evidence." in prompt
+    assert "root-cause registry and atomization pass" in prompt
+    assert "repeat it only for distinct local decision consequences" in prompt
     assert "title, issue, evidence, impact, recommendation" not in prompt
     assert "layer_2_markdown" in prompt
     assert "layer_2: structured copy of every Layer 2 atomic check with id, parent_layer_1_id, status, severity, question, answer, evidence, issue." in prompt
     assert "Layer 2 item must not include Risk or Recommendation fields" in prompt
+    assert "same block boundaries, block order, question order, question text" in prompt
     assert "The initiative claims strong MVP traction" in prompt
 
 

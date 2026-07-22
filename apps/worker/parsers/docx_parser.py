@@ -25,45 +25,65 @@ def parse_docx_document(path: Path) -> ParsedDocument:
         relationships = _read_docx_relationships(archive)
         styles = _read_docx_styles(archive)
         numbering = _read_docx_numbering(archive)
+        header_parts = _read_named_xml_parts(archive, prefix="word/header")
+        footer_parts = _read_named_xml_parts(archive, prefix="word/footer")
+        comments_xml = _read_optional_archive_member(archive, "word/comments.xml")
+        embedded_media_present = any(name.startswith("word/media/") for name in archive.namelist())
 
     root = ElementTree.fromstring(document_xml)
-    body = root.find("w:body", NAMESPACES)
     block_inputs: list[dict[str, object]] = []
-    table_count = 0
-    list_counters: dict[tuple[str, int], int] = {}
+    main_blocks, table_count = _container_to_blocks(
+        root,
+        relationships=relationships,
+        styles=styles,
+        numbering=numbering,
+        part_metadata={"part": "word/document.xml"},
+    )
+    block_inputs.extend(main_blocks)
 
-    if body is not None:
-        for child in body:
-            tag = _local_name(child.tag)
-            if tag == "p":
-                markdown = _paragraph_to_markdown(child, relationships, styles, numbering, list_counters)
-                if not markdown:
-                    continue
-                block_inputs.append(
-                    {
-                        "type": _paragraph_block_type(child, styles, numbering),
-                        "text": markdown,
-                        "markdown": markdown,
-                        "metadata": _paragraph_metadata(child, styles),
-                    }
-                )
-            elif tag == "tbl":
-                markdown = _table_to_markdown(child, relationships, styles, numbering)
-                if not markdown:
-                    continue
-                table_count += 1
-                rows, columns = _table_dimensions(child)
-                block_inputs.append(
-                    {
-                        "type": "table",
-                        "text": markdown,
-                        "markdown": markdown,
-                        "metadata": {"rows": rows, "columns": columns},
-                    }
-                )
+    for part_name, part_xml, part_relationships in header_parts:
+        part_blocks, part_table_count = _container_to_blocks(
+            ElementTree.fromstring(part_xml),
+            relationships=part_relationships,
+            styles=styles,
+            numbering=numbering,
+            part_metadata={"part": part_name},
+        )
+        if not part_blocks:
+            continue
+        table_count += part_table_count
+        block_inputs.append(_part_heading("DOCX header", part_name))
+        block_inputs.extend(part_blocks)
+
+    for part_name, part_xml, part_relationships in footer_parts:
+        part_blocks, part_table_count = _container_to_blocks(
+            ElementTree.fromstring(part_xml),
+            relationships=part_relationships,
+            styles=styles,
+            numbering=numbering,
+            part_metadata={"part": part_name},
+        )
+        if not part_blocks:
+            continue
+        table_count += part_table_count
+        block_inputs.append(_part_heading("DOCX footer", part_name))
+        block_inputs.extend(part_blocks)
+
+    if comments_xml is not None:
+        comment_blocks, comment_table_count = _comments_to_blocks(
+            comments_xml,
+            styles=styles,
+            numbering=numbering,
+        )
+        if comment_blocks:
+            table_count += comment_table_count
+            block_inputs.append(_part_heading("DOCX comments", "word/comments.xml"))
+            block_inputs.extend(comment_blocks)
 
     plain_text, markdown, blocks = build_blocks_from_output(block_inputs)
     warnings = ["empty_text_extraction"] if not plain_text.strip() else []
+    if embedded_media_present:
+        warnings.append("embedded_media_present")
     return ParsedDocument(
         plain_text=plain_text,
         markdown=markdown,
@@ -71,7 +91,10 @@ def parse_docx_document(path: Path) -> ParsedDocument:
         parser=ParserInfo(
             name="ooxml-docx",
             version=None,
-            options={"source": "zipfile.ElementTree"},
+            options={
+                "source": "zipfile.ElementTree",
+                "includes": ["body", "tables", "headers", "footers", "comments"],
+            },
         ),
         quality=ParseQuality(
             char_count=len(plain_text),
@@ -83,7 +106,15 @@ def parse_docx_document(path: Path) -> ParsedDocument:
 
 
 def _read_docx_relationships(archive: ZipFile) -> dict[str, str]:
-    xml = _read_optional_archive_member(archive, "word/_rels/document.xml.rels")
+    return _read_part_relationships(archive, "word/document.xml")
+
+
+def _read_part_relationships(archive: ZipFile, part_name: str) -> dict[str, str]:
+    try:
+        directory, filename = part_name.rsplit("/", 1)
+    except ValueError:
+        return {}
+    xml = _read_optional_archive_member(archive, f"{directory}/_rels/{filename}.rels")
     if xml is None:
         return {}
     root = ElementTree.fromstring(xml)
@@ -155,6 +186,117 @@ def _read_optional_archive_member(archive: ZipFile, name: str) -> bytes | None:
         return archive.read(name)
     except KeyError:
         return None
+
+
+def _read_named_xml_parts(archive: ZipFile, *, prefix: str) -> list[tuple[str, bytes, dict[str, str]]]:
+    return [
+        (name, archive.read(name), _read_part_relationships(archive, name))
+        for name in sorted(archive.namelist())
+        if name.startswith(prefix) and name.endswith(".xml")
+    ]
+
+
+def _container_to_blocks(
+    root: ElementTree.Element,
+    *,
+    relationships: dict[str, str],
+    styles: dict[str, str],
+    numbering: dict[str, dict[int, dict[str, int | str]]],
+    part_metadata: dict[str, object] | None = None,
+) -> tuple[list[dict[str, object]], int]:
+    block_inputs: list[dict[str, object]] = []
+    table_count = 0
+    list_counters: dict[tuple[str, int], int] = {}
+    for child in _content_children(root):
+        tag = _local_name(child.tag)
+        if tag == "p":
+            markdown = _paragraph_to_markdown(child, relationships, styles, numbering, list_counters)
+            if not markdown:
+                continue
+            metadata = _paragraph_metadata(child, styles)
+            metadata.update(part_metadata or {})
+            block_inputs.append(
+                {
+                    "type": _paragraph_block_type(child, styles, numbering),
+                    "text": markdown,
+                    "markdown": markdown,
+                    "metadata": metadata,
+                }
+            )
+        elif tag == "tbl":
+            markdown = _table_to_markdown(child, relationships, styles, numbering)
+            if not markdown:
+                continue
+            table_count += 1
+            rows, columns = _table_dimensions(child)
+            metadata = {"rows": rows, "columns": columns}
+            metadata.update(part_metadata or {})
+            block_inputs.append(
+                {
+                    "type": "table",
+                    "text": markdown,
+                    "markdown": markdown,
+                    "metadata": metadata,
+                }
+            )
+    return block_inputs, table_count
+
+
+def _content_children(root: ElementTree.Element) -> list[ElementTree.Element]:
+    body = root.find("w:body", NAMESPACES)
+    if body is not None:
+        return list(body)
+    return [child for child in root if _local_name(child.tag) in {"p", "tbl"}]
+
+
+def _part_heading(title: str, part_name: str) -> dict[str, object]:
+    filename = part_name.rsplit("/", 1)[-1]
+    markdown = f"## {title}: {filename}"
+    return {
+        "type": "heading",
+        "text": markdown,
+        "markdown": markdown,
+        "metadata": {"part": part_name},
+    }
+
+
+def _comments_to_blocks(
+    comments_xml: bytes,
+    *,
+    styles: dict[str, str],
+    numbering: dict[str, dict[int, dict[str, int | str]]],
+) -> tuple[list[dict[str, object]], int]:
+    root = ElementTree.fromstring(comments_xml)
+    blocks: list[dict[str, object]] = []
+    table_count = 0
+    for comment in root.findall("w:comment", NAMESPACES):
+        comment_id = _word_attr(comment, "id") or "unknown"
+        author = _word_attr(comment, "author") or "unknown"
+        date = _word_attr(comment, "date")
+        comment_blocks, comment_table_count = _container_to_blocks(
+            comment,
+            relationships={},
+            styles=styles,
+            numbering=numbering,
+            part_metadata={"part": "word/comments.xml", "comment_id": comment_id, "comment_author": author},
+        )
+        table_count += comment_table_count
+        comment_text = "\n\n".join(str(block.get("text") or "") for block in comment_blocks if block.get("text"))
+        if not comment_text:
+            continue
+        label = f"Comment {comment_id} by {author}"
+        if date:
+            label = f"{label} at {date}"
+        text = f"{label}\n{comment_text}"
+        blocks.append(
+            {
+                "type": "comment",
+                "text": text,
+                "markdown": f"**{label}**\n\n{comment_text}",
+                "metadata": {"part": "word/comments.xml", "comment_id": comment_id, "comment_author": author},
+            }
+        )
+    return blocks, table_count
 
 
 def _paragraph_to_markdown(

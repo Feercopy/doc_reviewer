@@ -85,8 +85,13 @@ def _output_requirements(*, response_schema: dict, output_language: str) -> str:
                 _assessment_markdown_requirement(output_language),
                 "2. layer_1_index: compact evidence-backed index of decision-critical Layer 1 issues. "
                 "Each item must include id, severity, issue, and evidence_anchor only.",
+                "Before finalizing layer_1_index, apply the external skill's root-cause registry and atomization pass: "
+                "place each issue in its primary dimension-home, repeat it only for distinct local decision consequences, "
+                "and split only independent committee decision problems.",
                 "3. layer_2_index: compact index of atomic Layer 2 checks with id, parent_layer_1_id, "
                 "status, severity, question, answer, and short_evidence only.",
+                "Before finalizing layer_2_index, verify that every atomic question from the selected stage rubric is "
+                "represented exactly once, with unchanged question text and exactly one answer, evidence, and issue.",
                 "4. details_status must be exactly not_requested, details_run_id must be null, "
                 "revision_required must be false, and revision_reason must be null.",
                 "Do the full Gate Challenger reasoning now, but do not output full detailed check blocks in this response.",
@@ -101,10 +106,15 @@ def _output_requirements(*, response_schema: dict, output_language: str) -> str:
             _assessment_markdown_requirement(output_language),
             "2. layer_1_markdown: reader-facing Layer 1 block after the summary, in strict Gate Challenger format. "
             "Each Layer 1 item must expose only issue, evidence, and severity; do not add Title, Impact, or Recommendation subblocks.",
+            "Before finalizing Layer 1, apply the external skill's root-cause registry and atomization pass: "
+            "place each issue in its primary dimension-home, repeat it only for distinct local decision consequences, "
+            "and split only independent committee decision problems.",
             "3. layer_1: structured copy of every Layer 1 item with id, severity, issue, evidence.",
             "4. layer_2_markdown: reader-facing Layer 2 block after Layer 1, in strict Gate Challenger format.",
             "5. layer_2: structured copy of every Layer 2 atomic check with id, parent_layer_1_id, status, "
             "severity, question, answer, evidence, issue. Layer 2 item must not include Risk or Recommendation fields.",
+            "Before returning Layer 2, verify exact one-to-one equality with the selected stage rubric's atomic checks: "
+            "same block boundaries, block order, question order, question text, and exactly one answer, evidence, and issue per question.",
             "Use Layer 4 expert analysis to strengthen or supplement Gate Challenger findings when it adds "
             "document-grounded issues or reinforces problems you independently find.",
             "Do not collapse Layer 1/Layer 2 into generic findings. The display order is always: "

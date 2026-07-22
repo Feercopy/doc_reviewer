@@ -97,7 +97,23 @@ def test_seeded_ic_agentic_review_skill_matches_source_contract(db_session):
     assert ic_review_skill.runtime_mode == "snapshot_required"
 
 
-def test_seeded_benchmark_judge_uses_gate2_v2_prompt_when_available(db_session, tmp_path, monkeypatch):
+def test_seeded_benchmark_judge_uses_latest_gate2_prompt_when_available(db_session, tmp_path, monkeypatch):
+    benchmark_dir = tmp_path / "benchmark"
+    benchmark_dir.mkdir()
+    prompt_path = benchmark_dir / "LLM-as-a-judge для оценки.txt"
+    prompt_text = "Ты — строгий LLM-as-a-judge with fixed atomization."
+    prompt_path.write_text(prompt_text, encoding="utf-8")
+    monkeypatch.setattr(skill_seeds, "GATE2_BENCHMARK_DIR", benchmark_dir, raising=False)
+
+    skills = seed_baseline_skills(db_session)
+
+    judge = next(skill for skill in skills if skill.name == "benchmark_judge")
+    assert judge.prompt_text == prompt_text
+    assert judge.source_metadata["prompt_source_path"] == str(prompt_path)
+    assert judge.source_metadata["prompt_sha256"] == hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
+
+
+def test_seeded_benchmark_judge_accepts_legacy_v2_prompt_name(db_session, tmp_path, monkeypatch):
     benchmark_dir = tmp_path / "benchmark"
     benchmark_dir.mkdir()
     prompt_path = benchmark_dir / "LLM-as-a-judge для оценки v2.txt"

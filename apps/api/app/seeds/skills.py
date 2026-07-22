@@ -23,7 +23,10 @@ DEVILS_ADVOCATE_SOURCE_PATH = Path(
 IC_AGENTIC_REVIEW_SOURCE_PATH = Path(
     os.getenv("IC_AGENTIC_REVIEW_SOURCE_PATH", "/Users/iseremenko/Documents/IC-Agentic-Review")
 )
-BENCHMARK_JUDGE_V2_PROMPT_PATH = "LLM-as-a-judge для оценки v2.txt"
+BENCHMARK_JUDGE_PROMPT_PATHS = (
+    "LLM-as-a-judge для оценки.txt",
+    "LLM-as-a-judge для оценки v2.txt",
+)
 RESULT_SUMMARY_SYNTHESIS_PROMPT = """You are the Result tab short-summary synthesis skill.
 
 Combine two already-produced review sections into one concise decision summary:
@@ -128,9 +131,16 @@ def _read_prompt(path: Path, fallback: str) -> str:
 
 
 def _benchmark_judge_prompt() -> tuple[str, dict]:
-    prompt_path = GATE2_BENCHMARK_DIR / BENCHMARK_JUDGE_V2_PROMPT_PATH
     fallback = "Compare analysis output with an etalon and calculate precision, recall, and F1."
-    if not prompt_path.exists() or not prompt_path.is_file():
+    prompt_path = next(
+        (
+            GATE2_BENCHMARK_DIR / relative_path
+            for relative_path in BENCHMARK_JUDGE_PROMPT_PATHS
+            if (GATE2_BENCHMARK_DIR / relative_path).is_file()
+        ),
+        None,
+    )
+    if prompt_path is None:
         return fallback, {"fallback": True}
     prompt_text = prompt_path.read_text(encoding="utf-8")
     return prompt_text, {

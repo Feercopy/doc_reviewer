@@ -21,6 +21,37 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Integrate merged PR #3 with the pending local Gate Challenger/runtime
+  updates without dropping either change set: fast-forwarded from `212387e` to
+  merge commit `4b83db4`, resolved benchmark seed/test and task-log conflicts,
+  preserved Result synthesis seeds, and retained a recoverable pre-sync stash.
+  Verified focused Python tests (`44 passed`), focused analysis-page tests (`24
+  passed`), full API tests (`192 passed`), full worker tests (`155 passed`),
+  full web tests (`139 passed`), production web build, Docker Compose config,
+  and `git diff --check`.
+- [x] Fix run details modal contrast in the Paper light analysis UI: root
+  cause was the light-theme override turning `.analysis-chip` cards white while
+  nested chip values still used the legacy dark-theme `#f8fafc` color, making
+  Provider/Model/Skill/Created and Run trace values nearly invisible in
+  production. Scoped readable modal chip, trace-title, and Run parameters
+  summary colors in `paperAnalysisOverrides`, added long-value wrapping, and
+  covered the regression in `analysisPage.test.ts`. Verified
+  `npm --prefix apps/web run test -- analysisPage` (`20 passed`) and
+  `npm --prefix apps/web run build`. Local web container rebuild was attempted
+  but blocked because Docker CLI cannot connect to the Colima socket even
+  though `colima status` reports the VM running.
+- [x] Adapt latest Gate Challenger source update for local service files:
+  external source head moved from previously synced `d7323d6` to `bfe1ee2`
+  (`Improve gate challenger benchmark reliability`). Updated benchmark judge
+  seeding to read the new canonical
+  `benchmark/LLM-as-a-judge для оценки.txt` filename while keeping fallback
+  compatibility with the legacy `v2` filename; tightened Gate2 runtime output
+  requirements for root-cause atomization and exact Layer 2 rubric completeness;
+  extended the deterministic DOCX parser to preserve body text, tables,
+  headers, footers, comments, and textbox content in parsed artifacts. Verified
+  `.venv/bin/python -m pytest apps/worker/tests/test_document_parsers.py apps/worker/tests/test_skill_renderers.py apps/api/tests/test_seeds.py apps/worker/tests/test_benchmark_scoring.py apps/worker/tests/test_benchmark_judge_prompt.py -q`
+  (`42 passed`, existing Starlette/passlib deprecation warnings). No production
+  release or container rebuild was performed in this local file update.
 - [x] Close the final PR #3 follow-up before merge: reject `reparse` for linked
   Fin Summary workbooks with `409` so `.xlsx` can never re-enter the generic
   document parser, add regression coverage that preserves the completed
