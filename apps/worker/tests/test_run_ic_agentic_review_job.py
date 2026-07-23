@@ -632,6 +632,34 @@ def test_legacy_scenarios_list_is_normalized_for_original_scripts(tmp_path, monk
         db.close()
 
 
+def test_legacy_verdict_summary_is_pdf_safe_when_section_10_is_long(tmp_path, monkeypatch):
+    db = _create_session()
+    calls: dict[str, object] = {}
+    try:
+        legacy_report = {
+            **_legacy_report(),
+            "sections": {
+                **_legacy_report()["sections"],
+                "section_10": {"content": "## Final IC verdict\n" + ("Long rationale sentence. " * 220)},
+            },
+        }
+        records = _seed_run(db, tmp_path, monkeypatch=monkeypatch, workbook=False, legacy_report=legacy_report)
+        _patch_script_pipeline(monkeypatch, calls, validation_text="validation ok\n")
+
+        run_ic_agentic_review(str(records["check_run"].id), db=db)
+
+        db.refresh(records["check_run"])
+        persisted_legacy = json.loads(calls["legacy_report_json_path"].read_text(encoding="utf-8"))
+        verdict_summary = persisted_legacy["verdict_summary"]
+        assert records["check_run"].status == RunStatus.COMPLETED.value
+        assert "Final IC verdict" not in verdict_summary
+        assert "Long rationale sentence" not in verdict_summary
+        assert verdict_summary == persisted_legacy["meta"]["verdict_summary"]
+        assert len(verdict_summary) <= 700
+    finally:
+        db.close()
+
+
 def test_overlong_compact_strings_are_trimmed_before_validation(tmp_path, monkeypatch):
     db = _create_session()
     calls: dict[str, object] = {}

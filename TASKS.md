@@ -21,6 +21,17 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Fix IC Review `ic_review_validation_failed` caused by missing legacy PDF:
+  diagnosed local failed run `5d515266-4967-480e-b521-efe48258cf62` and found
+  the only validation failure was `legacy_report.pdf` not being created because
+  the legacy PDF generator fell back to rendering the whole `section_10` as the
+  title-page verdict callout. The worker now persists a compact, PDF-safe
+  `verdict_summary` in both worker-assembled and model-provided legacy JSON, so
+  the original PDF script no longer uses the full final rationale as a single
+  ReportLab table cell. Verified Python syntax, rebuilt/restarted local
+  `worker`, ran focused worker tests in a one-off Docker container (`29
+  passed`), and confirmed the same legacy PDF generator creates a PDF from the
+  previously failed real local artifact once the compact summary is present.
 - [x] Complete the IC Review orphaned-run fix from production diagnostics:
   previous PR #7 already fixed slow Fin Summary `.xlsx` extraction and
   resumable requeues, and this follow-up now fails abandoned IC Review runs
