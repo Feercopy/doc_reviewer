@@ -39,6 +39,20 @@ Primary plan index:
   merging; the deployment workflow reconciles the resulting merge commit and
   uses a concurrency group separate from PR verification. Activation is pending
   PR merge and successful GitHub Actions completion.
+- [x] Fix IC Review stalls on Fin Summary workbook extraction: reproduced the
+  local run stuck at `extracting_workbook`, confirmed the workbook opened
+  quickly but bounded extraction hung, replaced read-only random cell access
+  with linear `iter_rows` extraction using the canonical 12-sheet/80-row/30-col
+  bounds, and added regression coverage for row-iteration extraction. Added IC
+  Review resume handling so a requeued run reuses completed role outputs and
+  marks stale interrupted role steps failed instead of spending provider tokens
+  again. Verified focused worker tests (`39 passed`), confirmed the real
+  `20260323_FS_Avito Sales.xlsx` snapshot extracts in `0.491s`, hot-updated and
+  restarted the local `worker` after a PyPI timeout blocked a clean image
+  rebuild, then requeued run `5d515266-4967-480e-b521-efe48258cf62`; the saved
+  `ic-financial-auditor` step was preserved and the run resumed at
+  `ic-product-analyst`.
+- [x] Add document-detail IC Review progress visibility: the Analysis history running state now shows the active IC Review `current_stage`, an eight-role subagent progress list derived from persisted IC Review steps, and a deterministic progress bar based on the current IC Review stage/role completion. Verified `git diff --check`, focused document-detail web test (`8 passed`), production web build, rebuilt/restarted the local `web` container for `gate-challenger-local`, and confirmed the target document page returns `200`.
 - [x] Automate production releases after verified merges to `main`: added a
   GitHub Actions verification/deploy workflow, release-tagged production images,
   a root-owned server deployer with a restricted SSH entrypoint, immutable

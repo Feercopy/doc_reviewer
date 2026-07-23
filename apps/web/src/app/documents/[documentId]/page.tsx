@@ -22,6 +22,7 @@ import {
   patchDocumentTitle,
   reparseDocument,
   type AnalysisRecord,
+  type AnalysisCheckRunRecord,
   type DocumentRecord,
   type OutputLanguage,
   type Provider,
@@ -44,6 +45,26 @@ const providerLabels: Record<Provider, string> = {
 
 const outputLanguageOptions: readonly OutputLanguage[] = ["ru", "en"];
 const ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY = "analysis_chain_cancel_requested_at";
+const DOCUMENT_POLL_INTERVAL_MS = 5000;
+
+const icReviewRoleSteps = [
+  { key: "ic-financial-auditor", label: "Financial auditor" },
+  { key: "ic-product-analyst", label: "Product analyst" },
+  { key: "ic-market-analyst", label: "Market analyst" },
+  { key: "ic-web-researcher", label: "Web researcher" },
+  { key: "ic-benchmark-valuation", label: "Benchmark valuation" },
+  { key: "ic-team-legal", label: "Team and legal" },
+  { key: "ic-tech-dd", label: "Tech DD" },
+  { key: "ic-risk-scenario", label: "Risk scenario" },
+] as const;
+
+type IcReviewRoleKey = (typeof icReviewRoleSteps)[number]["key"];
+
+type IcReviewProgressStep = {
+  key: IcReviewRoleKey;
+  label: string;
+  state: "queued" | "running" | "completed" | "failed" | "cancelled";
+};
 
 function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisRecord[]): WorkflowStep[] {
   const completedAnalyses = analyses
@@ -139,14 +160,111 @@ function getFullAnalysisStatusLabel(analysis: AnalysisRecord): string {
   if (predictedStatus && predictedStatus !== "completed") {
     return `Devils Advocate ${formatLabel(predictedStatus)}`;
   }
-  const icStatus = analysis.ic_review_run?.status;
-  if (!icStatus) {
+  const icRun = analysis.ic_review_run;
+  if (!icRun) {
     return "IC Review queued";
   }
-  if (icStatus !== "completed") {
-    return `IC Review ${formatLabel(icStatus)}`;
+  if (icRun.status !== "completed") {
+    return getIcReviewProgressStatusLabel(icRun);
   }
   return "Completed";
+}
+
+function getIcReviewProgressStatusLabel(run: AnalysisCheckRunRecord): string {
+  if (run.status === "queued") {
+    return "IC Review queued";
+  }
+  if (run.status === "running") {
+    return getIcReviewStageText(run);
+  }
+  return `IC Review ${formatLabel(run.status)}`;
+}
+
+function getIcReviewStageText(run: Pick<AnalysisCheckRunRecord, "current_stage" | "status">): string {
+  const stage = run.current_stage?.trim();
+  if (!stage) {
+    return run.status === "queued" ? "IC Review queued" : "IC Review running";
+  }
+  if (stage.startsWith("role:")) {
+    const role = stage.slice("role:".length);
+    return `Running ${formatIcReviewRoleLabel(role)}`;
+  }
+  const stageLabels: Record<string, string> = {
+    queued: "IC Review queued",
+    preparing_context: "Preparing IC Review context",
+    loading_snapshot: "Loading IC Review skill snapshot",
+    extracting_workbook: "Extracting Fin Summary workbook",
+    formula_audit: "Running formula audit",
+    building_context: "Building IC Review context",
+    synthesis: "Synthesizing IC Review verdict",
+    postprocess: "Preparing IC Review report",
+    full_report_pdf: "Rendering IC Review PDF",
+    legacy_artifacts: "Saving IC Review artifacts",
+    validation: "Validating IC Review output",
+    completed: "IC Review completed",
+    cancelled: "IC Review cancelled",
+    enqueue_failed: "IC Review enqueue failed",
+  };
+  if (stage.startsWith("failed:")) {
+    return `IC Review failed at ${formatIcReviewStageName(stage.slice("failed:".length))}`;
+  }
+  return stageLabels[stage] ?? `IC Review ${formatIcReviewStageName(stage)}`;
+}
+
+function buildIcReviewProgressSteps(run: AnalysisCheckRunRecord | null | undefined): IcReviewProgressStep[] {
+  const currentRole = run?.current_stage?.startsWith("role:") ? run.current_stage.slice("role:".length) : "";
+  return icReviewRoleSteps.map((role) => {
+    const stepStatus = run?.steps.find((step) => step.step_name === role.key)?.status;
+    return {
+      ...role,
+      state: stepStatus ?? (currentRole === role.key ? "running" : "queued"),
+    };
+  });
+}
+
+function getIcReviewProgressPercent(run: AnalysisCheckRunRecord): number {
+  if (run.status === "completed") {
+    return 100;
+  }
+  const stage = run.current_stage?.trim() ?? "";
+  const stageProgress: Record<string, number> = {
+    queued: 3,
+    preparing_context: 6,
+    loading_snapshot: 9,
+    extracting_workbook: 12,
+    formula_audit: 15,
+    building_context: 20,
+    synthesis: 84,
+    postprocess: 90,
+    full_report_pdf: 93,
+    legacy_artifacts: 96,
+    validation: 98,
+    enqueue_failed: 3,
+    cancelled: 3,
+  };
+  if (stage.startsWith("failed:")) {
+    return Math.max(3, stageProgress[stage.slice("failed:".length)] ?? 3);
+  }
+  if (!stage.startsWith("role:")) {
+    return stageProgress[stage] ?? (run.status === "queued" ? 3 : 8);
+  }
+
+  const role = stage.slice("role:".length);
+  const currentRoleIndex = icReviewRoleSteps.findIndex((item) => item.key === role);
+  const completedRoleCount = icReviewRoleSteps.filter((item) =>
+    run.steps.some((step) => step.step_name === item.key && step.status === "completed"),
+  ).length;
+  const activeRoleUnits = currentRoleIndex >= 0 ? currentRoleIndex + 0.4 : 0;
+  const roleUnits = Math.max(completedRoleCount, activeRoleUnits);
+  return Math.min(83, Math.max(20, Math.round(20 + (roleUnits / icReviewRoleSteps.length) * 60)));
+}
+
+function formatIcReviewRoleLabel(role: string): string {
+  return icReviewRoleSteps.find((item) => item.key === role)?.label ?? formatIcReviewStageName(role);
+}
+
+function formatIcReviewStageName(stage: string): string {
+  return stage.replace(/[_:-]+/g, " ").replace(/\bic\b/i, "IC").replace(/\bdd\b/i, "DD");
 }
 
 function getAnalysisTone(status: RunStatus): "good" | "info" | "bad" | "neutral" {
@@ -326,6 +444,12 @@ export default function DocumentDetailPage() {
   );
   const pendingFullAnalyses = useMemo(() => analyses.filter(isFullAnalysisInProgress), [analyses]);
   const hasPendingFullAnalysis = pendingFullAnalyses.length > 0;
+  const pendingFullAnalysis = pendingFullAnalyses[0] ?? null;
+  const pendingIcReviewRun =
+    pendingFullAnalysis?.ic_review_run && pendingFullAnalysis.ic_review_run.status !== "completed"
+      ? pendingFullAnalysis.ic_review_run
+      : null;
+  const pendingIcReviewProgressPercent = pendingIcReviewRun ? getIcReviewProgressPercent(pendingIcReviewRun) : null;
 
   useEffect(() => {
     if (configuredProviderModels.length === 0 || configuredProviderModels.some((item) => item.provider === provider)) {
@@ -344,7 +468,7 @@ export default function DocumentDetailPage() {
     }
     const timer = window.setInterval(() => {
       refresh().catch(() => undefined);
-    }, 5000);
+    }, DOCUMENT_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [documentId, hasPendingFullAnalysis]);
 
@@ -632,20 +756,51 @@ export default function DocumentDetailPage() {
                   </button>
                 </div>
 
-                {hasPendingFullAnalysis ? (
+                {hasPendingFullAnalysis && pendingFullAnalysis ? (
                   <div className="gc-analysis-progress" aria-live="polite">
                     <span aria-hidden="true" />
-                    <div>
-                      <strong>Full analysis is running</strong>
-                      <small>{getFullAnalysisStatusLabel(pendingFullAnalyses[0])}</small>
+                    <div className="gc-analysis-progress__body">
+                      <div className="gc-analysis-progress__summary">
+                        <strong>Full analysis is running</strong>
+                        <small>{getFullAnalysisStatusLabel(pendingFullAnalysis)}</small>
+                      </div>
+                      {pendingIcReviewRun && pendingIcReviewProgressPercent !== null ? (
+                        <>
+                          <div
+                            aria-label="IC Review progress"
+                            aria-valuemax={100}
+                            aria-valuemin={0}
+                            aria-valuenow={pendingIcReviewProgressPercent}
+                            className="gc-ic-progress-meter"
+                            role="progressbar"
+                          >
+                            <div className="gc-ic-progress-meter__label">
+                              <span>IC Review progress</span>
+                              <strong>{pendingIcReviewProgressPercent}%</strong>
+                            </div>
+                            <span className="gc-ic-progress-meter__track" aria-hidden="true">
+                              <span style={{ width: `${pendingIcReviewProgressPercent}%` }} />
+                            </span>
+                          </div>
+                          <ol className="gc-ic-progress-list" aria-label="IC Review subagent progress">
+                            {buildIcReviewProgressSteps(pendingIcReviewRun).map((step) => (
+                              <li className={`gc-ic-progress-step is-${step.state}`} key={step.key}>
+                                <span aria-hidden="true" />
+                                <strong>{step.label}</strong>
+                                <small>{formatLabel(step.state)}</small>
+                              </li>
+                            ))}
+                          </ol>
+                        </>
+                      ) : null}
                     </div>
                     <button
                       className="gc-stop-analysis"
-                      disabled={cancellingAnalysisId === pendingFullAnalyses[0].id}
+                      disabled={cancellingAnalysisId === pendingFullAnalysis.id}
                       type="button"
-                      onClick={() => stopAnalysis(pendingFullAnalyses[0])}
+                      onClick={() => stopAnalysis(pendingFullAnalysis)}
                     >
-                      {cancellingAnalysisId === pendingFullAnalyses[0].id ? "Stopping..." : "Stop Analysis"}
+                      {cancellingAnalysisId === pendingFullAnalysis.id ? "Stopping..." : "Stop Analysis"}
                     </button>
                   </div>
                 ) : null}
@@ -1151,7 +1306,7 @@ const documentDetailStyles = `
 .document-detail .gc-analysis-progress {
   display: flex;
   min-height: 56px;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   border: 1px solid #b8d8f1;
   border-radius: 8px;
@@ -1171,9 +1326,15 @@ const documentDetailStyles = `
   animation: gc-parse-spin 900ms linear infinite;
 }
 
-.document-detail .gc-analysis-progress div {
+.document-detail .gc-analysis-progress__body {
   display: grid;
   flex: 1 1 auto;
+  min-width: 0;
+  gap: 10px;
+}
+
+.document-detail .gc-analysis-progress__summary {
+  display: grid;
   min-width: 0;
   gap: 2px;
 }
@@ -1189,6 +1350,113 @@ const documentDetailStyles = `
   color: #1d70b8;
   font-size: 12px;
   line-height: 16px;
+}
+
+.document-detail .gc-ic-progress-meter {
+  display: grid;
+  gap: 6px;
+}
+
+.document-detail .gc-ic-progress-meter__label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #344054;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 14px;
+}
+
+.document-detail .gc-ic-progress-meter__label span,
+.document-detail .gc-ic-progress-meter__label strong {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.document-detail .gc-ic-progress-meter__label strong {
+  color: #1d70b8;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.document-detail .gc-ic-progress-meter__track {
+  display: block;
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(29, 112, 184, 0.14);
+}
+
+.document-detail .gc-ic-progress-meter__track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #1d70b8;
+  transition: width 240ms ease;
+}
+
+.document-detail .gc-ic-progress-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.document-detail .gc-ic-progress-step {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(29, 112, 184, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.68);
+  padding: 5px 7px;
+}
+
+.document-detail .gc-ic-progress-step > span {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #c8d0dc;
+}
+
+.document-detail .gc-ic-progress-step.is-running > span {
+  border: 2px solid rgba(29, 112, 184, 0.24);
+  border-top-color: #1d70b8;
+  background: transparent;
+  animation: gc-parse-spin 900ms linear infinite;
+}
+
+.document-detail .gc-ic-progress-step.is-completed > span {
+  background: #099268;
+}
+
+.document-detail .gc-ic-progress-step.is-failed > span,
+.document-detail .gc-ic-progress-step.is-cancelled > span {
+  background: #c92036;
+}
+
+.document-detail .gc-ic-progress-step strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-detail .gc-ic-progress-step small {
+  color: #5b6472;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 12px;
+  text-transform: capitalize;
 }
 
 .document-detail .gc-stop-analysis {
@@ -1543,6 +1811,10 @@ const documentDetailStyles = `
   .document-detail .gc-analysis-progress > span {
     animation: none;
   }
+
+  .document-detail .gc-ic-progress-step.is-running > span {
+    animation: none;
+  }
 }
 
 @media (max-width: 1440px) {
@@ -1613,6 +1885,20 @@ const documentDetailStyles = `
   .document-detail .gc-analysis-toolbar {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .document-detail .gc-analysis-progress {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+
+  .document-detail .gc-analysis-progress .gc-stop-analysis {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .document-detail .gc-ic-progress-list {
+    grid-template-columns: 1fr;
   }
 
   .document-detail .gc-analysis-model-button,

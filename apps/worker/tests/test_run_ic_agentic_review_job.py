@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from app.db.base import Base
 from app.core.config import get_settings
 from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisCheckStep, AnalysisDetailRun
+from app.models.base import utc_now
 from app.models.document import Document
 from app.models.provider_key import ProviderKey
 from app.models.skill import Skill
@@ -152,6 +153,67 @@ def test_completed_run_with_workbook_runs_formula_and_excel_audit(tmp_path, monk
         artifact_keys = {artifact["key"] for artifact in check_run.artifacts}
         assert "artifact:formula_audit" in artifact_keys
         assert "script:excel_audit:stdout" in artifact_keys
+    finally:
+        db.close()
+
+
+def test_requeued_run_reuses_completed_role_outputs_and_marks_stale_running_steps(tmp_path, monkeypatch):
+    db = _create_session()
+    calls: dict[str, object] = {}
+    try:
+        records = _seed_run(db, tmp_path, monkeypatch=monkeypatch, workbook=False)
+        check_run = records["check_run"]
+        run_parameters = dict(check_run.run_parameters)
+        role_mock_results = dict(run_parameters["role_mock_provider_results"])
+        role_mock_results[ROLE_ORDER[0]] = {
+            "structured_text": "first role should not be called again",
+            "raw_output": "first role should not be called again",
+            "latency_ms": 1,
+        }
+        run_parameters["role_mock_provider_results"] = role_mock_results
+        check_run.run_parameters = run_parameters
+        now = utc_now()
+        completed_step = AnalysisCheckStep(
+            check_run_id=check_run.id,
+            step_type="role",
+            step_name=ROLE_ORDER[0],
+            status=RunStatus.COMPLETED.value,
+            started_at=now,
+            completed_at=now,
+            raw_output="existing raw financial auditor",
+            structured_output=_role_result(ROLE_ORDER[0]),
+        )
+        stale_step = AnalysisCheckStep(
+            check_run_id=check_run.id,
+            step_type="role",
+            step_name=ROLE_ORDER[1],
+            status=RunStatus.RUNNING.value,
+            started_at=now,
+        )
+        db.add_all([completed_step, stale_step])
+        db.commit()
+        _patch_script_pipeline(monkeypatch, calls, validation_text="validation ok\n")
+
+        run_ic_agentic_review(str(check_run.id), db=db)
+
+        db.refresh(check_run)
+        role_steps = (
+            db.execute(
+                select(AnalysisCheckStep)
+                .where(AnalysisCheckStep.step_type == "role")
+                .order_by(AnalysisCheckStep.created_at, AnalysisCheckStep.id)
+            )
+            .scalars()
+            .all()
+        )
+
+        assert check_run.status == RunStatus.COMPLETED.value
+        assert [step.step_name for step in role_steps].count(ROLE_ORDER[0]) == 1
+        assert role_steps[0].raw_output == "existing raw financial auditor"
+        product_steps = [step for step in role_steps if step.step_name == ROLE_ORDER[1]]
+        assert [step.status for step in product_steps] == [RunStatus.FAILED.value, RunStatus.COMPLETED.value]
+        assert product_steps[0].error_message == "interrupted_by_worker_restart"
+        assert [step.step_name for step in role_steps if step.status == RunStatus.COMPLETED.value] == list(ROLE_ORDER)
     finally:
         db.close()
 

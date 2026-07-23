@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any
 
 
 MAX_SHEETS = 12
-MAX_ROWS_PER_SHEET = 180
-MAX_COLUMNS_PER_ROW = 60
+MAX_ROWS_PER_SHEET = 80
+MAX_COLUMNS_PER_ROW = 30
 MAX_CELL_TEXT_LENGTH = 2_000
 
 
@@ -51,11 +52,19 @@ def _extract_sheet(*, formula_sheet: Any, values_sheet: Any | None) -> dict[str,
     max_row = formula_sheet.max_row or 0
     max_column = formula_sheet.max_column or 0
     rows = []
-    for row_index in range(1, min(max_row, MAX_ROWS_PER_SHEET) + 1):
+    row_limit = min(max_row, MAX_ROWS_PER_SHEET)
+    column_limit = min(max_column, MAX_COLUMNS_PER_ROW)
+    formula_rows = formula_sheet.iter_rows(max_row=row_limit, max_col=column_limit)
+    value_rows = (
+        values_sheet.iter_rows(max_row=row_limit, max_col=column_limit)
+        if values_sheet is not None
+        else ()
+    )
+    for row_index, (formula_row, value_row) in enumerate(zip_longest(formula_rows, value_rows), start=1):
         row_cells = []
-        for column_index in range(1, min(max_column, MAX_COLUMNS_PER_ROW) + 1):
-            formula_cell = formula_sheet.cell(row=row_index, column=column_index)
-            values_cell = values_sheet.cell(row=row_index, column=column_index) if values_sheet is not None else None
+        formula_cells = formula_row or ()
+        value_cells = value_row or ()
+        for column_index, (formula_cell, values_cell) in enumerate(zip_longest(formula_cells, value_cells), start=1):
             record = _cell_record(
                 address=getattr(formula_cell, "coordinate", _cell_address(row_index, column_index)),
                 column_index=column_index,

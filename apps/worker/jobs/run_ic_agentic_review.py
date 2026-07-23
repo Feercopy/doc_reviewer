@@ -17,7 +17,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.logging import worker_logger
-from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisDetailRun
+from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisCheckStep, AnalysisDetailRun
 from app.models.base import utc_now
 from app.models.document import Document
 from app.models.provider_key import ProviderKey
@@ -167,8 +167,11 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         flag_modified(check_run, "run_parameters")
         session.commit()
 
-        role_outputs: dict[str, dict] = {}
+        _mark_stale_running_role_steps(session=session, check_run=check_run)
+        role_outputs: dict[str, dict] = _completed_role_outputs(session=session, check_run=check_run)
         for role in ROLE_ORDER:
+            if role in role_outputs:
+                continue
             _raise_if_cancelled(session=session, check_run=check_run)
             check_run.current_stage = f"role:{role}"
             session.commit()
@@ -458,6 +461,40 @@ def _claim_queued_run(session: Session, run_uuid: UUID) -> AnalysisCheckRun | No
             current_run.completed_at = utc_now()
         session.commit()
     return None
+
+
+def _mark_stale_running_role_steps(*, session: Session, check_run: AnalysisCheckRun) -> None:
+    statement = select(AnalysisCheckStep).where(
+        AnalysisCheckStep.check_run_id == check_run.id,
+        AnalysisCheckStep.step_type == "role",
+        AnalysisCheckStep.status == RunStatus.RUNNING.value,
+    )
+    stale_steps = list(session.execute(statement).scalars().all())
+    if not stale_steps:
+        return
+    for step in stale_steps:
+        step.status = RunStatus.FAILED.value
+        step.error_message = "interrupted_by_worker_restart"
+        step.completed_at = utc_now()
+    session.commit()
+
+
+def _completed_role_outputs(*, session: Session, check_run: AnalysisCheckRun) -> dict[str, dict]:
+    statement = (
+        select(AnalysisCheckStep)
+        .where(
+            AnalysisCheckStep.check_run_id == check_run.id,
+            AnalysisCheckStep.step_type == "role",
+            AnalysisCheckStep.status == RunStatus.COMPLETED.value,
+        )
+        .order_by(AnalysisCheckStep.created_at, AnalysisCheckStep.id)
+    )
+    outputs_by_role = {
+        step.step_name: step.structured_output
+        for step in session.execute(statement).scalars().all()
+        if step.step_name in ROLE_ORDER and isinstance(step.structured_output, dict)
+    }
+    return {role: outputs_by_role[role] for role in ROLE_ORDER if role in outputs_by_role}
 
 
 def _set_current_stage(*, session: Session, check_run: AnalysisCheckRun, stage: str) -> None:
