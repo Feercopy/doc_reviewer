@@ -919,10 +919,15 @@ def _build_legacy_report_json(
             }
         )
 
+    verdict = compact_result.get("verdict") or "UNKNOWN"
+    verdict_summary = _legacy_verdict_summary(compact_result)
     return {
+        "verdict": verdict,
+        "verdict_summary": verdict_summary,
         "meta": {
             "title": "IC Review Full Report",
-            "verdict": compact_result.get("verdict") or "UNKNOWN",
+            "verdict": verdict,
+            "verdict_summary": verdict_summary,
             "confidence": compact_result.get("confidence"),
             "generation_mode": "worker_assembled_from_role_full_report_materials",
         },
@@ -1139,9 +1144,38 @@ def _normalize_legacy_report_json(legacy_report_json: dict, *, compact_result: d
         normalized["scenarios"] = {}
 
     meta = normalized.get("meta")
-    if isinstance(meta, dict) and compact_result is not None:
-        meta.setdefault("verdict", compact_result.get("verdict") or "—")
+    if not isinstance(meta, dict):
+        meta = {}
+        normalized["meta"] = meta
+    if compact_result is not None:
+        verdict = compact_result.get("verdict") or "—"
+        verdict_summary = _legacy_verdict_summary(compact_result)
+        normalized.setdefault("verdict", verdict)
+        normalized.setdefault("verdict_summary", verdict_summary)
+        meta.setdefault("verdict", verdict)
+        meta.setdefault("verdict_summary", verdict_summary)
     return normalized
+
+
+def _legacy_verdict_summary(compact_result: dict) -> str:
+    executive_brief = str(compact_result.get("executive_brief") or "").strip()
+    if executive_brief:
+        return _pdf_safe_summary_text(executive_brief)
+
+    findings = _legacy_finding_lines(compact_result)
+    if findings:
+        return _pdf_safe_summary_text(" ".join(findings[:3]))
+    return "IC Review completed with a compact structured result; see the report sections for details."
+
+
+def _pdf_safe_summary_text(value: str, *, max_chars: int = 700) -> str:
+    text = re.sub(r"^\s{0,3}#{1,6}\s+", "", value, flags=re.MULTILINE)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= max_chars:
+        return text
+
+    truncated = text[: max_chars + 1].rsplit(" ", 1)[0].rstrip(".,;: ")
+    return f"{truncated}."
 
 
 def _normalize_legacy_section(section: object, *, index: int, compact_result: dict) -> dict:
