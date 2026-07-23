@@ -59,6 +59,26 @@ describe("document detail analysis controls", () => {
     expect(source).not.toContain("window.location.href = appPath(`/analyses/${analysis.id}`)");
   });
 
+  it("shows IC Review subagent progress while a full analysis is running", () => {
+    const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
+
+    expect(source).toContain("DOCUMENT_POLL_INTERVAL_MS");
+    expect(source).toContain("buildIcReviewProgressSteps");
+    expect(source).toContain("getIcReviewProgressPercent");
+    expect(source).toContain("getIcReviewStageText");
+    expect(source).toContain('role="progressbar"');
+    expect(source).toContain('aria-label="IC Review progress"');
+    expect(source).toContain("{pendingIcReviewProgressPercent}%");
+    expect(source).toContain("gc-ic-progress-meter");
+    expect(source).toContain('aria-label="IC Review subagent progress"');
+    expect(source).toContain("Financial auditor");
+    expect(source).toContain("Product analyst");
+    expect(source).toContain("Market analyst");
+    expect(source).toContain("Risk scenario");
+    expect(source).toContain("Running ${formatIcReviewRoleLabel(role)}");
+    expect(source).toContain("gc-ic-progress-step");
+  });
+
   it("uses an interactive title editor instead of a decorative pencil", () => {
     const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
 

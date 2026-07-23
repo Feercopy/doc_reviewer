@@ -520,5 +520,83 @@ def test_extract_workbook_snapshot_bounds_formulas_values_and_redaction(tmp_path
     assert "AE81" not in cells
 
 
+def test_extract_workbook_snapshot_uses_linear_row_iteration(tmp_path, monkeypatch):
+    openpyxl = pytest.importorskip("openpyxl")
+
+    class FakeCell:
+        def __init__(self, coordinate, value):
+            self.coordinate = coordinate
+            self.value = value
+
+    class FakeSheet:
+        title = "Financials"
+        max_row = 2
+        max_column = 2
+
+        def __init__(self, rows):
+            self._rows = rows
+
+        def iter_rows(self, *, max_row, max_col):
+            assert max_row == 2
+            assert max_col == 2
+            return iter(tuple(row[:max_col]) for row in self._rows[:max_row])
+
+        def cell(self, *, row, column):
+            raise AssertionError("read-only sheets must be consumed through iter_rows")
+
+    class FakeWorkbook:
+        sheetnames = ["Financials"]
+
+        def __init__(self, sheet):
+            self._sheet = sheet
+            self.closed = False
+
+        def __getitem__(self, name):
+            assert name == "Financials"
+            return self._sheet
+
+        def close(self):
+            self.closed = True
+
+    formula_sheet = FakeSheet(
+        [
+            [FakeCell("A1", "Metric"), FakeCell("B1", "Value")],
+            [FakeCell("A2", "ARR"), FakeCell("B2", "=A2*2")],
+        ]
+    )
+    values_sheet = FakeSheet(
+        [
+            [FakeCell("A1", "Metric"), FakeCell("B1", "Value")],
+            [FakeCell("A2", "ARR"), FakeCell("B2", 20)],
+        ]
+    )
+    workbooks = {
+        False: FakeWorkbook(formula_sheet),
+        True: FakeWorkbook(values_sheet),
+    }
+
+    def fake_load_workbook(path, *, data_only, read_only):
+        assert read_only is True
+        return workbooks[data_only]
+
+    monkeypatch.setattr(openpyxl, "load_workbook", fake_load_workbook)
+
+    snapshot = workbook_parser.extract_workbook_snapshot(tmp_path / "financial_model.xlsx")
+
+    cells = {
+        cell["address"]: cell
+        for row in snapshot["sheets"][0]["rows"]
+        for cell in row["cells"]
+    }
+    assert cells["B2"] == {
+        "address": "B2",
+        "column": 2,
+        "formula": "=A2*2",
+        "data_only_value": 20,
+    }
+    assert workbooks[False].closed is True
+    assert workbooks[True].closed is True
+
+
 def _write_script(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
