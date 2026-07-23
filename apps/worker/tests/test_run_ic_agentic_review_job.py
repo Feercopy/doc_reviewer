@@ -22,6 +22,7 @@ from app.schemas.enums import DocumentParseStatus, DocumentType, EntityStatus, P
 from app.security.secrets import encrypt_secret
 from ic_review.renderer import ROLE_ORDER
 from ic_review.script_runner import ScriptPipelineResult, ScriptResult
+from jobs.orphaned_ic_review_runs import mark_abandoned_ic_review_runs
 from jobs import run_ic_agentic_review as job
 from jobs.run_ic_agentic_review import run_ic_agentic_review
 
@@ -214,6 +215,74 @@ def test_requeued_run_reuses_completed_role_outputs_and_marks_stale_running_step
         assert [step.status for step in product_steps] == [RunStatus.FAILED.value, RunStatus.COMPLETED.value]
         assert product_steps[0].error_message == "interrupted_by_worker_restart"
         assert [step.step_name for step in role_steps if step.status == RunStatus.COMPLETED.value] == list(ROLE_ORDER)
+    finally:
+        db.close()
+
+
+def test_abandoned_running_ic_review_run_is_failed_without_losing_completed_steps(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        records = _seed_run(db, tmp_path, monkeypatch=monkeypatch, workbook=False)
+        check_run = records["check_run"]
+        check_run.status = RunStatus.RUNNING.value
+        check_run.current_stage = f"role:{ROLE_ORDER[1]}"
+        now = utc_now()
+        completed_step = AnalysisCheckStep(
+            check_run_id=check_run.id,
+            step_type="role",
+            step_name=ROLE_ORDER[0],
+            status=RunStatus.COMPLETED.value,
+            started_at=now,
+            completed_at=now,
+            raw_output="existing raw financial auditor",
+            structured_output=_role_result(ROLE_ORDER[0]),
+        )
+        running_step = AnalysisCheckStep(
+            check_run_id=check_run.id,
+            step_type="role",
+            step_name=ROLE_ORDER[1],
+            status=RunStatus.RUNNING.value,
+            started_at=now,
+        )
+        db.add_all([completed_step, running_step])
+        db.commit()
+
+        cleaned = mark_abandoned_ic_review_runs(session=db, active_run_ids=[])
+
+        db.refresh(check_run)
+        db.refresh(completed_step)
+        db.refresh(running_step)
+        assert cleaned == 1
+        assert check_run.status == RunStatus.FAILED.value
+        assert check_run.current_stage == "failed:abandoned"
+        assert check_run.error_message == "worker_job_abandoned"
+        assert check_run.completed_at is not None
+        assert check_run.run_parameters["abandoned_cleanup"]["reason"] == "worker_job_abandoned"
+        assert completed_step.status == RunStatus.COMPLETED.value
+        assert completed_step.raw_output == "existing raw financial auditor"
+        assert running_step.status == RunStatus.FAILED.value
+        assert running_step.error_message == "interrupted_by_worker_restart"
+        assert running_step.completed_at is not None
+    finally:
+        db.close()
+
+
+def test_running_ic_review_with_active_rq_job_is_not_marked_abandoned(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        records = _seed_run(db, tmp_path, monkeypatch=monkeypatch, workbook=False)
+        check_run = records["check_run"]
+        check_run.status = RunStatus.RUNNING.value
+        check_run.current_stage = f"role:{ROLE_ORDER[1]}"
+        db.commit()
+
+        cleaned = mark_abandoned_ic_review_runs(session=db, active_run_ids=[check_run.id])
+
+        db.refresh(check_run)
+        assert cleaned == 0
+        assert check_run.status == RunStatus.RUNNING.value
+        assert check_run.current_stage == f"role:{ROLE_ORDER[1]}"
+        assert check_run.completed_at is None
     finally:
         db.close()
 
