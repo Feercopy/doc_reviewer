@@ -21,6 +21,15 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Complete the IC Review orphaned-run fix from production diagnostics:
+  previous PR #7 already fixed slow Fin Summary `.xlsx` extraction and
+  resumable requeues, and this follow-up now fails abandoned IC Review runs
+  during worker startup after RQ registry cleanup when PostgreSQL still says
+  `running` but no active RQ job exists. Completed role outputs are preserved,
+  stale running role steps are marked `interrupted_by_worker_restart`, and the
+  run receives `failed:abandoned` / `worker_job_abandoned` so the UI stops
+  spinning indefinitely and the user can start a fresh run. Verified focused
+  worker tests (`41 passed`) and `git diff --check`.
 - [~] Automate clean Codex-reviewed PR merges: enabled repository-wide
   automatic and exhaustive Codex reviews on every PR update, and added a
   least-privilege workflow that records every full PR head SHA as trusted
