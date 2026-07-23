@@ -21,6 +21,17 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Fix production IC Review `invalid_json:Expecting value` after synthesis:
+  production worker logs showed the RQ job finished normally while the business
+  run persisted `failed`, matching a final synthesis response that stayed
+  empty/non-JSON even after the existing one-shot JSON retry. The worker now
+  preserves all completed IC role outputs and falls back to a deterministic
+  compact IC result assembled from those outputs, records
+  `synthesis_fallback` in run parameters for traceability, and continues the
+  legacy report/PDF/validation pipeline instead of discarding the run. Verified
+  with focused Docker worker tests (`25 passed`), the IC Review renderer/script
+  runner/job suite (`55 passed`), full Docker worker tests (`156 passed`),
+  Python syntax compile, and `git diff --check`.
 - [x] Fix IC Review `ic_review_validation_failed` caused by missing legacy PDF:
   diagnosed local failed run `5d515266-4967-480e-b521-efe48258cf62` and found
   the only validation failure was `legacy_report.pdf` not being created because
