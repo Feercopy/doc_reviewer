@@ -735,6 +735,58 @@ def test_synthesis_invalid_json_retries_once_without_rerunning_roles(tmp_path, m
         db.close()
 
 
+def test_synthesis_retry_invalid_json_falls_back_to_completed_role_outputs(tmp_path, monkeypatch):
+    db = _create_session()
+    calls: dict[str, object] = {}
+    try:
+        records = _seed_run(
+            db,
+            tmp_path,
+            monkeypatch=monkeypatch,
+            workbook=False,
+            synthesis_mock_provider_result={
+                "structured_text": "",
+                "raw_output": "first empty synthesis raw",
+                "input_tokens": 101,
+                "output_tokens": 0,
+                "latency_ms": 303,
+            },
+            synthesis_json_retry_mock_provider_result={
+                "structured_text": "",
+                "raw_output": "retry empty synthesis raw",
+                "input_tokens": 111,
+                "output_tokens": 0,
+                "latency_ms": 333,
+            },
+        )
+        _patch_script_pipeline(monkeypatch, calls, validation_text="validation ok\n")
+
+        run_ic_agentic_review(str(records["check_run"].id), db=db)
+
+        db.refresh(records["check_run"])
+        steps = db.execute(select(AnalysisCheckStep).order_by(AnalysisCheckStep.created_at)).scalars().all()
+
+        assert records["check_run"].status == RunStatus.COMPLETED.value
+        assert records["check_run"].raw_output == "retry empty synthesis raw"
+        assert records["check_run"].run_parameters["synthesis_json_retry"] == {
+            "attempts": 2,
+            "reason": "Expecting value",
+            "retry_step": "synthesis:json_retry",
+        }
+        assert records["check_run"].run_parameters["synthesis_fallback"] == {
+            "reason": "invalid_json:Expecting value",
+            "source": "role_outputs",
+        }
+        assert records["check_run"].structured_output["run_mode"] == "ic_agentic_review_compact"
+        assert records["check_run"].structured_output["executive_brief"].startswith("IC Review completed all role analyses")
+        assert calls["legacy_report_json_path"].is_file()
+        role_steps = [step for step in steps if step.step_type == "role"]
+        assert [step.step_name for step in role_steps] == list(ROLE_ORDER)
+        assert [step.status for step in role_steps] == [RunStatus.COMPLETED.value] * len(ROLE_ORDER)
+    finally:
+        db.close()
+
+
 def test_malformed_legacy_wrapper_is_ignored_and_report_is_assembled_from_roles(tmp_path, monkeypatch):
     db = _create_session()
     calls: dict[str, object] = {}

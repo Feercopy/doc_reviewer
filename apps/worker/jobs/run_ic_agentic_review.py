@@ -246,7 +246,18 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         session.commit()
         _raise_if_cancelled(session=session, check_run=check_run)
 
-        compact_result = _parse_synthesis_compact(result.structured_text, review_schema)
+        try:
+            compact_result = _parse_synthesis_compact(result.structured_text, review_schema)
+        except json.JSONDecodeError as exc:
+            compact_result = _fallback_compact_result_from_roles(role_outputs=role_outputs, review_schema=review_schema)
+            run_parameters = dict(check_run.run_parameters or {})
+            run_parameters["synthesis_fallback"] = {
+                "reason": f"invalid_json:{exc.msg}",
+                "source": "role_outputs",
+            }
+            check_run.run_parameters = run_parameters
+            flag_modified(check_run, "run_parameters")
+            session.commit()
         legacy_report_json = _build_legacy_report_json(
             compact_result=compact_result,
             role_outputs=role_outputs,
@@ -847,6 +858,253 @@ def _parse_synthesis_compact(structured_text: str, review_schema: dict) -> dict:
     except ValidationError as exc:
         raise RuntimeError(f"invalid_synthesis_compact:{safe_ic_review_error_message(exc)}") from exc
     return compact_result
+
+
+def _fallback_compact_result_from_roles(*, role_outputs: dict[str, dict], review_schema: dict) -> dict:
+    findings = _compact_findings_from_roles(role_outputs)
+    critical_risks = _compact_report_item_texts(role_outputs, "risks", severities={"blocker", "critical", "high"})
+    data_gaps = _compact_data_gaps_from_roles(role_outputs)
+    required_actions = _compact_report_item_texts(role_outputs, "recommendations")
+    questions = _compact_questions_from_gaps(data_gaps)
+    key_numbers = _compact_key_numbers_from_roles(role_outputs)
+    verdict = _fallback_verdict(findings=findings, critical_risks=critical_risks, data_gaps=data_gaps)
+    role_summaries = [
+        {
+            "role": role,
+            "summary": _role_summary_for_compact(role, role_outputs.get(role) or {}),
+        }
+        for role in ROLE_ORDER
+        if role in role_outputs
+    ]
+    compact_result = {
+        "run_mode": "ic_agentic_review_compact",
+        "verdict": verdict,
+        "executive_brief": _fallback_executive_brief(
+            verdict=verdict,
+            findings=findings,
+            critical_risks=critical_risks,
+            data_gaps=data_gaps,
+            required_actions=required_actions,
+        ),
+        "confidence": 0.55,
+        "top_findings": findings[:7],
+        "key_numbers": key_numbers[:12],
+        "spreadsheet_audit": {
+            "status": "not_provided",
+            "summary": "Synthesis fallback used role outputs; workbook audit status is finalized later in the IC Review pipeline.",
+            "formula_issues_count": 0,
+            "critical_formula_issues_count": 0,
+            "source_filename": None,
+        },
+        "critical_risks": critical_risks[:7],
+        "data_gaps": data_gaps[:7],
+        "required_actions": required_actions[:7],
+        "questions_for_team": questions[:7],
+        "role_summaries": role_summaries[:8],
+        "validation": {
+            "status": "not_run",
+            "summary": "Compact result assembled from completed IC role outputs after synthesis JSON fallback.",
+            "warnings_count": 0,
+            "failures_count": 0,
+        },
+        "artifacts": [],
+    }
+    compact_result = normalize_schema_bounded_strings(compact_result, review_schema, review_schema)
+    validate(instance=compact_result, schema=review_schema)
+    return compact_result
+
+
+def _compact_findings_from_roles(role_outputs: dict[str, dict]) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    for role in ROLE_ORDER:
+        role_output = role_outputs.get(role)
+        if not isinstance(role_output, dict):
+            continue
+        for item in role_output.get("findings") or []:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or f"Finding from {role}").strip()
+            evidence = str(item.get("evidence") or role_output.get("summary") or "Role output identified this issue.").strip()
+            recommendation = str(item.get("recommendation") or "Review and close this issue before approval.").strip()
+            findings.append(
+                {
+                    "title": _compact_text(title, 160),
+                    "severity": _compact_severity(item.get("severity")),
+                    "summary": _compact_text(evidence, 500),
+                    "evidence": _compact_text(evidence, 700),
+                    "recommendation": _compact_text(recommendation, 500),
+                }
+            )
+            if len(findings) >= 7:
+                return findings
+    if findings:
+        return findings
+    for role in ROLE_ORDER:
+        role_output = role_outputs.get(role)
+        if not isinstance(role_output, dict):
+            continue
+        summary = str(role_output.get("summary") or "").strip()
+        if not summary:
+            continue
+        findings.append(
+            {
+                "title": _compact_text(f"{role} finding summary", 160),
+                "severity": "medium",
+                "summary": _compact_text(summary, 500),
+                "evidence": _compact_text(summary, 700),
+                "recommendation": "Review the role-level evidence and close the documented IC readiness gaps.",
+            }
+        )
+        if len(findings) >= 3:
+            break
+    return findings
+
+
+def _compact_data_gaps_from_roles(role_outputs: dict[str, dict]) -> list[str]:
+    gaps: list[str] = []
+    for role in ROLE_ORDER:
+        role_output = role_outputs.get(role)
+        if not isinstance(role_output, dict):
+            continue
+        for value in role_output.get("data_gaps") or []:
+            if isinstance(value, str) and value.strip():
+                gaps.append(_compact_text(f"{role}: {value}", 500))
+        gaps.extend(_compact_report_item_texts({role: role_output}, "data_gaps"))
+        if len(gaps) >= 7:
+            break
+    return _dedupe_compact_texts(gaps)[:7]
+
+
+def _compact_report_item_texts(
+    role_outputs: dict[str, dict],
+    key: str,
+    *,
+    severities: set[str] | None = None,
+) -> list[str]:
+    values: list[str] = []
+    for role in ROLE_ORDER:
+        role_output = role_outputs.get(role)
+        if not isinstance(role_output, dict):
+            continue
+        materials = role_output.get("full_report_materials")
+        if not isinstance(materials, dict):
+            continue
+        for item in materials.get(key) or []:
+            if not isinstance(item, dict):
+                continue
+            severity = str(item.get("severity") or "").lower()
+            if severities is not None and severity not in severities:
+                continue
+            title = str(item.get("title") or key.replace("_", " ")).strip()
+            detail = str(item.get("detail") or "").strip()
+            text = f"{role}: {title}. {detail}".strip()
+            if text:
+                values.append(_compact_text(text, 500))
+            if len(values) >= 7:
+                return _dedupe_compact_texts(values)
+    return _dedupe_compact_texts(values)
+
+
+def _compact_key_numbers_from_roles(role_outputs: dict[str, dict]) -> list[dict[str, str]]:
+    numbers: list[dict[str, str]] = []
+    for role in ROLE_ORDER:
+        role_output = role_outputs.get(role)
+        if not isinstance(role_output, dict):
+            continue
+        for item in role_output.get("numbers_used") or []:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            value = str(item.get("value") or "").strip()
+            source = str(item.get("source") or role).strip()
+            if label and value and source:
+                numbers.append(
+                    {
+                        "label": _compact_text(label, 120),
+                        "value": _compact_text(value, 120),
+                        "unit": "",
+                        "source": _compact_text(source, 240),
+                    }
+                )
+            if len(numbers) >= 12:
+                return numbers
+    return numbers
+
+
+def _compact_questions_from_gaps(data_gaps: list[str]) -> list[str]:
+    if data_gaps:
+        return [_compact_text(f"What evidence closes this gap: {gap}", 500) for gap in data_gaps[:7]]
+    return ["What additional evidence should the team provide before the IC decision is finalized?"]
+
+
+def _fallback_verdict(*, findings: list[dict[str, str]], critical_risks: list[str], data_gaps: list[str]) -> str:
+    severities = {str(item.get("severity") or "").lower() for item in findings}
+    if "blocker" in severities:
+        return "NO-GO"
+    if critical_risks or data_gaps or severities.intersection({"critical", "high", "data_gap"}):
+        return "CONDITIONAL"
+    return "UNKNOWN"
+
+
+def _fallback_executive_brief(
+    *,
+    verdict: str,
+    findings: list[dict[str, str]],
+    critical_risks: list[str],
+    data_gaps: list[str],
+    required_actions: list[str],
+) -> str:
+    finding_text = "; ".join(item["summary"] for item in findings[:3]) or "role outputs completed but did not provide a concise synthesis finding"
+    risk_text = "; ".join(critical_risks[:2]) or "no critical risks were separately elevated by the compact fallback"
+    gap_text = "; ".join(data_gaps[:2]) or "no explicit data gaps were separately elevated by the compact fallback"
+    action_text = "; ".join(required_actions[:2]) or "review the role-level recommendations and close the documented evidence gaps"
+    text = (
+        f"IC Review completed all role analyses, but the final synthesis provider response was not valid JSON, "
+        f"so this compact result was assembled deterministically from the persisted role outputs. The fallback "
+        f"verdict is {verdict}. Main role-level findings: {finding_text}. Key risks: {risk_text}. Data gaps: "
+        f"{gap_text}. Required follow-up: {action_text}. The full report materials, role outputs, prompts, raw "
+        f"provider metadata, and validation artifacts remain preserved for traceability and review."
+    )
+    while len(text) < 400:
+        text += " The decision should be treated as evidence-gated until the team reviews the role-level materials."
+    return _compact_text(text, 1200)
+
+
+def _role_summary_for_compact(role: str, role_output: dict) -> str:
+    summary = str(role_output.get("summary") or "").strip()
+    if not summary:
+        summary = f"{role} completed and contributed role-level material to the IC Review fallback synthesis."
+    if len(summary) < 120:
+        summary = (
+            f"{summary} This summary was included in a deterministic compact fallback because the final synthesis "
+            "provider response was not valid JSON."
+        )
+    return _compact_text(summary, 500)
+
+
+def _compact_severity(value: object) -> str:
+    severity = str(value or "medium").lower()
+    return severity if severity in {"blocker", "critical", "high", "medium", "info", "data_gap"} else "medium"
+
+
+def _dedupe_compact_texts(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(value)
+    return deduped
+
+
+def _compact_text(value: str, max_chars: int) -> str:
+    text = re.sub(r"\s+", " ", str(value)).strip()
+    if len(text) <= max_chars:
+        return text
+    truncated = text[: max_chars + 1].rsplit(" ", 1)[0].rstrip(".,;: ")
+    return f"{truncated}."
 
 
 def _build_legacy_report_json(
