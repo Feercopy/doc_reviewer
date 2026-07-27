@@ -49,6 +49,7 @@ def test_seeded_gate_challenger_skill_matches_supported_document_types(db_sessio
 
     assert main_skill.source_uri.endswith("/skills/gate-challenger/SKILL.md")
     assert main_skill.skill_source_id is not None
+    assert main_skill.version == "stage-checklist-v1"
     assert main_skill.supported_document_types == [
         DocumentType.GATE_2.value,
         DocumentType.STREAM_REVIEW_1.value,

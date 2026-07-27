@@ -14,6 +14,7 @@ from app.schemas.enums import GATE_CHALLENGER_DOCUMENT_TYPES, DocumentType, Enti
 GATE_CHALLENGER_SOURCE_PATH = Path(
     os.getenv("GATE_CHALLENGER_SOURCE_PATH", "/Users/iseremenko/Projects/Gate2-challenger")
 )
+GATE_CHALLENGER_SKILL_VERSION = os.getenv("GATE_CHALLENGER_SKILL_VERSION", "stage-checklist-v1")
 GATE2_BENCHMARK_DIR = Path(
     os.getenv("GATE2_BENCHMARK_DIR", str(GATE_CHALLENGER_SOURCE_PATH / "benchmark"))
 )
@@ -236,7 +237,7 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
         {
             "name": "gate2_challenger_main_analysis",
             "description": "Gate Challenger main analysis skill snapshot source.",
-            "version": "baseline",
+            "version": GATE_CHALLENGER_SKILL_VERSION,
             "skill_type": SkillType.MAIN_ANALYSIS.value,
             "supported_document_types": gate_challenger_document_types,
             "source_type": SkillSourceType.LOCAL_SKILL_REPO.value,

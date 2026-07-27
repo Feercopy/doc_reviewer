@@ -137,6 +137,8 @@ def _run_one_etalon(*, session: Session, benchmark: Benchmark, etalon_id: UUID, 
         return {"etalon_id": str(etalon.id), "status": "failed", "error": "document_parsed_text_missing"}
 
     try:
+        main_run_parameters = dict(benchmark.run_parameters or {})
+        main_run_parameters["document_type"] = etalon.document_type
         actual_output = _run_provider(
             session=session,
             benchmark=benchmark,
@@ -145,12 +147,12 @@ def _run_one_etalon(*, session: Session, benchmark: Benchmark, etalon_id: UUID, 
                 document=document,
                 skill=main_skill,
                 response_schema=_load_schema(main_skill.result_schema_path),
-                run_parameters=benchmark.run_parameters,
+                run_parameters=main_run_parameters,
             ),
             schema_path=main_skill.result_schema_path,
-            run_parameters=benchmark.run_parameters,
+            run_parameters=main_run_parameters,
         )
-        actual_layer_output = extract_benchmark_layers(actual_output)
+        actual_scoring_output = extract_benchmark_layers(actual_output)
         expected_output = _expected_output_for_etalon(benchmark=benchmark, etalon=etalon)
         judge_run_parameters = dict(benchmark.run_parameters)
         if "judge_mock_provider_result" in benchmark.run_parameters:
@@ -161,19 +163,21 @@ def _run_one_etalon(*, session: Session, benchmark: Benchmark, etalon_id: UUID, 
             skill=judge_skill,
             prompt=build_judge_prompt(
                 etalon=expected_output,
-                actual=actual_layer_output,
+                actual=actual_scoring_output,
                 judge_prompt=judge_skill.prompt_text,
             ),
             schema_path=judge_skill.result_schema_path,
             run_parameters=judge_run_parameters,
         )
-        scores = score_judge_output(expected=expected_output, actual=actual_layer_output, judge_output=judge_output)
+        scores = score_judge_output(expected=expected_output, actual=actual_scoring_output, judge_output=judge_output)
         return {
             "etalon_id": str(etalon.id),
             "document_id": str(document.id),
             "status": "completed",
+            "main_run_parameters": main_run_parameters,
             "expected_output": expected_output,
-            "actual_output": actual_layer_output,
+            "actual_output": actual_output,
+            "actual_scoring_output": actual_scoring_output,
             "judge_output": judge_output,
             "scores": scores,
         }
@@ -204,7 +208,12 @@ def _run_provider(
             run_parameters=run_parameters,
         )
     )
-    return parse_and_validate_json_output(structured_text=result.structured_text, schema_path=skill.result_schema_path)
+    return parse_and_validate_json_output(
+        structured_text=result.structured_text,
+        schema_path=skill.result_schema_path,
+        document_type=run_parameters.get("document_type"),
+        enforce_stage_checklist=skill.name == "gate2_challenger_main_analysis",
+    )
 
 
 def _get_provider_key(*, session: Session, benchmark: Benchmark, provider: Provider) -> ProviderKey | None:

@@ -16,6 +16,7 @@ def render_prompt(*, document: Document, skill: Skill, response_schema: dict, ru
             source_snapshot=source_snapshot,
             output_language=parameters.get("output_language"),
             layer_4_context=parameters.get("gate_challenger_layer_4_context"),
+            document_type=parameters.get("document_type"),
         )
 
     prompt_parts = [

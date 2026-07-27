@@ -267,6 +267,14 @@ def test_main_analysis_schema_accepts_valid_result():
         "verdict": "need_evidence",
         "summary": "Evidence is incomplete.",
         "assessment_markdown": "Оценка документа\nРекомендация: не одобрять полный запуск.",
+        "stage_checklist": [
+            {
+                "id": "gate2_hypothesis_results",
+                "label": "Результаты проверки гипотез из Gate 1",
+                "status": "red",
+                "evidence": "Документ не показывает метод, threshold и фактический результат проверки гипотез Gate 1.",
+            }
+        ],
         "findings": [
             {
                 "id": "finding-1",
@@ -326,6 +334,14 @@ def test_main_analysis_schema_accepts_gate_challenger_parity_fields():
         "verdict": "need_evidence",
         "summary": "Evidence is incomplete.",
         "assessment_markdown": "Оценка документа\nРекомендация: не одобрять полный запуск.",
+        "stage_checklist": [
+            {
+                "id": "gate2_hypothesis_results",
+                "label": "Результаты проверки гипотез из Gate 1",
+                "status": "red",
+                "evidence": "Документ не показывает метод, threshold и фактический результат проверки гипотез Gate 1.",
+            }
+        ],
         "findings": [],
         "checks": [],
         "layer_1_markdown": "Layer 1\nL1-001 — Decision-critical blocker.",
@@ -377,6 +393,14 @@ def test_main_analysis_schema_rejects_expanded_layer_1_fields():
         "verdict": "need_evidence",
         "summary": "Evidence is incomplete.",
         "assessment_markdown": "Оценка документа\nРекомендация: не одобрять полный запуск.",
+        "stage_checklist": [
+            {
+                "id": "gate2_hypothesis_results",
+                "label": "Результаты проверки гипотез из Gate 1",
+                "status": "red",
+                "evidence": "Документ не показывает метод, threshold и фактический результат проверки гипотез Gate 1.",
+            }
+        ],
         "findings": [],
         "checks": [],
         "layer_1_markdown": "Layer 1\nL1-001 — Decision-critical blocker.",
@@ -408,7 +432,10 @@ def test_main_analysis_schema_rejects_expanded_layer_1_fields():
 
     try:
         validate(instance=payload, schema=schema)
-    except ValidationError:
+    except ValidationError as exc:
+        assert "title" in exc.message
+        assert "impact" in exc.message
+        assert "recommendation" in exc.message
         return
 
     raise AssertionError("schema accepted expanded Layer 1 fields")
@@ -420,6 +447,14 @@ def test_main_analysis_schema_rejects_non_skill_layer_2_fields():
         "verdict": "need_evidence",
         "summary": "Evidence is incomplete.",
         "assessment_markdown": "Оценка документа\nРекомендация: не одобрять полный запуск.",
+        "stage_checklist": [
+            {
+                "id": "gate2_hypothesis_results",
+                "label": "Результаты проверки гипотез из Gate 1",
+                "status": "red",
+                "evidence": "Документ не показывает метод, threshold и фактический результат проверки гипотез Gate 1.",
+            }
+        ],
         "findings": [],
         "checks": [],
         "layer_1_markdown": "Layer 1\nL1-001 — Decision-critical blocker.",
@@ -450,7 +485,9 @@ def test_main_analysis_schema_rejects_non_skill_layer_2_fields():
 
     try:
         validate(instance=payload, schema=schema)
-    except ValidationError:
+    except ValidationError as exc:
+        assert "risk" in exc.message
+        assert "recommendation" in exc.message
         return
 
     raise AssertionError("schema accepted non-skill Layer 2 risk/recommendation fields")
@@ -462,6 +499,14 @@ def test_main_analysis_summary_schema_accepts_staged_summary_result():
         "verdict": "need_evidence",
         "summary": "Evidence is incomplete.",
         "assessment_markdown": "Оценка документа\nРекомендация: запросить доказательства.",
+        "stage_checklist": [
+            {
+                "id": "gate2_hypothesis_results",
+                "label": "Результаты проверки гипотез из Gate 1",
+                "status": "red",
+                "evidence": "Документ не показывает метод, threshold и фактический результат проверки гипотез Gate 1.",
+            }
+        ],
         "layer_1_index": [
             {
                 "id": "l1-traction",

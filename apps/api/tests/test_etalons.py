@@ -96,6 +96,14 @@ def test_create_etalon_draft_maps_gate_challenger_layers(client, db_session):
         "verdict": "need_evidence",
         "summary": "Needs stronger metric evidence.",
         "assessment_markdown": "Оценка документа\nРекомендация: strengthen metric evidence before approval.",
+        "stage_checklist": [
+            {
+                "id": "gate2_hypothesis_results",
+                "label": "Результаты проверки гипотез из Gate 1",
+                "status": "red",
+                "evidence": "The mock document omits Gate 1 hypothesis results.",
+            }
+        ],
         "findings": [],
         "checks": [],
         "layer_1_markdown": "Layer 1\nL1-001 - Metric proof is incomplete.",

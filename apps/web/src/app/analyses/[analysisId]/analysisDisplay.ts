@@ -132,8 +132,30 @@ export type ResultRationaleItem = {
   sources: ResultRationaleSource[];
 };
 
+export type StageChecklistStatus = "green" | "red";
+
+export type StageChecklistItem = {
+  id: string;
+  label: string;
+  status: StageChecklistStatus;
+  evidence: string;
+};
+
 export function analysisShortSummary(analysis: SummarySource): string | null {
   return resultShortSummaryFromOutput(analysis.structured_output) || analysis.summary || summaryFromOutput(analysis.structured_output);
+}
+
+export function analysisStageChecklist(analysis: Pick<AnalysisRecord, "structured_output">): StageChecklistItem[] {
+  return asRecordArray(analysis.structured_output?.stage_checklist).flatMap((record) => {
+    const id = asString(record.id);
+    const label = asString(record.label);
+    const status = asStageChecklistStatus(record.status);
+    const evidence = asString(record.evidence);
+    if (!id || !label || !status || !evidence) {
+      return [];
+    }
+    return [{ id, label, status, evidence }];
+  });
 }
 
 export function analysisResultRationale(analysis: Pick<AnalysisRecord, "structured_output">): ResultRationale | null {
@@ -166,6 +188,11 @@ function resultRationaleItems(value: unknown): ResultRationaleItem[] {
 
 function isResultRationaleSource(value: string): value is ResultRationaleSource {
   return value === "gate_challenger" || value === "ic_review";
+}
+
+function asStageChecklistStatus(value: unknown): StageChecklistStatus | null {
+  const normalized = asString(value)?.toLowerCase();
+  return normalized === "green" || normalized === "red" ? normalized : null;
 }
 
 export function analysisGateDetailsOutput(

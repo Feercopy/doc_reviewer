@@ -5,6 +5,8 @@ from typing import Any
 
 from jsonschema import validate
 
+from skills.stage_checklists import validate_stage_checklist_for_document_type
+
 
 FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 DEVILS_ADVOCATE_SCHEMA = "devils-advocate-result.schema.json"
@@ -21,11 +23,25 @@ def parse_json_output(structured_text: str) -> Any:
     return _parse_json_output(structured_text, depth=0)
 
 
-def parse_and_validate_json_output(*, structured_text: str, schema_path: str) -> dict:
+GATE_CHALLENGER_RESULT_SCHEMAS = {
+    "main-analysis-result.schema.json",
+    "main-analysis-summary-result.schema.json",
+}
+
+
+def parse_and_validate_json_output(
+    *,
+    structured_text: str,
+    schema_path: str,
+    document_type: str | None = None,
+    enforce_stage_checklist: bool = False,
+) -> dict:
     payload = parse_json_output(structured_text)
     schema = json.loads(_resolve_schema_path(schema_path).read_text(encoding="utf-8"))
     payload = _normalize_payload_for_schema(payload=payload, schema=schema, schema_path=schema_path)
     validate(instance=payload, schema=schema)
+    if enforce_stage_checklist and Path(schema_path).name in GATE_CHALLENGER_RESULT_SCHEMAS:
+        validate_stage_checklist_for_document_type(payload, document_type=document_type)
     return payload
 
 

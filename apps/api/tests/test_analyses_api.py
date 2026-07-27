@@ -711,6 +711,14 @@ def test_analysis_detail_includes_latest_detail_run_without_raw_for_non_admin(cl
             "verdict": "need_evidence",
             "summary": "Needs evidence",
             "assessment_markdown": "Оценка документа\nНужны доказательства.",
+            "stage_checklist": [
+                {
+                    "id": "gate2_hypothesis_results",
+                    "label": "Результаты проверки гипотез из Gate 1",
+                    "status": "red",
+                    "evidence": "Нет фактических результатов проверки гипотез Gate 1.",
+                }
+            ],
             "layer_1_index": [],
             "layer_2_index": [],
             "details_status": "not_requested",

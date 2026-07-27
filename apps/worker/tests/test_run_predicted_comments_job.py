@@ -709,6 +709,14 @@ def _main_analysis_json(summary: str = "Needs evidence.") -> str:
             "verdict": "need_evidence",
             "summary": summary,
             "assessment_markdown": f"Оценка документа\nРекомендация: {summary}",
+            "stage_checklist": [
+                {
+                    "id": "gate2_hypothesis_results",
+                    "label": "Результаты проверки гипотез из Gate 1",
+                    "status": "red",
+                    "evidence": "The mock document omits Gate 1 hypothesis results.",
+                }
+            ],
             "layer_1_index": [
                 {
                     "id": "L1-001",

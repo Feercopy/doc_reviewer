@@ -32,6 +32,7 @@ import { formatDate, formatLabel } from "@/lib/format";
 import { appPath } from "@/lib/routing";
 import {
   analysisGateDetailsOutput,
+  analysisStageChecklist,
   analysisShortSummary,
   buildDocumentCommentAnchors,
   buildLayeredGateChecks,
@@ -43,6 +44,7 @@ import {
   type DocumentCommentSegment,
   type LayeredGateCheck,
   type LayeredGateLayer2Check,
+  type StageChecklistItem,
   type DevilsAdvocateRoleComment,
   splitDevilsAdvocateMarkdown,
   stripAssessmentHeading,
@@ -760,6 +762,7 @@ function ResultPanel({ analysis }: { analysis: AnalysisRecord }) {
   const agentVerdicts = buildAgentVerdicts(analysis);
   const shortSummary = analysisShortSummary(analysis);
   const productMarkdown = resultProductAnalysisMarkdown(analysis);
+  const stageChecklist = analysisStageChecklist(analysis);
   const financialDisplay =
     analysis.ic_review_run?.status === "completed" && isIcReviewCompactResult(analysis.ic_review_run.structured_output)
       ? buildIcReviewCompactDisplay(analysis.ic_review_run.structured_output)
@@ -792,11 +795,11 @@ function ResultPanel({ analysis }: { analysis: AnalysisRecord }) {
         </section>
         <section className="analysis-result-report" aria-label="Summary analysis report">
           <ResultReportSection title="Продуктовый анализ">
-            {productMarkdown ? (
-              <MarkdownPreview markdown={productMarkdown} className="gc-markdown-preview--narrative" unboxed />
-            ) : (
+            {stageChecklist.length ? <StageChecklist items={stageChecklist} /> : null}
+            {productMarkdown ? <MarkdownPreview markdown={productMarkdown} className="gc-markdown-preview--narrative" unboxed /> : null}
+            {!productMarkdown && !stageChecklist.length ? (
               <p className="analysis-muted">No Gate Challenger text output is available for this analysis yet.</p>
-            )}
+            ) : null}
           </ResultReportSection>
           <ResultReportSection title="Финансовый анализ">
             {financialDisplay ? (
@@ -817,6 +820,35 @@ function ResultReportSection({ children, title }: { children: ReactNode; title: 
       <summary>{title}</summary>
       <div className="analysis-result-report-section__body">{children}</div>
     </details>
+  );
+}
+
+function StageChecklist({ items }: { items: StageChecklistItem[] }) {
+  return (
+    <section className="analysis-stage-checklist" aria-label="Stage checklist">
+      <h3>Обязательные элементы</h3>
+      <ul>
+        {items.map((item) => {
+          const statusLabel = item.status === "green" ? "Есть" : "Нет";
+          return (
+            <li
+              aria-label={`${statusLabel}: ${item.label}`}
+              className={`analysis-stage-checklist__item analysis-stage-checklist__item--${item.status}`}
+              key={item.id}
+            >
+              <span className="analysis-stage-checklist__marker" aria-hidden="true" />
+              <div>
+                <div className="analysis-stage-checklist__heading">
+                  <strong>{item.label}</strong>
+                  <span className="analysis-stage-checklist__status">{statusLabel}</span>
+                </div>
+                <p>{item.evidence}</p>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -2984,6 +3016,97 @@ const analysisStyles = `
   background: transparent;
   padding: 0;
   box-shadow: none;
+}
+
+.analysis-stage-checklist {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  background: #f7f9fb;
+  padding: 14px;
+}
+
+.analysis-stage-checklist h3 {
+  margin: 0;
+  color: #161616;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.analysis-stage-checklist ul {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.analysis-stage-checklist__item {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.analysis-stage-checklist__marker {
+  width: 10px;
+  height: 10px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: #9aa4b2;
+}
+
+.analysis-stage-checklist__item--green .analysis-stage-checklist__marker {
+  background: #0e9f6e;
+}
+
+.analysis-stage-checklist__item--red .analysis-stage-checklist__marker {
+  background: #d92d20;
+}
+
+.analysis-stage-checklist__item strong {
+  display: block;
+  min-width: 0;
+  color: #161616;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.analysis-stage-checklist__item p {
+  margin: 4px 0 0;
+  color: #5b6472;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.analysis-stage-checklist__heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
+}
+
+.analysis-stage-checklist__status {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: #edf2f7;
+  color: #3f4856;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.analysis-stage-checklist__item--green .analysis-stage-checklist__status {
+  background: #dff7ed;
+  color: #047857;
+}
+
+.analysis-stage-checklist__item--red .analysis-stage-checklist__status {
+  background: #fde8e5;
+  color: #b42318;
 }
 
 .analysis-result-ic-output {

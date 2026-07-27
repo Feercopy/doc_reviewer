@@ -7,6 +7,7 @@
     "verdict",
     "summary",
     "assessment_markdown",
+    "stage_checklist",
     "layer_1_index",
     "layer_2_index",
     "details_status",
@@ -22,6 +23,11 @@
     },
     "summary": { "type": "string", "minLength": 1 },
     "assessment_markdown": { "type": "string", "minLength": 1 },
+    "stage_checklist": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/stage_checklist_item" }
+    },
     "layer_1_index": {
       "type": "array",
       "items": { "$ref": "#/$defs/layer_1_index_item" }
@@ -43,6 +49,17 @@
     }
   },
   "$defs": {
+    "stage_checklist_item": {
+      "type": "object",
+      "required": ["id", "label", "status", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "enum": ["green", "red"] },
+        "evidence": { "type": "string", "minLength": 1 }
+      }
+    },
     "layer_1_index_item": {
       "type": "object",
       "required": ["id", "severity", "issue", "evidence_anchor"],

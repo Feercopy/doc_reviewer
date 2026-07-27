@@ -21,6 +21,16 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Add production Summary traffic-light checklist for Gate Challenger:
+  creating a clean Doc Reviewer change that keeps the canonical
+  `Ilya-eremenko/Gate2-challenger-skill` source, requires and validates
+  `stage_checklist` for Gate Challenger outputs, renders red/green checklist
+  items at the top of Summary, preserves checklist data in benchmark traces,
+  and seeds the Gate Challenger skill as version `stage-checklist-v1`.
+  Verified focused API tests (`68 passed`), worker tests (`47 passed`), web
+  Summary tests (`47 passed`), `git diff --check`, rebuilt local `api`,
+  `worker`, and `web`, refreshed local baseline skills, and confirmed
+  `localhost:3000` redirects to `/login`.
 - [x] Fix production IC Review `invalid_json:Expecting value` after synthesis:
   production worker logs showed the RQ job finished normally while the business
   run persisted `failed`, matching a final synthesis response that stayed

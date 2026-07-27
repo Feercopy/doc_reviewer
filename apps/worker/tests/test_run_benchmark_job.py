@@ -91,12 +91,69 @@ def test_run_benchmark_persists_scores_judge_output_and_report(tmp_path):
         assert benchmark.partial_matches[0]["ref_id"] == "L2-001"
         document_result = benchmark.judge_output["documents"][0]
         assert document_result["etalon_id"] == str(etalon.id)
+        assert document_result["main_run_parameters"]["document_type"] == DocumentType.GATE_2.value
         assert set(document_result["expected_output"]) == {"verdict", "layer_1", "layer_2"}
         assert document_result["expected_output"]["layer_1"][0]["id"] == "SNAP-L1"
-        assert set(document_result["actual_output"]) == {"verdict", "layer_1", "layer_2"}
-        assert "layer_3" not in document_result["actual_output"]
-        assert "summary" not in document_result["actual_output"]
+        assert document_result["actual_output"]["stage_checklist"][0]["id"] == "gate2_hypothesis_results"
+        assert "layer_3" in document_result["actual_output"]
+        assert "summary" in document_result["actual_output"]
+        assert set(document_result["actual_scoring_output"]) == {"verdict", "layer_1", "layer_2"}
+        assert "layer_3" not in document_result["actual_scoring_output"]
+        assert "summary" not in document_result["actual_scoring_output"]
         assert benchmark.report["overall"]["f1"] == 0.75
+    finally:
+        _close_session(db)
+
+
+def test_run_benchmark_uses_etalon_document_type_for_gate_checklist(tmp_path):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        document.manual_document_type = DocumentType.GATE_2.value
+        etalon = _create_etalon(db, document, user, document_type=DocumentType.GATE_3.value)
+        main_skill = _create_skill(db, SkillType.MAIN_ANALYSIS)
+        judge_skill = _create_skill(db, SkillType.BENCHMARK_JUDGE)
+        benchmark = Benchmark(
+            name="Mixed stage baseline",
+            description="Benchmark",
+            etalon_ids=[str(etalon.id)],
+            skill_id=main_skill.id,
+            skill_version=main_skill.version,
+            judge_skill_id=judge_skill.id,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            started_by_id=user.id,
+            run_parameters={
+                "document_type": DocumentType.GATE_2.value,
+                "mock_provider_result": {
+                    "structured_text": _main_analysis_json_for_gate3(),
+                    "raw_output": "raw analysis",
+                    "latency_ms": 10,
+                },
+                "judge_mock_provider_result": {
+                    "structured_text": _judge_v2_json(),
+                    "raw_output": "raw judge",
+                    "latency_ms": 5,
+                },
+            },
+        )
+        db.add(benchmark)
+        db.commit()
+
+        run_benchmark(str(benchmark.id), db=db)
+
+        db.refresh(benchmark)
+        assert benchmark.status == RunStatus.COMPLETED.value, benchmark.error_message
+        document_result = benchmark.judge_output["documents"][0]
+        assert document_result["main_run_parameters"]["document_type"] == DocumentType.GATE_3.value
+        assert [item["id"] for item in document_result["actual_output"]["stage_checklist"]] == [
+            "gate3_working_mvp",
+            "gate3_performance_vs_gate2_plan",
+            "gate3_pmf_criteria",
+        ]
+        assert set(document_result["actual_scoring_output"]) == {"verdict", "layer_1", "layer_2"}
     finally:
         _close_session(db)
 
@@ -154,6 +211,32 @@ def _main_analysis_json_with_benchmark_ids() -> str:
             "verdict": "need_evidence",
             "summary": "Needs evidence.",
             "assessment_markdown": "Оценка документа\nРекомендация: Needs evidence.",
+            "stage_checklist": [
+                {
+                    "id": "gate2_hypothesis_results",
+                    "label": "Результаты проверки гипотез из Gate 1",
+                    "status": "red",
+                    "evidence": "The mock document omits Gate 1 hypothesis results.",
+                },
+                {
+                    "id": "gate2_mvp_or_target_product",
+                    "label": "Описание MVP/целевого продукта",
+                    "status": "green",
+                    "evidence": "The mock document describes the target product.",
+                },
+                {
+                    "id": "gate2_mockups_or_user_flow",
+                    "label": "Mockups или видео пользовательского flow",
+                    "status": "red",
+                    "evidence": "The mock document omits user-flow mockups.",
+                },
+                {
+                    "id": "gate2_gate3_commitments",
+                    "label": "Commitments к Gate 3: сроки, expected performance, метрики",
+                    "status": "red",
+                    "evidence": "The mock document omits Gate 3 commitments.",
+                },
+            ],
             "findings": [],
             "checks": [],
             "layer_1_markdown": "Layer 1\nA1 — Weak traction.",
@@ -181,6 +264,31 @@ def _main_analysis_json_with_benchmark_ids() -> str:
             "layer_3": [{"id": "A3", "risk": "Should not be benchmarked."}],
         }
     )
+
+
+def _main_analysis_json_for_gate3() -> str:
+    payload = json.loads(_main_analysis_json_with_benchmark_ids())
+    payload["stage_checklist"] = [
+        {
+            "id": "gate3_working_mvp",
+            "label": "Работающий MVP",
+            "status": "green",
+            "evidence": "The mock document includes a working MVP.",
+        },
+        {
+            "id": "gate3_performance_vs_gate2_plan",
+            "label": "Performance/results по сравнению с планом Gate 2",
+            "status": "red",
+            "evidence": "The mock document does not compare performance with the Gate 2 plan.",
+        },
+        {
+            "id": "gate3_pmf_criteria",
+            "label": "Критерии product-market fit для следующего review",
+            "status": "green",
+            "evidence": "The mock document names PMF criteria.",
+        },
+    ]
+    return json.dumps(payload)
 
 
 def _judge_v2_json() -> str:
@@ -314,12 +422,18 @@ def _create_document(db: Session, tmp_path, user: User) -> Document:
     return document
 
 
-def _create_etalon(db: Session, document: Document, user: User) -> Etalon:
+def _create_etalon(
+    db: Session,
+    document: Document,
+    user: User,
+    *,
+    document_type: str = DocumentType.GATE_2.value,
+) -> Etalon:
     etalon = Etalon(
         document_id=document.id,
         author_id=user.id,
         source=EtalonSource.AI_POST_ANNOTATION.value,
-        document_type=DocumentType.GATE_2.value,
+        document_type=document_type,
         expected_verdict="need_evidence",
         layer_1=[{"id": "L1-001", "title": "Weak traction"}],
         layer_2=[{"id": "L2-001", "parent_layer_1_id": "L1-001", "status": "fail", "finding": "No incrementality"}],

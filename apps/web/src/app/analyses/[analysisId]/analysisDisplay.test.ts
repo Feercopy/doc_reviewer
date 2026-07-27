@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   analysisGateDetailsOutput,
   analysisResultRationale,
+  analysisStageChecklist,
   analysisShortSummary,
   buildDocumentCommentAnchors,
   buildLayeredGateChecks,
@@ -27,6 +28,48 @@ describe("analysis display helpers", () => {
         },
       }),
     ).toBe("Combined Result short summary from Gate Challenger and IC Review.");
+  });
+
+  it("extracts the stage checklist from structured output", () => {
+    expect(
+      analysisStageChecklist({
+        structured_output: {
+          stage_checklist: [
+            {
+              id: "gate2_hypothesis_results",
+              label: "Результаты проверки гипотез из Gate 1",
+              status: "red",
+              evidence: "Нет фактических результатов проверки.",
+            },
+            {
+              id: "gate2_mvp_or_target_product",
+              label: "Описание MVP/целевого продукта",
+              status: "green",
+              evidence: "Раздел MVP описывает целевой пользовательский flow.",
+            },
+            {
+              id: "ignored",
+              label: "Ignored",
+              status: "partial",
+              evidence: "Invalid traffic-light status.",
+            },
+          ],
+        },
+      }),
+    ).toEqual([
+      {
+        id: "gate2_hypothesis_results",
+        label: "Результаты проверки гипотез из Gate 1",
+        status: "red",
+        evidence: "Нет фактических результатов проверки.",
+      },
+      {
+        id: "gate2_mvp_or_target_product",
+        label: "Описание MVP/целевого продукта",
+        status: "green",
+        evidence: "Раздел MVP описывает целевой пользовательский flow.",
+      },
+    ]);
   });
 
   it("reads the Result tab rationale block from structured output", () => {

@@ -213,3 +213,109 @@ def test_parse_and_validate_json_output_normalizes_devils_advocate_markdown_only
         "TechDir": "reject",
         "VertDir": "reject",
     }
+
+
+def test_parse_and_validate_json_output_enforces_stage_checklist_for_document_type():
+    payload = schema_validation.parse_and_validate_json_output(
+        structured_text=json.dumps(_main_analysis_result_payload()),
+        schema_path="contracts/schemas/main-analysis-result.schema.json",
+        document_type="gate_2",
+        enforce_stage_checklist=True,
+    )
+
+    assert [item["id"] for item in payload["stage_checklist"]] == [
+        "gate2_hypothesis_results",
+        "gate2_mvp_or_target_product",
+        "gate2_mockups_or_user_flow",
+        "gate2_gate3_commitments",
+    ]
+
+
+def test_parse_and_validate_json_output_rejects_partial_stage_checklist_for_document_type():
+    payload = _main_analysis_result_payload()
+    payload["stage_checklist"] = payload["stage_checklist"][:1]
+
+    try:
+        schema_validation.parse_and_validate_json_output(
+            structured_text=json.dumps(payload),
+            schema_path="contracts/schemas/main-analysis-result.schema.json",
+            document_type="gate_2",
+            enforce_stage_checklist=True,
+        )
+    except ValueError as exc:
+        assert "stage_checklist must match the selected document type exactly" in str(exc)
+        assert "gate2_gate3_commitments" in str(exc)
+        return
+
+    raise AssertionError("stage-specific checklist validator accepted a partial checklist")
+
+
+def test_parse_and_validate_json_output_allows_custom_skill_schema_without_gate_checklist_enforcement():
+    payload = _main_analysis_result_payload()
+    payload["stage_checklist"] = payload["stage_checklist"][:1]
+
+    parsed = schema_validation.parse_and_validate_json_output(
+        structured_text=json.dumps(payload),
+        schema_path="contracts/schemas/main-analysis-result.schema.json",
+        document_type="gate_2",
+    )
+
+    assert [item["id"] for item in parsed["stage_checklist"]] == ["gate2_hypothesis_results"]
+
+
+def _main_analysis_result_payload() -> dict:
+    return {
+        "verdict": "need_evidence",
+        "summary": "Needs evidence.",
+        "assessment_markdown": "Оценка документа\nРекомендация: запросить доказательства.",
+        "stage_checklist": [
+            {
+                "id": "gate2_hypothesis_results",
+                "label": "Результаты проверки гипотез из Gate 1",
+                "status": "red",
+                "evidence": "The document omits Gate 1 hypothesis results.",
+            },
+            {
+                "id": "gate2_mvp_or_target_product",
+                "label": "Описание MVP/целевого продукта",
+                "status": "green",
+                "evidence": "The document describes the target product.",
+            },
+            {
+                "id": "gate2_mockups_or_user_flow",
+                "label": "Mockups или видео пользовательского flow",
+                "status": "red",
+                "evidence": "The document omits user-flow mockups.",
+            },
+            {
+                "id": "gate2_gate3_commitments",
+                "label": "Commitments к Gate 3: сроки, expected performance, метрики",
+                "status": "red",
+                "evidence": "The document omits Gate 3 commitments.",
+            },
+        ],
+        "findings": [],
+        "checks": [],
+        "layer_1_markdown": "Layer 1\nL1-001 - Decision-critical blocker.",
+        "layer_1": [
+            {
+                "id": "L1-001",
+                "severity": "critical",
+                "issue": "Mandatory readiness is not proven.",
+                "evidence": "The document does not close the required proof.",
+            }
+        ],
+        "layer_2_markdown": "Layer 2\nL2-001 - Atomic weak-link finding.",
+        "layer_2": [
+            {
+                "id": "L2-001",
+                "parent_layer_1_id": "L1-001",
+                "status": "fail",
+                "severity": "high",
+                "question": "Is the key target evidenced?",
+                "answer": "NO",
+                "issue": "A key target is not evidenced.",
+                "evidence": "The document omits the proof.",
+            }
+        ],
+    }

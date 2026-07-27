@@ -219,6 +219,14 @@ def _summary_output() -> dict:
         "verdict": "need_evidence",
         "summary": "Needs evidence",
         "assessment_markdown": "Document assessment\nNeeds evidence.",
+        "stage_checklist": [
+            {
+                "id": "gate2_hypothesis_results",
+                "label": "Результаты проверки гипотез из Gate 1",
+                "status": "red",
+                "evidence": "The mock document omits Gate 1 hypothesis results.",
+            }
+        ],
         "layer_1_index": [],
         "layer_2_index": [],
         "details_status": "not_requested",

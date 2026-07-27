@@ -80,6 +80,7 @@ describe("analysis result page", () => {
     expect(pageSource).toContain('activeTopTab === "executiveSummary"');
     expect(pageSource).toContain('activeTopTab === "fullReport"');
     expect(pageSource).toContain("const shortSummary = analysisShortSummary(analysis)");
+    expect(pageSource).toContain("const stageChecklist = analysisStageChecklist(analysis)");
     expect(pageSource).toContain("const agentVerdicts = buildAgentVerdicts(analysis)");
     expect(pageSource).toContain('className="analysis-result-agent-verdicts"');
     expect(pageSource).toContain("analysis-result-agent-verdict__marker");
@@ -374,6 +375,7 @@ describe("analysis result page", () => {
     );
 
     expect(resultPanelSource).toContain('<ResultReportSection title="Продуктовый анализ">');
+    expect(resultPanelSource).toContain("<StageChecklist items={stageChecklist} />");
     expect(resultPanelSource).toContain('<ResultReportSection title="Финансовый анализ">');
     expect(resultPanelSource).toContain("<details className=\"analysis-result-report-section\" open>");
     expect(resultPanelSource).toContain("productAnalysisMarkdownForSummary(sections.main)");
@@ -383,6 +385,30 @@ describe("analysis result page", () => {
     expect(resultPanelSource).toContain("<IcReviewTextOutput display={financialDisplay} />");
     expect(resultPanelSource).not.toContain("IcReviewFullReportDownloads");
     expect(pageSource).toContain(".analysis-result-report-section__body > .gc-markdown-preview");
+  });
+
+  it("renders the stage checklist as a red and green traffic-light block above Summary product analysis", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const resultPanelSource = pageSource.slice(
+      pageSource.indexOf("function ResultPanel"),
+      pageSource.indexOf("function ResultReportSection"),
+    );
+    const stageChecklistSource = pageSource.slice(
+      pageSource.indexOf("function StageChecklist"),
+      pageSource.indexOf("function IcReviewTextOutput"),
+    );
+
+    expect(resultPanelSource.indexOf("<StageChecklist items={stageChecklist} />")).toBeLessThan(
+      resultPanelSource.indexOf("<MarkdownPreview markdown={productMarkdown}"),
+    );
+    expect(stageChecklistSource).toContain('aria-label="Stage checklist"');
+    expect(stageChecklistSource).toContain('aria-label={`${statusLabel}: ${item.label}`}');
+    expect(stageChecklistSource).toContain('className="analysis-stage-checklist__status"');
+    expect(stageChecklistSource).toContain("analysis-stage-checklist__item--${item.status}");
+    expect(pageSource).toContain(".analysis-stage-checklist__item--green .analysis-stage-checklist__marker");
+    expect(pageSource).toContain(".analysis-stage-checklist__item--red .analysis-stage-checklist__marker");
+    expect(pageSource).toContain(".analysis-stage-checklist__item--green .analysis-stage-checklist__status");
+    expect(pageSource).toContain(".analysis-stage-checklist__item--red .analysis-stage-checklist__status");
   });
 
   it("styles Summary report disclosure controls and financial brief as requested", () => {
