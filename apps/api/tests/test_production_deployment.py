@@ -16,8 +16,8 @@ def test_production_compose_uses_release_tagged_application_images() -> None:
     assert "image: ${GATE_API_IMAGE:-infra-api}" in compose
     assert "image: ${GATE_WORKER_IMAGE:-infra-worker}" in compose
     assert "image: ${GATE_WEB_IMAGE:-infra-web}" in compose
-    assert "document-worker:" in compose
-    assert 'command: ["python", "worker.py", "documents"]' in compose
+    assert 'command: ["python", "supervisor.py"]' in compose
+    assert "document-worker:" not in compose
     assert "replicas: ${ANALYSIS_WORKER_REPLICAS:-2}" in compose
 
 

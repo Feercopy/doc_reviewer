@@ -21,6 +21,14 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] Restore the dedicated parser process in production after release
+  `d5ee846c`: the verified application release deployed successfully, but the
+  server's older root-owned deployer recreated only its legacy service list and
+  did not start the new Compose `document-worker`. A compatibility hotfix moves
+  the independent `documents` and `analysis, benchmark` RQ processes under a
+  supervised `worker` container that the installed deployer already recreates;
+  two worker replicas preserve parallel analysis capacity while parsing remains
+  isolated from long provider jobs.
 - [x] Prevent long Gate Challenger / IC Review runs from blocking new document
   parsing and make upload-to-analysis survive a browser refresh. Split RQ into
   one dedicated `document-worker` and two analysis/benchmark workers, persist a
