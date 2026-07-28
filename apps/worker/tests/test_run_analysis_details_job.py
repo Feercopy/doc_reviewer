@@ -1,5 +1,6 @@
 import json
 
+from app.core.config import get_settings
 from app.models.analysis import Analysis, AnalysisDetailRun
 from app.models.provider_key import ProviderKey
 from app.schemas.enums import Provider, RunStatus, Verdict, Role
@@ -81,6 +82,90 @@ def test_run_analysis_details_uses_previous_response_id_and_persists_details(tmp
         assert detail_run.run_parameters["rendered_prompt_artifact_path"]
     finally:
         _close_session(db)
+
+
+def test_run_analysis_details_falls_back_to_saved_prompt_without_previous_response_id(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        storage_root = tmp_path / "storage"
+        monkeypatch.setenv("STORAGE_ROOT", str(storage_root))
+        get_settings.cache_clear()
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        prompt_path = storage_root / "prompts" / str(document.id) / "rendered.txt"
+        prompt_path.parent.mkdir(parents=True)
+        prompt_path.write_text("Original Gate Challenger prompt with full parsed document evidence.", encoding="utf-8")
+        db.add(
+            ProviderKey(
+                owner_id=_create_user(db, role=Role.ADMIN).id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url="https://admllm.test/v1",
+                default_model="openai/gpt-5.5",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="openai/gpt-5.5",
+            status=RunStatus.COMPLETED.value,
+            verdict=Verdict.NEED_EVIDENCE.value,
+            summary="Needs evidence",
+            structured_output=_summary_output(),
+            run_parameters={
+                "output_language": "en",
+                "rendered_prompt_artifact_path": str(prompt_path),
+            },
+        )
+        db.add(analysis)
+        db.flush()
+        detail_run = AnalysisDetailRun(
+            analysis_id=analysis.id,
+            status=RunStatus.QUEUED.value,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="openai/gpt-5.5",
+            previous_response_id=None,
+            run_parameters={
+                "provider_api": "chat_completions_fallback",
+                "mock_provider_result": {
+                    "structured_text": json.dumps(_details_output(str(analysis.id))),
+                    "raw_output": "raw detail fallback",
+                    "input_tokens": 150,
+                    "output_tokens": 175,
+                    "latency_ms": 350,
+                },
+            },
+        )
+        db.add(detail_run)
+        db.commit()
+
+        run_analysis_details(str(detail_run.id), db=db)
+
+        db.refresh(detail_run)
+        db.refresh(analysis)
+        assert analysis.status == RunStatus.COMPLETED.value
+        assert analysis.structured_output["details_status"] == RunStatus.COMPLETED.value
+        assert detail_run.status == RunStatus.COMPLETED.value
+        assert detail_run.previous_response_id is None
+        assert detail_run.response_id is None
+        assert detail_run.structured_output["layer_1"][0]["id"] == "L1-001"
+        assert detail_run.raw_output == "raw detail fallback"
+        assert detail_run.input_tokens == 150
+        assert detail_run.output_tokens == 175
+        assert detail_run.run_parameters["provider_api"] == "chat_completions_fallback"
+        assert detail_run.run_parameters["fallback_reason"] == "gate_challenger_response_id_missing"
+        rendered_prompt = get_settings().storage_root
+        prompt_text = open(detail_run.run_parameters["rendered_prompt_artifact_path"], encoding="utf-8").read()
+        assert str(rendered_prompt) in detail_run.run_parameters["rendered_prompt_artifact_path"]
+        assert "Original Gate Challenger prompt with full parsed document evidence." in prompt_text
+    finally:
+        _close_session(db)
+        get_settings.cache_clear()
 
 
 def test_run_analysis_details_failure_keeps_main_analysis_completed(tmp_path):

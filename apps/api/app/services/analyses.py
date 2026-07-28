@@ -322,8 +322,6 @@ def request_analysis_detail_run(*, db: Session, actor: User, analysis_id: UUID) 
     if analysis.status != RunStatus.COMPLETED.value:
         raise AnalysisPreconditionError("Analysis is not completed")
     previous_response_id = (analysis.run_parameters or {}).get("gate_challenger_response_id")
-    if not previous_response_id:
-        raise AnalysisPreconditionError("Gate Challenger response id is missing")
 
     reusable_run = reusable_analysis_detail_run(db=db, analysis_id=analysis.id)
     if reusable_run is not None:
@@ -331,7 +329,6 @@ def request_analysis_detail_run(*, db: Session, actor: User, analysis_id: UUID) 
         return reusable_run
 
     run_parameters = {
-        "provider_api": "responses",
         "previous_response_id": previous_response_id,
         "output_language": (analysis.run_parameters or {}).get("output_language", "ru"),
         "source_snapshot_id": (analysis.run_parameters or {}).get("source_snapshot_id"),
@@ -339,12 +336,17 @@ def request_analysis_detail_run(*, db: Session, actor: User, analysis_id: UUID) 
         "source_revision": (analysis.run_parameters or {}).get("source_revision"),
         "skill_source_snapshot": (analysis.run_parameters or {}).get("skill_source_snapshot"),
     }
+    if previous_response_id:
+        run_parameters["provider_api"] = "responses"
+    else:
+        run_parameters["provider_api"] = "chat_completions_fallback"
+        run_parameters["fallback_reason"] = "gate_challenger_response_id_missing"
     detail_run = AnalysisDetailRun(
         analysis_id=analysis.id,
         status=RunStatus.QUEUED.value,
         provider=analysis.provider,
         model=analysis.model,
-        previous_response_id=str(previous_response_id),
+        previous_response_id=str(previous_response_id) if previous_response_id else None,
         run_parameters=run_parameters,
     )
     db.add(detail_run)

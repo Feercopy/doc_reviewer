@@ -299,12 +299,12 @@ describe("analysis result page", () => {
     expect(pageSource).toContain("createAnalysisDetails");
     expect(pageSource).toContain("async function loadAnalysisDetails");
     expect(fullOutputSource).toContain("Load detailed Layer 1 / Layer 2");
-    expect(fullOutputSource).toContain("isAnalysisDetailsResponseIdMissing(analysis)");
-    expect(fullOutputSource).toContain("Gate Challenger response id was not saved");
+    expect(fullOutputSource).not.toContain("isAnalysisDetailsResponseIdMissing(analysis)");
+    expect(fullOutputSource).not.toContain("Gate Challenger response id was not saved");
     expect(fullOutputSource).toContain("analysis.detail_run?.status");
     expect(fullOutputSource).toContain("<DetailedGateChecksOutput analysis={analysis} />");
     expect(fullOutputSource).toContain("Detail run failed");
-    expect(pageSource).toContain("!analysis.run_parameters?.gate_challenger_response_id");
+    expect(pageSource).not.toContain("!analysis.run_parameters?.gate_challenger_response_id");
   });
 
   it("lets analysis tabs wrap on narrow screens without clipping Full Output", () => {

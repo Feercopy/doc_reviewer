@@ -2007,9 +2007,6 @@ function canRequestAnalysisDetails(analysis: AnalysisRecord): boolean {
   if (analysis.status !== "completed") {
     return false;
   }
-  if (!analysis.run_parameters?.gate_challenger_response_id) {
-    return false;
-  }
   if (!isStagedSummaryAnalysis(analysis)) {
     return false;
   }
@@ -2036,10 +2033,6 @@ function isStagedSummaryAnalysis(analysis: AnalysisRecord): boolean {
   );
 }
 
-function isAnalysisDetailsResponseIdMissing(analysis: AnalysisRecord): boolean {
-  return isStagedSummaryAnalysis(analysis) && !analysis.run_parameters?.gate_challenger_response_id;
-}
-
 function CollapsibleMarkdown({ markdown, title }: { markdown: string; title: string }) {
   return (
     <details className="analysis-markdown-details">
@@ -2061,7 +2054,6 @@ function FullOutputPanel({
   const detailRun = analysis.detail_run;
   const isDetailActive = isActiveRunStatus(analysis.detail_run?.status);
   const canRequestDetails = canRequestAnalysisDetails(analysis);
-  const detailsResponseIdMissing = isAnalysisDetailsResponseIdMissing(analysis);
   const showDetailsButton = canRequestDetails || isDetailActive || isLoadingDetails;
   return (
     <section className="analysis-card stack">
@@ -2086,14 +2078,6 @@ function FullOutputPanel({
           ) : (
             <span>Gate Challenger summary is available. Detailed Layer 1 / Layer 2 will be requested on demand.</span>
           )}
-        </div>
-      ) : null}
-      {!showDetailsButton && detailsResponseIdMissing ? (
-        <div className="analysis-detail-loader">
-          <span>
-            Detailed Layer 1 / Layer 2 cannot be loaded for this run because the Gate Challenger response id was not saved.
-            Re-run the analysis with the Responses API enabled to request lazy details.
-          </span>
         </div>
       ) : null}
       {detailRun?.status === "failed" ? (

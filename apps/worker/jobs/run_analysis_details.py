@@ -17,7 +17,7 @@ from app.schemas.enums import Provider, RunStatus
 from app.security.secrets import decrypt_secret
 from app.services.provider_keys import get_shared_provider_key
 from app.storage.local import LocalDocumentStorage
-from providers.base import ProviderResponseRequest
+from providers.base import ProviderResponseRequest, ProviderRunRequest
 from providers.registry import get_provider_adapter
 from results.schema_validation import parse_and_validate_json_output
 from skills.output_language import output_language_instruction
@@ -64,8 +64,6 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
         previous_response_id = detail_run.previous_response_id or (analysis.run_parameters or {}).get(
             "gate_challenger_response_id"
         )
-        if not previous_response_id:
-            raise RuntimeError("previous_response_id_missing")
 
         schema = json.loads(_resolve_schema_path(DETAILS_SCHEMA_PATH).read_text(encoding="utf-8"))
         prompt = _render_and_persist_detail_prompt(
@@ -73,19 +71,33 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
             analysis=analysis,
             detail_run=detail_run,
             schema=schema,
-            previous_response_id=str(previous_response_id),
+            previous_response_id=str(previous_response_id) if previous_response_id else None,
         )
-        request = ProviderResponseRequest(
-            provider=provider,
-            model=detail_run.model,
-            api_key=api_key,
-            base_url=provider_key.base_url if provider_key else None,
-            input=prompt,
-            response_schema=schema,
-            previous_response_id=str(previous_response_id),
-            run_parameters={**(analysis.run_parameters or {}), **(detail_run.run_parameters or {})},
-        )
-        result = get_provider_adapter(provider, detail_run.run_parameters).run_response(request)
+        run_parameters = {**(analysis.run_parameters or {}), **(detail_run.run_parameters or {})}
+        adapter = get_provider_adapter(provider, run_parameters)
+        if previous_response_id:
+            request = ProviderResponseRequest(
+                provider=provider,
+                model=detail_run.model,
+                api_key=api_key,
+                base_url=provider_key.base_url if provider_key else None,
+                input=prompt,
+                response_schema=schema,
+                previous_response_id=str(previous_response_id),
+                run_parameters=run_parameters,
+            )
+            result = adapter.run_response(request)
+        else:
+            request = ProviderRunRequest(
+                provider=provider,
+                model=detail_run.model,
+                api_key=api_key,
+                base_url=provider_key.base_url if provider_key else None,
+                prompt=prompt,
+                response_schema=schema,
+                run_parameters=run_parameters,
+            )
+            result = adapter.run(request)
         provider_raw_output = result.raw_output
         provider_structured_text = result.structured_text
         if _detail_run_cancelled(session=session, detail_run=detail_run):
@@ -103,7 +115,7 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
             session=session,
             detail_run=detail_run,
             analysis=analysis,
-            previous_response_id=str(previous_response_id),
+            previous_response_id=str(previous_response_id) if previous_response_id else None,
             response_id=result.provider_metadata.get("response_id"),
             structured=structured,
             raw_output=result.raw_output,
@@ -182,7 +194,7 @@ def _complete_detail_run_if_running(
     session: Session,
     detail_run: AnalysisDetailRun,
     analysis: Analysis,
-    previous_response_id: str,
+    previous_response_id: str | None,
     response_id: str | None,
     structured: dict,
     raw_output: str,
@@ -261,23 +273,39 @@ def _render_and_persist_detail_prompt(
     analysis: Analysis,
     detail_run: AnalysisDetailRun,
     schema: dict,
-    previous_response_id: str,
+    previous_response_id: str | None,
 ) -> str:
     language = (detail_run.run_parameters or {}).get("output_language") or (analysis.run_parameters or {}).get(
         "output_language"
     )
+    original_prompt = _original_gate_challenger_prompt(analysis)
+    if previous_response_id is None and original_prompt is None:
+        raise RuntimeError("gate_challenger_detail_context_missing")
     parts = [
         "Gate Challenger lazy detail expansion.",
-        "Use the existing Responses API conversation state addressed by previous_response_id.",
-        f"previous_response_id: {previous_response_id}",
+        (
+            "Use the existing Responses API conversation state addressed by previous_response_id."
+            if previous_response_id
+            else (
+                "The original Gate Challenger response id was not saved for this analysis. "
+                "Use the full saved Gate Challenger prompt below as the source context for this fallback detail run."
+            )
+        ),
+        f"previous_response_id: {previous_response_id}" if previous_response_id else "",
         output_language_instruction(language) if language is not None else "",
         "Expand the already produced Gate Challenger analysis state into full Layer 1 and Layer 2 details.",
         "Preserve the original verdict and summary unless the details contradict the summary result.",
-        "Do not invent new document evidence. Use only evidence already considered in the previous Gate Challenger analysis.",
+        (
+            "Do not invent new document evidence. Use only evidence already considered in the previous Gate Challenger analysis."
+            if previous_response_id
+            else "Do not invent new document evidence. Use only evidence present in the saved Gate Challenger prompt and compact Stage 2 output."
+        ),
         "If details contradict the Stage 2 verdict, keep the original verdict field stable, set revision_required to true, "
         "and explain the contradiction in revision_reason.",
         "Compact Stage 2 structured output:",
         json.dumps(analysis.structured_output or {}, ensure_ascii=False, sort_keys=True),
+        "Saved original Gate Challenger prompt:",
+        original_prompt if original_prompt is not None else "Unavailable.",
         "Return only JSON matching this schema:",
         json.dumps(schema, ensure_ascii=False, sort_keys=True),
     ]
@@ -285,14 +313,28 @@ def _render_and_persist_detail_prompt(
     storage = LocalDocumentStorage(get_settings().storage_root)
     prompt_path = storage.save_rendered_prompt(analysis_id=detail_run.id, prompt=prompt)
     run_parameters = dict(detail_run.run_parameters or {})
-    run_parameters["provider_api"] = "responses"
+    run_parameters["provider_api"] = "responses" if previous_response_id else "chat_completions_fallback"
     run_parameters["previous_response_id"] = previous_response_id
+    if previous_response_id is None:
+        run_parameters["fallback_reason"] = "gate_challenger_response_id_missing"
+        run_parameters["fallback_context_source"] = "rendered_prompt_artifact_path" if original_prompt is not None else "unavailable"
     run_parameters["rendered_prompt_artifact_path"] = str(prompt_path)
     run_parameters["prompt_fingerprint"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
     detail_run.run_parameters = run_parameters
     flag_modified(detail_run, "run_parameters")
     session.commit()
     return prompt
+
+
+def _original_gate_challenger_prompt(analysis: Analysis) -> str | None:
+    prompt_path = (analysis.run_parameters or {}).get("rendered_prompt_artifact_path")
+    if not prompt_path:
+        return None
+    storage = LocalDocumentStorage(get_settings().storage_root)
+    path = storage.stored_path(str(prompt_path))
+    if not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")
 
 
 def _set_summary_details_status(*, analysis: Analysis, status: str, detail_run: AnalysisDetailRun) -> None:

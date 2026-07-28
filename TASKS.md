@@ -21,6 +21,13 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Restore lazy Layer 1 / Layer 2 detail loading for staged Gate Challenger
+  summaries without a saved Responses API id: detail requests now remain
+  available for older chat-completions runs and worker fallback uses the saved
+  original Gate prompt as context; Responses API runs still use
+  `previous_response_id`. Verified focused API tests (`18 passed`), worker
+  detail tests (`4 passed`), web analysis page tests (`69 passed`), Python
+  compile, and `git diff --check`.
 - [x] Fix IC Review `invalid_json:Expecting value` for Gate-only runs without
   Fin Summary: the financial auditor role now treats an absent workbook plus
   invalid/empty role JSON as a controlled financial data gap instead of failing

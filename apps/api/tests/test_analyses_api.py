@@ -767,30 +767,56 @@ def test_analysis_detail_includes_latest_detail_run_without_raw_for_non_admin(cl
     assert payload["detail_run"]["raw_output"] is None
 
 
-def test_create_analysis_detail_run_requires_summary_response_id(client, db_session):
-    user = create_user(db_session, "author", "secret")
-    skill = seed_baseline_skills(db_session)[0]
-    analysis = Analysis(
-        document_id=_create_completed_document(client, db_session, user),
-        user_id=user.id,
-        skill_id=skill.id,
-        skill_version=skill.version,
-        provider=Provider.OPENAI_COMPATIBLE.value,
-        model="gpt-test",
-        status=RunStatus.COMPLETED.value,
-        verdict="need_evidence",
-        summary="Needs evidence",
-        structured_output={"verdict": "need_evidence", "summary": "Needs evidence"},
-        run_parameters={},
+def test_create_analysis_detail_run_allows_missing_response_id_fallback(client, db_session):
+    enqueued: list[str] = []
+
+    from app.main import app
+    from app.routers import analyses as analyses_router
+
+    app.dependency_overrides[analyses_router.get_run_analysis_details_enqueue] = lambda: lambda detail_run_id: enqueued.append(
+        str(detail_run_id)
     )
-    db_session.add(analysis)
-    db_session.commit()
-    login(client, "author", "secret")
+    try:
+        user = create_user(db_session, "author", "secret")
+        skill = seed_baseline_skills(db_session)[0]
+        analysis = Analysis(
+            document_id=_create_completed_document(client, db_session, user),
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.COMPLETED.value,
+            verdict="need_evidence",
+            summary="Needs evidence",
+            structured_output={
+                "verdict": "need_evidence",
+                "summary": "Needs evidence",
+                "assessment_markdown": "Оценка документа\nНужны доказательства.",
+                "layer_1_index": [],
+                "layer_2_index": [],
+                "details_status": "not_requested",
+                "details_run_id": None,
+                "revision_required": False,
+                "revision_reason": None,
+            },
+            run_parameters={"output_language": "ru"},
+        )
+        db_session.add(analysis)
+        db_session.commit()
+        login(client, "author", "secret")
 
-    response = client.post(f"/analyses/{analysis.id}/details")
+        response = client.post(f"/analyses/{analysis.id}/details")
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == "Gate Challenger response id is missing"
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "queued"
+        assert payload["previous_response_id"] is None
+        assert payload["run_parameters"]["provider_api"] == "chat_completions_fallback"
+        assert payload["run_parameters"]["fallback_reason"] == "gate_challenger_response_id_missing"
+        assert enqueued == [payload["id"]]
+    finally:
+        app.dependency_overrides.pop(analyses_router.get_run_analysis_details_enqueue, None)
 
 
 def test_create_analysis_detail_run_is_idempotent_for_active_run(client, db_session):
