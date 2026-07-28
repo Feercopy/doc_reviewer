@@ -29,6 +29,7 @@ IC_REVIEW_PROVIDER_TIMEOUT_SECONDS = 600
 IC_REVIEW_PROVIDER_CONNECT_TIMEOUT_SECONDS = 30
 IC_REVIEW_PROVIDER_MAX_RETRIES = 3
 IC_REVIEW_ROLE_MAX_OUTPUT_TOKENS = 32000
+FINANCIAL_AUDITOR_ROLE = "ic-financial-auditor"
 
 
 def run_role_step(
@@ -108,7 +109,27 @@ def run_role_step(
         if _check_run_cancelled(session=session, check_run=check_run, step=step):
             raise IcReviewRunCancelled("ic_review_cancelled")
 
-        payload = parse_json_output(result.structured_text)
+        try:
+            payload = parse_json_output(result.structured_text)
+        except json.JSONDecodeError as exc:
+            if not _can_fallback_missing_workbook_role(role=role, context=context):
+                raise
+            structured = _missing_workbook_financial_role_fallback(role=role, schema=schema)
+            step.structured_output = structured
+            step.status = RunStatus.COMPLETED.value
+            step.error_message = None
+            step.artifacts = [
+                *list(step.artifacts or []),
+                {
+                    "key": "role_json_fallback",
+                    "kind": "metadata",
+                    "reason": f"invalid_json:{exc.msg}",
+                    "source": "missing_workbook_financial_auditor",
+                },
+            ]
+            step.completed_at = utc_now()
+            session.commit()
+            return structured
         structured = normalize_schema_bounded_strings(payload, schema, schema)
         validate(instance=structured, schema=schema)
         step.structured_output = structured
@@ -263,6 +284,103 @@ def _role_json_retry_prompt(*, prompt: str, error: json.JSONDecodeError) -> str:
         + "keep arrays within the schema limits, keep full_report_materials detailed but bounded, and do not "
         + "include Markdown fences, commentary, or prose outside the JSON object."
     )
+
+
+def _can_fallback_missing_workbook_role(*, role: str, context: ICReviewContext) -> bool:
+    return (
+        role == FINANCIAL_AUDITOR_ROLE
+        and context.workbook_extraction_summary is None
+        and context.formula_auditor_summary is None
+    )
+
+
+def _missing_workbook_financial_role_fallback(*, role: str, schema: dict[str, Any]) -> dict[str, Any]:
+    structured = {
+        "role": role,
+        "section_keys": ["section_4"],
+        "summary": (
+            "Financial model was not provided, so IC financial audit is limited to the Gate document and "
+            "main Gate Challenger output. Treat model-level formulas, sensitivities, and KPI reconciliation "
+            "as unavailable evidence rather than as passed checks."
+        ),
+        "findings": [
+            {
+                "title": "Financial model not provided",
+                "severity": "data_gap",
+                "evidence": "No linked or uploaded Fin Summary workbook was available for this IC Review run.",
+                "recommendation": (
+                    "Attach the Fin Summary workbook before relying on model formulas, sensitivities, "
+                    "and KPI reconciliation for an IC decision."
+                ),
+            }
+        ],
+        "data_gaps": [
+            "Fin Summary workbook is absent.",
+            "Formula audit and spreadsheet cross-checks were skipped.",
+            "Financial sensitivities must be verified from the source model before IC approval.",
+        ],
+        "numbers_used": [],
+        "full_report_materials": {
+            "section_drafts": [
+                {
+                    "section_key": "section_4",
+                    "title": "Financial model availability",
+                    "content": (
+                        "No Fin Summary workbook was attached to the IC Review run. The financial review "
+                        "therefore cannot validate formulas, source-model assumptions, scenario sensitivities, "
+                        "or KPI reconciliation. Financial conclusions should remain conditional and grounded "
+                        "only in the Gate document until the workbook is provided."
+                    ),
+                    "evidence_ids": [],
+                }
+            ],
+            "tables": [
+                {
+                    "section_key": "section_4",
+                    "title": "Financial audit status",
+                    "markdown": "| Check | Status |\n|---|---|\n| Fin Summary workbook | Not provided |\n| Formula audit | Skipped |",
+                }
+            ],
+            "risks": [
+                {
+                    "title": "Unverified financial model",
+                    "detail": "The IC decision may rely on financial assumptions that were not checked against a source workbook.",
+                    "severity": "data_gap",
+                    "evidence_ids": [],
+                }
+            ],
+            "data_gaps": [
+                {
+                    "title": "Missing workbook",
+                    "detail": "Attach the Fin Summary workbook to verify formulas, scenarios, and KPI reconciliation.",
+                    "severity": "data_gap",
+                    "evidence_ids": [],
+                }
+            ],
+            "recommendations": [
+                {
+                    "title": "Attach Fin Summary",
+                    "detail": "Rerun IC Review with the source financial workbook before treating financial checks as complete.",
+                    "severity": "high",
+                    "evidence_ids": [],
+                }
+            ],
+            "scenarios": [
+                {
+                    "title": "Base case unresolved",
+                    "detail": "Base, upside, and downside scenarios cannot be validated without the source workbook.",
+                    "severity": "data_gap",
+                    "evidence_ids": [],
+                }
+            ],
+            "primary_verify_notes": [
+                "Financial role fallback was used because the workbook was absent and the provider returned invalid JSON."
+            ],
+        },
+    }
+    structured = normalize_schema_bounded_strings(structured, schema, schema)
+    validate(instance=structured, schema=schema)
+    return structured
 
 
 def apply_ic_review_provider_defaults(parameters: dict[str, Any]) -> dict[str, Any]:

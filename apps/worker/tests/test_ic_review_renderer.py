@@ -576,6 +576,53 @@ def test_run_role_step_marks_run_failed_and_preserves_structured_text_when_schem
         db.close()
 
 
+def test_run_financial_role_step_without_workbook_falls_back_after_invalid_json(tmp_path):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        check_run = _check_run(
+            analysis_id=analysis.id,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": "",
+                    "raw_output": "empty financial auditor raw",
+                    "input_tokens": 5,
+                    "output_tokens": 0,
+                    "latency_ms": 11,
+                }
+            },
+        )
+        db.add_all([analysis, check_run])
+        db.commit()
+
+        structured = run_role_step(
+            session=db,
+            check_run=check_run,
+            analysis=analysis,
+            role="ic-financial-auditor",
+            context=_context(workbook=False),
+            source_snapshot=_snapshot(),
+            storage=LocalDocumentStorage(tmp_path / "storage"),
+        )
+
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        db.refresh(check_run)
+        assert structured["role"] == "ic-financial-auditor"
+        assert structured["findings"][0]["severity"] == "data_gap"
+        assert "Financial model was not provided" in structured["summary"]
+        assert step.status == RunStatus.COMPLETED.value
+        assert step.raw_output == "empty financial auditor raw"
+        assert step.artifacts[-1] == {
+            "key": "role_json_fallback",
+            "kind": "metadata",
+            "reason": "invalid_json:Expecting value",
+            "source": "missing_workbook_financial_auditor",
+        }
+        assert check_run.status == RunStatus.RUNNING.value
+    finally:
+        db.close()
+
+
 def test_run_role_step_schema_validation_error_does_not_leak_provider_instance(tmp_path):
     db = _create_session()
     secret_evidence = "SECRET_DOCUMENT_EVIDENCE_SHOULD_NOT_RENDER"

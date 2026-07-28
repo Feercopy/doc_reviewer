@@ -326,6 +326,32 @@ def test_provider_failure_after_role_three_preserves_first_three_raw_outputs_and
         db.close()
 
 
+def test_financial_role_invalid_json_without_workbook_does_not_fail_ic_review(tmp_path, monkeypatch):
+    db = _create_session()
+    calls: dict[str, object] = {}
+    try:
+        records = _seed_run(db, tmp_path, monkeypatch=monkeypatch, workbook=False, failing_role=ROLE_ORDER[0])
+        _patch_script_pipeline(monkeypatch, calls, validation_text="validation ok\n")
+
+        run_ic_agentic_review(str(records["check_run"].id), db=db)
+
+        check_run = db.get(AnalysisCheckRun, records["check_run"].id)
+        steps = db.execute(select(AnalysisCheckStep).order_by(AnalysisCheckStep.created_at)).scalars().all()
+        financial_step = steps[0]
+
+        assert check_run.status == RunStatus.COMPLETED.value
+        assert check_run.structured_output["spreadsheet_audit"]["status"] == "not_provided"
+        assert [step.step_name for step in steps if step.step_type == "role"] == list(ROLE_ORDER)
+        assert financial_step.step_name == "ic-financial-auditor"
+        assert financial_step.status == RunStatus.COMPLETED.value
+        assert financial_step.raw_output == "not json"
+        assert financial_step.structured_output["findings"][0]["severity"] == "data_gap"
+        assert financial_step.artifacts[-1]["key"] == "role_json_fallback"
+        assert calls["formula_audit_json_path"] is None
+    finally:
+        db.close()
+
+
 def test_role_schema_failure_does_not_leak_provider_instance_to_run_error(tmp_path, monkeypatch):
     db = _create_session()
     secret_evidence = "SECRET_DOCUMENT_EVIDENCE_SHOULD_NOT_RENDER"

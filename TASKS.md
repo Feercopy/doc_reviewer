@@ -21,6 +21,12 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Fix IC Review `invalid_json:Expecting value` for Gate-only runs without
+  Fin Summary: the financial auditor role now treats an absent workbook plus
+  invalid/empty role JSON as a controlled financial data gap instead of failing
+  the whole IC Review, while other role JSON/schema failures still fail the run.
+  Verified focused Docker worker tests
+  (`test_ic_review_renderer.py test_run_ic_agentic_review_job.py`: 49 passed).
 - [~] Restore the dedicated parser process in production after release
   `d5ee846c`: the verified application release deployed successfully, but the
   server's older root-owned deployer recreated only its legacy service list and
