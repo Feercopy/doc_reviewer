@@ -2,6 +2,11 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from docx import Document as DocxDocument
+from PIL import Image as PillowImage
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Image as ReportlabImage
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from parsers import docling_parser
 from parsers import parse_file, parse_file_to_document
@@ -212,12 +217,80 @@ def test_parse_pdf_returns_page_blocks_and_quality(tmp_path, monkeypatch):
 
     parsed = parse_file_to_document(path)
 
-    assert parsed.parser.name == "pypdf"
+    assert parsed.parser.name == "pdfplumber"
     assert parsed.quality.page_count == 2
     assert parsed.quality.empty_pages == []
-    assert [block.page for block in parsed.blocks] == [1, 2]
+    assert [block.page for block in parsed.blocks if block.type == "page"] == [1, 2]
     assert parsed.blocks[0].type == "page"
     assert "<!-- page 1 -->" in parsed.markdown
+
+
+def test_parse_pdf_preserves_tables_as_markdown(tmp_path, monkeypatch):
+    monkeypatch.setattr(docling_parser, "is_docling_available", lambda: False)
+    path = tmp_path / "table-defense.pdf"
+    _write_pdf_with_table(path)
+
+    parsed = parse_file_to_document(path)
+
+    assert parsed.parser.name == "pdfplumber"
+    assert parsed.quality.table_count == 1
+    assert "| Metric | Value |" in parsed.markdown
+    assert "| Traction | Growing |" in parsed.markdown
+    assert "| Risks | Low |" in parsed.plain_text
+    assert any(block.type == "table" for block in parsed.blocks)
+
+
+def test_parse_pdf_emits_image_placeholders(tmp_path, monkeypatch):
+    monkeypatch.setattr(docling_parser, "is_docling_available", lambda: False)
+    path = tmp_path / "image-defense.pdf"
+    image_path = tmp_path / "chart.png"
+    PillowImage.new("RGB", (24, 16), color=(18, 94, 140)).save(image_path)
+    _write_pdf_with_image(path, image_path)
+
+    parsed = parse_file_to_document(path)
+
+    assert parsed.parser.name == "pdfplumber"
+    assert "image_placeholders_emitted" in parsed.quality.warnings
+    assert "[Image on page 1:" in parsed.markdown
+    image_blocks = [block for block in parsed.blocks if block.type == "image"]
+    assert len(image_blocks) == 1
+    assert image_blocks[0].metadata["width"] > 0
+    assert image_blocks[0].metadata["height"] > 0
+
+
+def _write_pdf_with_table(path: Path) -> None:
+    styles = getSampleStyleSheet()
+    table = Table([["Metric", "Value"], ["Traction", "Growing"], ["Risks", "Low"]])
+    table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+            ]
+        )
+    )
+    SimpleDocTemplate(str(path)).build(
+        [
+            Paragraph("Gate 2 parser probe", styles["Title"]),
+            Spacer(1, 12),
+            table,
+            Spacer(1, 12),
+            Paragraph("Below is the follow-up text.", styles["BodyText"]),
+        ]
+    )
+
+
+def _write_pdf_with_image(path: Path, image_path: Path) -> None:
+    styles = getSampleStyleSheet()
+    SimpleDocTemplate(str(path)).build(
+        [
+            Paragraph("Gate 2 image probe", styles["Title"]),
+            Spacer(1, 12),
+            ReportlabImage(str(image_path), width=120, height=80),
+            Spacer(1, 12),
+            Paragraph("Image caption evidence.", styles["BodyText"]),
+        ]
+    )
 
 
 def _pdf_with_text_pages(page_texts: list[str]) -> bytes:

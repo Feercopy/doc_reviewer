@@ -21,6 +21,14 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Improve PDF parser structure preservation: diagnosed local PDF parsing
+  as incomplete Docling runtime silently falling back to `pypdf`, added a
+  lightweight `pdfplumber` PDF path that emits page, paragraph, table, and image
+  placeholder blocks in parsed markdown/artifacts, and extended the parse
+  artifact schema with `image` blocks. Verified focused worker parser tests
+  (`15 passed`), parse job tests (`2 passed`), and contract schema tests (`23
+  passed`), `git diff --check`, rebuilt/restarted the local `worker`, and
+  confirmed a probe PDF parses as `pdfplumber` with one markdown table.
 - [x] Add production Summary traffic-light checklist for Gate Challenger:
   creating a clean Doc Reviewer change that keeps the canonical
   `Ilya-eremenko/Gate2-challenger-skill` source, requires and validates
