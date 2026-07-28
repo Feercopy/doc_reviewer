@@ -11,6 +11,7 @@ from app.schemas.enums import DocumentParseStatus
 from app.services.audit import record_audit
 from app.services.document_type_detector import detect_document_type
 from app.storage.local import LocalDocumentStorage
+from jobs.deferred_analyses import DeferredAnalysisEnqueue, enqueue_ready_deferred_analyses
 from parsers import parse_file_to_document
 
 
@@ -19,6 +20,7 @@ def parse_document(
     *,
     db: Session | None = None,
     storage: LocalDocumentStorage | None = None,
+    enqueue_analysis: DeferredAnalysisEnqueue | None = None,
 ) -> None:
     owns_session = db is None
     session = db or SessionLocal()
@@ -79,6 +81,12 @@ def parse_document(
             },
         )
         session.commit()
+        if owns_session or enqueue_analysis is not None:
+            enqueue_ready_deferred_analyses(
+                db=session,
+                document_id=document.id,
+                enqueue=enqueue_analysis,
+            )
         worker_logger.info(
             "worker_job_completed",
             extra={"job_type": "parse_document", "entity_id": str(document_uuid), "status": "completed"},

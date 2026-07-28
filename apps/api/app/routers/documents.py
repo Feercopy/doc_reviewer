@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -8,10 +8,12 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.dependencies.auth import require_current_user
+from app.models.analysis import Analysis
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.documents import DocumentRead, DocumentTitlePatch, DocumentTypePatch, DocumentsListResponse
-from app.schemas.enums import DocumentParseStatus, DocumentType
+from app.schemas.enums import DocumentParseStatus, DocumentType, Provider, RunStatus
+from app.services.analyses import AnalysisPreconditionError, create_analysis_for_document
 from app.services.document_jobs import ParseDocumentEnqueue, enqueue_parse_document
 from app.services.documents import (
     DocumentNotFoundError,
@@ -46,11 +48,26 @@ def create_document(
     fin_summary_file: Annotated[UploadFile | None, File()] = None,
     title: Annotated[str | None, Form()] = None,
     manual_document_type: Annotated[DocumentType | None, Form()] = None,
+    analysis_provider: Annotated[Provider | None, Form()] = None,
+    analysis_model: Annotated[str | None, Form()] = None,
+    analysis_output_language: Annotated[Literal["ru", "en"], Form()] = "en",
     db: Session = Depends(get_db),
     current_user: User = Depends(require_current_user),
     storage: LocalDocumentStorage = Depends(get_document_storage),
     enqueue: ParseDocumentEnqueue = Depends(get_parse_document_enqueue),
 ) -> Document:
+    if (analysis_provider is None) != (analysis_model is None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="analysis_provider and analysis_model must be provided together",
+        )
+    normalized_analysis_model = analysis_model.strip() if analysis_model else None
+    if analysis_model is not None and not normalized_analysis_model:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="analysis_model must not be blank",
+        )
+
     try:
         bundle = create_uploaded_document_bundle(
             db=db,
@@ -61,11 +78,44 @@ def create_document(
             title=title,
             manual_document_type=manual_document_type,
         )
+        deferred_analysis: Analysis | None = None
+        if analysis_provider is not None and normalized_analysis_model is not None:
+            try:
+                deferred_analysis = create_analysis_for_document(
+                    db=db,
+                    actor=current_user,
+                    document_id=bundle.primary_document.id,
+                    provider=analysis_provider,
+                    model=normalized_analysis_model,
+                    skill_id=None,
+                    document_type_override=manual_document_type,
+                    run_parameters={"output_language": analysis_output_language},
+                    defer_until_document_parsed=True,
+                )
+            except AnalysisPreconditionError as exc:
+                db.rollback()
+                cleanup_uploaded_document_bundle(
+                    db=db,
+                    storage=storage,
+                    primary_document_id=bundle.primary_document.id,
+                )
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         try:
             for document_id in bundle.enqueued_document_ids:
                 enqueue(document_id)
         except Exception as exc:
-            cleanup_uploaded_document_bundle(db=db, storage=storage, primary_document_id=bundle.primary_document.id)
+            if deferred_analysis is None:
+                cleanup_uploaded_document_bundle(
+                    db=db,
+                    storage=storage,
+                    primary_document_id=bundle.primary_document.id,
+                )
+            else:
+                bundle.primary_document.parse_status = DocumentParseStatus.FAILED.value
+                bundle.primary_document.parse_error = "Failed to enqueue document parsing"
+                deferred_analysis.status = RunStatus.FAILED.value
+                deferred_analysis.error_message = "Failed to enqueue document parsing"
+                db.commit()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to enqueue document parsing",

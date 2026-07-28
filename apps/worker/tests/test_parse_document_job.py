@@ -8,9 +8,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
+from app.models.analysis import Analysis
 from app.models.document import Document
+from app.models.skill import Skill
 from app.models.user import User
-from app.schemas.enums import DocumentParseStatus, DocumentType, EntityStatus, Role, UserStatus
+from app.schemas.enums import DocumentParseStatus, DocumentType, EntityStatus, Role, RunStatus, SkillType, UserStatus
+from app.services.analyses import DOCUMENT_PARSE_DEPENDENCY_KEY
 from app.security.passwords import hash_password
 from app.storage.local import LocalDocumentStorage
 from jobs.parse_document import parse_document
@@ -83,6 +86,69 @@ def test_parse_document_failure_marks_failed_and_preserves_raw_file(tmp_path):
         assert document.parse_error
         assert raw_path.exists()
         assert raw_path.read_bytes() == b"not a valid pdf"
+    finally:
+        _close_session(db)
+
+
+def test_parse_document_enqueues_persisted_analysis_after_parse(tmp_path):
+    db = _create_session()
+    try:
+        owner = _create_user(db)
+        storage = LocalDocumentStorage(tmp_path)
+        document = _create_document(
+            db,
+            storage,
+            owner,
+            filename="gate-2.md",
+            content=b"# Gate 2\n\nMVP scope, traction, metrics, risks, and business case.",
+            mime_type="text/markdown",
+        )
+        skill = Skill(
+            name="gate2_challenger_main_analysis",
+            description="Gate Challenger",
+            version="test",
+            skill_type=SkillType.MAIN_ANALYSIS.value,
+            supported_document_types=[DocumentType.GATE_2.value],
+            source_type="inline_prompt",
+            prompt_text="Review",
+            result_schema_path="contracts/schemas/main-analysis-result.schema.json",
+            runtime_mode="inline",
+            status=EntityStatus.ACTIVE.value,
+        )
+        db.add(skill)
+        db.flush()
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=owner.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider="openai_compatible",
+            model="openai/gpt-5.5",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "document_type": DocumentType.UNKNOWN.value,
+                DOCUMENT_PARSE_DEPENDENCY_KEY: {
+                    "document_id": str(document.id),
+                    "state": "waiting",
+                },
+            },
+        )
+        db.add(analysis)
+        db.commit()
+        enqueued: list[str] = []
+
+        parse_document(
+            str(document.id),
+            db=db,
+            storage=storage,
+            enqueue_analysis=lambda analysis_id: enqueued.append(str(analysis_id)),
+        )
+
+        db.refresh(analysis)
+        assert enqueued == [str(analysis.id)]
+        assert analysis.status == RunStatus.QUEUED.value
+        assert analysis.run_parameters["document_type"] == DocumentType.GATE_2.value
+        assert analysis.run_parameters[DOCUMENT_PARSE_DEPENDENCY_KEY]["state"] == "enqueued"
     finally:
         _close_session(db)
 

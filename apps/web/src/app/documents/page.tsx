@@ -11,9 +11,7 @@ import {
 } from "@/lib/api/provider-settings";
 import {
   USER_SELECTABLE_DOCUMENT_TYPES,
-  createAnalysis,
   deleteDocument,
-  getDocument,
   listDocuments,
   listAnalyses,
   uploadDocument,
@@ -25,7 +23,6 @@ import {
   type Provider,
 } from "@/lib/api/documents";
 import { formatDate } from "@/lib/format";
-import { appPath } from "@/lib/routing";
 import { formatDocumentTypeLabel, getDocumentParsePresentation } from "./documentsDisplay";
 
 type ParseFilter = "all" | ParseStatus;
@@ -34,8 +31,6 @@ const supportedExtensions = [".docx", ".pdf", ".md", ".txt"];
 type UploadSlot = "primary" | "finSummary";
 type UploadStep = "uploading" | "parsing" | "starting_analysis";
 
-const parsePollIntervalMs = 3000;
-const parsePollTimeoutMs = 5 * 60 * 1000;
 const defaultOutputLanguage: OutputLanguage = "en";
 
 const parseFilters: { label: string; value: ParseFilter }[] = [
@@ -110,7 +105,19 @@ function getLatestCaseAnalysis(analyses: AnalysisRecord[]): AnalysisRecord | nul
   );
 }
 
-function getAnalysisStatusSignal(analysis: AnalysisRecord): { label: string; tone: "good" | "info" | "warn" | "bad" } {
+function getAnalysisStatusSignal(
+  analysis: AnalysisRecord | undefined,
+  parseStatus: ParseStatus,
+): { label: string; tone: "good" | "info" | "warn" | "bad" } {
+  if (!analysis) {
+    if (parseStatus === "queued" || parseStatus === "running") {
+      return { label: "Waiting for parser", tone: parseStatus === "queued" ? "warn" : "info" };
+    }
+    if (parseStatus === "failed") {
+      return { label: "Analysis not started", tone: "bad" };
+    }
+    return { label: "Analysis pending", tone: "warn" };
+  }
   if (isFullAnalysisComplete(analysis)) {
     return { label: "Analysis complete", tone: "good" };
   }
@@ -141,10 +148,6 @@ function getAnalysisStatusSignal(analysis: AnalysisRecord): { label: string; ton
   }
 
   return { label: "Analysis running", tone: "info" };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function chooseAnalysisConfig(providerModels: ProviderModelOptions[]): { provider: Provider; model: string } | null {
@@ -254,10 +257,10 @@ export default function DocumentsPage() {
       return;
     }
     const timer = window.setInterval(() => {
-      refreshCaseAnalyses(documents).catch(() => undefined);
-    }, 10000);
+      refresh().catch(() => undefined);
+    }, 5000);
     return () => window.clearInterval(timer);
-  }, [documents]);
+  }, [documents.length]);
 
   useEffect(() => {
     let ignore = false;
@@ -323,32 +326,6 @@ export default function DocumentsPage() {
     chooseFile(slot, event.dataTransfer.files[0] ?? null);
   }
 
-  async function waitForUploadedDocumentParse(documentId: string): Promise<DocumentRecord> {
-    const startedAt = Date.now();
-
-    while (Date.now() - startedAt < parsePollTimeoutMs) {
-      const nextDocument = await getDocument(documentId);
-      setDocuments((items) => {
-        const existingIndex = items.findIndex((item) => item.id === nextDocument.id);
-        if (existingIndex === -1) {
-          return [nextDocument, ...items];
-        }
-        return items.map((item) => (item.id === nextDocument.id ? nextDocument : item));
-      });
-
-      if (nextDocument.parse_status === "completed") {
-        return nextDocument;
-      }
-      if (nextDocument.parse_status === "failed") {
-        throw new Error(nextDocument.parse_error || "Parser failed");
-      }
-
-      await sleep(parsePollIntervalMs);
-    }
-
-    throw new Error("Parsing did not finish within 5 minutes. Open the document to check parser status.");
-  }
-
   async function getAnalysisConfig(): Promise<{ provider: Provider; model: string }> {
     const models = providerModels.length > 0 ? providerModels : (await listProviderModels()).provider_models;
     setProviderModels(models);
@@ -369,34 +346,37 @@ export default function DocumentsPage() {
     setUploadStep("uploading");
     setUploadError("");
 
-    const form = new FormData();
-    form.set("file", primaryFile);
-    if (finSummaryFile) {
-      form.set("fin_summary_file", finSummaryFile);
-    }
-    if (title.trim()) {
-      form.set("title", title.trim());
-    }
-    if (manualType) {
-      form.set("manual_document_type", manualType);
-    }
-
     try {
+      const analysisConfig = await getAnalysisConfig();
+      const form = new FormData();
+      form.set("file", primaryFile);
+      form.set("analysis_provider", analysisConfig.provider);
+      form.set("analysis_model", analysisConfig.model);
+      form.set("analysis_output_language", defaultOutputLanguage);
+      if (finSummaryFile) {
+        form.set("fin_summary_file", finSummaryFile);
+      }
+      if (title.trim()) {
+        form.set("title", title.trim());
+      }
+      if (manualType) {
+        form.set("manual_document_type", manualType);
+      }
+
       const document = await uploadDocument(form);
       setDocuments((items) => [document, ...items.filter((item) => item.id !== document.id)]);
-      setUploadStep("parsing");
-      const parsedDocument = await waitForUploadedDocumentParse(document.id);
       setUploadStep("starting_analysis");
-      const analysisConfig = await getAnalysisConfig();
-      await createAnalysis(parsedDocument.id, {
-        provider: analysisConfig.provider,
-        model: analysisConfig.model,
-        document_type_override: parsedDocument.manual_document_type ?? parsedDocument.detected_document_type,
-        run_parameters: {
-          output_language: defaultOutputLanguage,
-        },
-      });
-      window.location.href = appPath(`/documents/${document.id}`);
+      await refresh();
+      setTitle("");
+      setManualType("");
+      setPrimaryFile(null);
+      setFinSummaryFile(null);
+      if (primaryFileInputRef.current) {
+        primaryFileInputRef.current.value = "";
+      }
+      if (finSummaryFileInputRef.current) {
+        finSummaryFileInputRef.current.value = "";
+      }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Start analysis failed");
     } finally {
@@ -405,10 +385,7 @@ export default function DocumentsPage() {
     }
   }
 
-  const caseDocuments = useMemo(
-    () => documents.filter((document) => caseAnalysesByDocumentId[document.id]),
-    [caseAnalysesByDocumentId, documents],
-  );
+  const caseDocuments = documents;
 
   const filteredCases = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -683,8 +660,8 @@ export default function DocumentsPage() {
                     const finSummary = document.linked_fin_summary_document;
                     const finSummaryParseState = getFinSummaryPresentation(finSummary);
                     const caseAnalysis = caseAnalysesByDocumentId[document.id];
-                    const analysisSignal = getAnalysisStatusSignal(caseAnalysis);
-                    const canOpenAnalysis = isFullAnalysisComplete(caseAnalysis);
+                    const analysisSignal = getAnalysisStatusSignal(caseAnalysis, document.parse_status);
+                    const canOpenAnalysis = caseAnalysis ? isFullAnalysisComplete(caseAnalysis) : false;
 
                     return (
                       <tr key={document.id}>
@@ -727,7 +704,7 @@ export default function DocumentsPage() {
                         </td>
                         <td>
                           <div className="gc-action-row">
-                            {canOpenAnalysis ? (
+                            {caseAnalysis && canOpenAnalysis ? (
                               <Link className="gc-compact-link" href={`/analyses/${caseAnalysis.id}`}>
                                 Analysis results
                               </Link>

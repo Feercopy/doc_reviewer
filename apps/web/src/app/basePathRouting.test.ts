@@ -45,7 +45,7 @@ describe("base path routing", () => {
     expect(loginPage).toContain('window.location.href = appPath("/documents")');
     expect(homePage).toContain('redirect(appPath("/login"))');
     expect(adminPage).toContain('redirect(appPath("/admin/users"))');
-    expect(documentsPage).toContain("window.location.href = appPath(`/documents/${document.id}`)");
+    expect(documentsPage).not.toContain("window.location.href");
     expect(documentDetailPage).toContain('window.location.href = appPath("/documents")');
     expect(documentDetailPage).not.toContain("window.location.href = appPath(`/analyses/${analysis.id}`)");
     expect(analysisPage).toContain(
