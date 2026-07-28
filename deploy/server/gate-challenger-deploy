@@ -125,6 +125,15 @@ health_check() {
   return 1
 }
 
+recreate_application_services() {
+  local target="$1"
+  local services=(api worker web edge)
+  if compose_for "$target" config --services | grep -qx "document-worker"; then
+    services+=(document-worker)
+  fi
+  compose_for "$target" up -d --no-deps --force-recreate "${services[@]}"
+}
+
 point_current_at() {
   local target="$1"
   local next_link="$base_dir/.current-next"
@@ -174,7 +183,7 @@ rollback_release() {
     log "rolling application containers back to $previous_dir"
     point_current_at "$previous_dir"
     set_release_images "$(release_version_for "$previous_dir")"
-    compose_for "$previous_dir" up -d --no-deps --force-recreate api worker web edge
+    recreate_application_services "$previous_dir"
     if health_check; then
       log "application rollback passed health checks"
     else
@@ -210,7 +219,7 @@ deploy_release() {
   switched_release="true"
 
   log "recreating application and edge containers"
-  compose_for "$release_dir" up -d --no-deps --force-recreate api worker web edge
+  recreate_application_services "$release_dir"
 
   log "waiting for internal and public health checks"
   health_check || return 1

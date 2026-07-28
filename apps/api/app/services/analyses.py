@@ -43,6 +43,7 @@ class AnalysisPreconditionError(ValueError):
 ACTIVE_RUN_STATUSES = {RunStatus.QUEUED.value, RunStatus.RUNNING.value}
 ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY = "analysis_chain_cancel_requested_at"
 ANALYSIS_CHAIN_CANCELLED_BY_USER_ID_KEY = "analysis_chain_cancelled_by_user_id"
+DOCUMENT_PARSE_DEPENDENCY_KEY = "document_parse_dependency"
 
 
 def create_analysis_for_document(
@@ -55,9 +56,11 @@ def create_analysis_for_document(
     skill_id: UUID | None,
     document_type_override: DocumentType | None,
     run_parameters: dict,
+    defer_until_document_parsed: bool = False,
 ) -> Analysis:
     document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
-    if document.parse_status != DocumentParseStatus.COMPLETED.value or not document.parsed_text:
+    parse_completed = document.parse_status == DocumentParseStatus.COMPLETED.value and bool(document.parsed_text)
+    if not parse_completed and not defer_until_document_parsed:
         raise AnalysisPreconditionError("Document parse is not completed")
 
     document_type = (
@@ -79,6 +82,11 @@ def create_analysis_for_document(
     merged_parameters = dict(run_parameters)
     merged_parameters["document_type"] = document_type
     merged_parameters["skill_source_snapshot"] = skill_source_snapshot(skill)
+    if not parse_completed:
+        merged_parameters[DOCUMENT_PARSE_DEPENDENCY_KEY] = {
+            "document_id": str(document.id),
+            "state": "waiting",
+        }
 
     analysis = Analysis(
         document_id=document.id,

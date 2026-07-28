@@ -9,12 +9,18 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.main import app
+from app.models.analysis import Analysis
 from app.models.audit_log import AuditLog
 from app.models.document import Document
+from app.models.provider_key import ProviderKey
+from app.models.skill import Skill
 from app.routers import documents as documents_router
 from app.models.user import User
-from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus, Role, UserStatus
+from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus, Provider, Role, UserStatus
 from app.security.passwords import hash_password
+from app.security.secrets import encrypt_secret
+from app.seeds.skills import seed_baseline_skills
+from app.services.analyses import DOCUMENT_PARSE_DEPENDENCY_KEY
 
 
 @pytest.fixture()
@@ -123,6 +129,65 @@ def test_upload_enqueues_parse_job(api_client, db_session, enqueued_parse_jobs):
 
     assert response.status_code == 201
     assert enqueued_parse_jobs == [response.json()["id"]]
+
+
+def test_upload_persists_deferred_analysis_before_parser_runs(api_client, db_session, enqueued_parse_jobs):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    author = create_user(db_session, "author", "secret")
+    seed_baseline_skills(db_session)
+    main_skill = db_session.query(Skill).filter_by(name="gate2_challenger_main_analysis").one()
+    main_skill.runtime_mode = "inline"
+    main_skill.skill_source_id = None
+    db_session.add(
+        ProviderKey(
+            owner_id=admin.id,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            default_model="openai/gpt-5.5",
+            available_models=["openai/gpt-5.5"],
+            encrypted_api_key=encrypt_secret("sk-test"),
+            api_key_fingerprint="openai_compatible:...test",
+        )
+    )
+    db_session.commit()
+    login(api_client, author.login, "secret")
+
+    response = api_client.post(
+        "/documents",
+        data={
+            "title": "Gate 2 Defense",
+            "analysis_provider": Provider.OPENAI_COMPATIBLE.value,
+            "analysis_model": "openai/gpt-5.5",
+            "analysis_output_language": "en",
+        },
+        files={"file": ("gate-2.md", b"# Gate 2\n\nMVP metrics", "text/markdown")},
+    )
+
+    assert response.status_code == 201
+    document_id = UUID(response.json()["id"])
+    analysis = db_session.query(Analysis).filter_by(document_id=document_id).one()
+    assert analysis.user_id == author.id
+    assert analysis.status == "queued"
+    assert analysis.run_parameters["output_language"] == "en"
+    assert analysis.run_parameters[DOCUMENT_PARSE_DEPENDENCY_KEY] == {
+        "document_id": str(document_id),
+        "state": "waiting",
+    }
+    assert enqueued_parse_jobs == [str(document_id)]
+
+
+def test_upload_rejects_partial_analysis_config_before_storing_document(api_client, db_session, storage_root):
+    create_user(db_session, "author", "secret")
+    login(api_client, "author", "secret")
+
+    response = api_client.post(
+        "/documents",
+        data={"analysis_provider": Provider.OPENAI_COMPATIBLE.value},
+        files={"file": ("gate-2.md", b"# Gate 2", "text/markdown")},
+    )
+
+    assert response.status_code == 422
+    assert db_session.query(Document).count() == 0
+    assert not any(path.is_file() for path in storage_root.rglob("*"))
 
 
 def test_upload_rejects_unsupported_primary_file_without_db_or_storage_artifacts(

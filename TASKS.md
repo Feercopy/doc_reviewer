@@ -21,6 +21,19 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Prevent long Gate Challenger / IC Review runs from blocking new document
+  parsing and make upload-to-analysis survive a browser refresh. Split RQ into
+  one dedicated `document-worker` and two analysis/benchmark workers, persist a
+  deferred queued analysis in the same upload request, enqueue it after parsing
+  with document-worker startup recovery, and show every uploaded document in
+  the cases table with five-second status refresh. Verified full Docker API
+  tests (`199 passed`), worker tests (`172 passed`), web tests (`143 passed`),
+  production web build, Python syntax, local and production Compose configs,
+  deploy-script syntax, and `git diff --check`. Rebuilt the local API/web/worker
+  stack; API health is `ok`, web `/login` returns `200`, the document worker
+  listens only on `documents`, and two workers listen on `analysis, benchmark`.
+  Production release is handled separately through the verified `main`
+  deployment workflow.
 - [x] Improve PDF parser structure preservation: diagnosed local PDF parsing
   as incomplete Docling runtime silently falling back to `pypdf`, added a
   lightweight `pdfplumber` PDF path that emits page, paragraph, table, and image
