@@ -112,16 +112,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["python", "worker.py", "analysis", "benchmark"]
+    command: ["python", "supervisor.py"]
     deploy:
       replicas: ${ANALYSIS_WORKER_REPLICAS:-2}
-
-  document-worker:
-    extends:
-      service: worker
-    command: ["python", "worker.py", "documents"]
-    deploy:
-      replicas: 1
 
   web:
     build:
