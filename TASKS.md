@@ -27,15 +27,20 @@ Primary plan index:
   before provider access. The worker stores a local placeholder mapping in
   internal run parameters, keeps rendered provider prompts/raw provider output
   anonymized, and de-anonymizes structured outputs before saving reader-facing
-  Gate Challenger, lazy detail, predicted-comment, and IC Review results. API
-  responses strip the internal mapping from `run_parameters`. The sanitizer
-  preserves common product terms such as Contact Rate, North Star Metric, Unit
-  Economics, Product Market Fit, and Avito Sales, uses typed link/identifier
-  placeholders, and fails closed on residual PII before model access. Enabled
-  the flag in local and production worker Compose config; verified focused
-  worker parser/analysis tests (`27 passed`), predicted/detail tests (`13
-  passed`), IC Review tests (`49 passed`), and API analysis/IC tests (`38
-  passed`). Production deployment is handled separately.
+  Gate Challenger, lazy detail, predicted-comment, IC Review, Result summary,
+  and Result rationale outputs. Follow-up hardening keeps external skill
+  instructions and JSON schemas out of prompt-wide masking, anonymizes only
+  document/result context sections, and sends providers a whitelisted
+  non-sensitive run-parameter subset so placeholder mappings and Layer 4/IC
+  context cannot leak through Hermes-style payloads. API responses strip the
+  internal mapping from `run_parameters`. The sanitizer preserves common
+  product terms such as Contact Rate, North Star Metric, Unit Economics,
+  Product Market Fit, and Avito Sales, uses typed link/identifier placeholders,
+  and fails closed on residual PII before model access. Enabled the flag in
+  local and production worker Compose config; verified focused worker tests
+  (`90 passed`), API analysis/IC tests (`38 passed`), Python syntax,
+  production Compose config, and `git diff --check`. Production deployment is
+  handled separately.
 - [x] Restore lazy Layer 1 / Layer 2 detail loading for staged Gate Challenger
   summaries without a saved Responses API id: detail requests now remain
   available for older chat-completions runs and worker fallback uses the saved

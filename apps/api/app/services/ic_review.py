@@ -474,6 +474,11 @@ def _sanitize_artifacts(artifacts: list | None, *, include_paths: bool) -> list[
         if not isinstance(artifact, dict):
             continue
         item = dict(artifact)
+        run_parameters = item.get("run_parameters")
+        if isinstance(run_parameters, dict):
+            safe_run_parameters = dict(run_parameters)
+            _strip_model_anonymization_replacements(safe_run_parameters)
+            item["run_parameters"] = safe_run_parameters
         if not include_paths:
             item.pop("path", None)
         sanitized.append(item)

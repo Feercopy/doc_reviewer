@@ -20,7 +20,12 @@ from ic_review.renderer import ROLE_SCHEMA_PATH, SnapshotTextReader, render_role
 from ic_review.schema_normalization import normalize_schema_bounded_strings
 from providers.base import AnalysisProviderResult, ProviderRunRequest
 from providers.registry import get_provider_adapter
-from privacy.model_anonymization import RUN_PARAMETER_KEY, anonymize_prompt_for_model, deanonymize_model_value
+from privacy.model_anonymization import (
+    RUN_PARAMETER_KEY,
+    anonymize_prompt_sections_for_model,
+    deanonymize_model_value,
+    provider_safe_run_parameters,
+)
 from results.schema_validation import parse_json_output
 
 from .errors import IcReviewRunCancelled, safe_ic_review_error_message
@@ -75,8 +80,9 @@ def run_role_step(
             source_snapshot=source_snapshot,
             role_schema=schema,
         )
-        anonymization = anonymize_prompt_for_model(
+        anonymization = anonymize_prompt_sections_for_model(
             prompt,
+            sections=[("## Context Pack", "## Output Contract")],
             existing_metadata=(check_run.run_parameters or {}).get(RUN_PARAMETER_KEY)
             or (analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
         )
@@ -266,7 +272,8 @@ def _call_role_provider(
     response_schema: dict,
     run_parameters: dict[str, Any],
 ) -> AnalysisProviderResult:
-    return get_provider_adapter(provider, run_parameters).run(
+    provider_parameters = provider_safe_run_parameters(run_parameters)
+    return get_provider_adapter(provider, provider_parameters).run(
         ProviderRunRequest(
             provider=provider,
             model=model,
@@ -274,7 +281,7 @@ def _call_role_provider(
             base_url=base_url,
             prompt=prompt,
             response_schema=response_schema,
-            run_parameters=run_parameters,
+            run_parameters=provider_parameters,
         )
     )
 

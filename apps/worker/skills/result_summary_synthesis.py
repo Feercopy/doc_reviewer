@@ -17,6 +17,12 @@ from app.schemas.enums import EntityStatus, Provider, RunStatus, SkillType
 from ic_review.role_runner import apply_ic_review_provider_defaults
 from providers.base import ProviderRunRequest
 from providers.registry import get_provider_adapter
+from privacy.model_anonymization import (
+    RUN_PARAMETER_KEY,
+    anonymize_value_for_model,
+    deanonymize_model_value,
+    provider_safe_run_parameters,
+)
 from results.schema_validation import parse_json_output
 from skills.result_synthesis_trace import (
     complete_result_synthesis_step,
@@ -71,14 +77,24 @@ def update_result_short_summary(
 
     skill = _resolve_result_summary_skill(session)
     schema = _load_schema(_skill_schema_path(skill))
+    anonymization = anonymize_value_for_model(
+        {
+            "gate_recommendations": gate_recommendations,
+            "ic_executive_summary": ic_executive_summary,
+        },
+        existing_metadata=(check_run.run_parameters or {}).get(RUN_PARAMETER_KEY)
+        or (analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
+    )
+    anonymized = anonymization.value if isinstance(anonymization.value, dict) else {}
     prompt = build_result_short_summary_prompt(
-        gate_recommendations=gate_recommendations,
-        ic_executive_summary=ic_executive_summary,
+        gate_recommendations=str(anonymized.get("gate_recommendations") or gate_recommendations),
+        ic_executive_summary=str(anonymized.get("ic_executive_summary") or ic_executive_summary),
         output_language=(check_run.run_parameters or {}).get("output_language") or (analysis.run_parameters or {}).get("output_language"),
         skill_prompt=skill.prompt_text if skill else DEFAULT_RESULT_SUMMARY_PROMPT,
         response_schema=schema,
     )
     run_parameters = _result_summary_run_parameters(check_run.run_parameters or {})
+    run_parameters[RUN_PARAMETER_KEY] = anonymization.metadata
     step = start_result_synthesis_step(
         session=session,
         check_run=check_run,
@@ -90,7 +106,8 @@ def update_result_short_summary(
     )
     raw_to_preserve = None
     try:
-        result = get_provider_adapter(provider, run_parameters).run(
+        provider_parameters = provider_safe_run_parameters(run_parameters)
+        result = get_provider_adapter(provider, provider_parameters).run(
             ProviderRunRequest(
                 provider=provider,
                 model=model,
@@ -98,12 +115,13 @@ def update_result_short_summary(
                 base_url=base_url,
                 prompt=prompt,
                 response_schema=schema,
-                run_parameters=run_parameters,
+                run_parameters=provider_parameters,
             )
         )
         raw_to_preserve = result.raw_output or result.structured_text
         payload = parse_json_output(result.structured_text)
         validate(instance=payload, schema=schema)
+        payload = deanonymize_model_value(payload, metadata=run_parameters.get(RUN_PARAMETER_KEY))
     except Exception as exc:
         session.rollback()
         fail_result_synthesis_step(

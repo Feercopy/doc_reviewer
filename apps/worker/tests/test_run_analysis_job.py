@@ -148,6 +148,7 @@ def test_run_analysis_anonymizes_prompt_and_deanonymizes_structured_output(tmp_p
         assert "[PERSON_001]" in prompt
         assert "[EMAIL_001]" in prompt
         assert "[PHONE_001]" in prompt
+        assert "https://json-schema.org/draft/2020-12/schema" in prompt
         metadata = analysis.run_parameters["model_anonymization"]
         assert metadata["enabled"] is True
         assert metadata["replacement_count"] >= 3
