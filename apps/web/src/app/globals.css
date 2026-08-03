@@ -420,27 +420,30 @@ tbody tr:last-child td {
   gap: 10px;
 }
 
-.anonymizer-chip {
+.anonymizer-banner {
   display: inline-flex;
-  min-height: 34px;
+  width: fit-content;
+  min-height: 52px;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  margin: 18px 36px 0;
   border-radius: 999px;
   background: var(--success-bg);
   color: #075e45;
-  padding: 0 14px;
-  font-size: 12px;
+  padding: 0 22px;
+  font-size: 18px;
   font-weight: 850;
+  line-height: 24px;
   white-space: nowrap;
 }
 
-.anonymizer-chip span {
-  width: 8px;
-  height: 8px;
+.anonymizer-banner__dot {
+  width: 12px;
+  height: 12px;
   flex: 0 0 auto;
   border-radius: 999px;
   background: currentColor;
-  box-shadow: 0 0 0 3px rgba(14, 159, 110, 0.14);
+  box-shadow: 0 0 0 5px rgba(14, 159, 110, 0.14);
 }
 
 .user-chip {
@@ -1110,6 +1113,10 @@ details.details-panel[open] summary {
     margin-left: auto;
   }
 
+  .anonymizer-banner {
+    margin: 16px 16px 0;
+  }
+
   .main,
   .page-shell {
     padding: 20px 16px;
@@ -1175,6 +1182,15 @@ details.details-panel[open] summary {
 
   .topbar-actions button.secondary {
     flex: 0 0 auto;
+  }
+
+  .anonymizer-banner {
+    width: auto;
+    min-height: 48px;
+    margin: 14px 12px 0;
+    padding: 0 18px;
+    font-size: 16px;
+    white-space: normal;
   }
 
   .button-row {

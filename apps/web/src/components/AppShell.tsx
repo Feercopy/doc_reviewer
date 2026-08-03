@@ -69,10 +69,6 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
         </nav>
 
         <div className="topbar-actions">
-          <span className="anonymizer-chip" aria-label="Анонимизатор включен">
-            <span aria-hidden="true" />
-            Анонимизатор включен
-          </span>
           <span className="user-chip" title={user.login}>
             {user.display_name || user.login}
           </span>
@@ -84,6 +80,10 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
 
       <div className="content-shell">
         {error ? <div className="shell-alert panel error">{error}</div> : null}
+        <div className="anonymizer-banner" role="status" aria-label="Анонимизатор включен">
+          <span className="anonymizer-banner__dot" aria-hidden="true" />
+          <span>Анонимизатор включен</span>
+        </div>
         <div className="content-scroll">{children}</div>
       </div>
     </div>

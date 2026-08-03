@@ -41,10 +41,11 @@ Primary plan index:
   (`90 passed`), API analysis/IC tests (`38 passed`), Python syntax,
   production Compose config, and `git diff --check`. Production deployment is
   handled separately.
-- [x] Show local anonymizer availability in the app header: added a green
-  "Анонимизатор включен" badge in the authenticated top bar using the existing
-  success visual language. Verified focused web documents tests
-  (`38 passed`) and `git diff --check`. Production deployment is handled
+- [x] Show local anonymizer availability under the app header: added a larger
+  green "Анонимизатор включен" badge directly below the authenticated top
+  navigation using the existing success visual language. Verified focused web
+  documents/navigation tests
+  (`41 passed`) and `git diff --check`. Production deployment is handled
   separately.
 - [x] Restore lazy Layer 1 / Layer 2 detail loading for staged Gate Challenger
   summaries without a saved Responses API id: detail requests now remain
