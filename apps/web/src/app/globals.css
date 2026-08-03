@@ -420,6 +420,29 @@ tbody tr:last-child td {
   gap: 10px;
 }
 
+.anonymizer-chip {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  background: var(--success-bg);
+  color: #075e45;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.anonymizer-chip span {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 3px rgba(14, 159, 110, 0.14);
+}
+
 .user-chip {
   display: inline-flex;
   min-height: 34px;

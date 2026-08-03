@@ -69,6 +69,10 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
         </nav>
 
         <div className="topbar-actions">
+          <span className="anonymizer-chip" aria-label="Анонимизатор включен">
+            <span aria-hidden="true" />
+            Анонимизатор включен
+          </span>
           <span className="user-chip" title={user.login}>
             {user.display_name || user.login}
           </span>

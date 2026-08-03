@@ -422,10 +422,6 @@ export default function DocumentsPage() {
             <h1>Documents</h1>
             <p className="gc-muted">Upload investment review and product defense documents.</p>
           </div>
-          <span className="gc-anonymizer-badge" aria-label="Анонимизатор включен">
-            <span aria-hidden="true" />
-            Анонимизатор включен
-          </span>
         </section>
 
         {error ? <section className="gc-alert">{error}</section> : null}
@@ -760,8 +756,6 @@ const documentsStyles = `
 .gc-hero {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
   margin-bottom: 22px;
 }
 
@@ -779,31 +773,6 @@ const documentsStyles = `
   color: #5b6472;
   font-size: 14px;
   line-height: 22px;
-}
-
-.gc-anonymizer-badge {
-  display: inline-flex;
-  min-height: 34px;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: #eaf8f1;
-  color: #075e45;
-  padding: 0 14px;
-  font-size: 12px;
-  font-weight: 850;
-  line-height: 18px;
-  white-space: nowrap;
-}
-
-.gc-anonymizer-badge span {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: currentColor;
-  box-shadow: 0 0 0 3px rgba(14, 159, 110, 0.14);
 }
 
 .gc-upload-card,
