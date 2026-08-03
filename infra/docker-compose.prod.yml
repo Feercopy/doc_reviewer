@@ -88,6 +88,7 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-gate}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-gate}
       REDIS_URL: redis://redis:6379/0
       STORAGE_ROOT: /var/lib/gate-challenger/storage
+      DOCUMENT_ANONYMIZATION_ENABLED: ${DOCUMENT_ANONYMIZATION_ENABLED:-true}
       HERMES_ENABLED: ${HERMES_ENABLED:-false}
       HERMES_MODE: ${HERMES_MODE:-http}
       HERMES_HTTP_URL: ${HERMES_HTTP_URL:-http://127.0.0.1:8787}

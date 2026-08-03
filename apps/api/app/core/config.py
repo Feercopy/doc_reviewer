@@ -52,6 +52,7 @@ class Settings(BaseSettings):
         alias="DEVILS_ADVOCATE_SOURCE_PATH",
     )
     skill_source_snapshot_mode: str | None = Field(default=None, alias="SKILL_SOURCE_SNAPSHOT_MODE")
+    document_anonymization_enabled: bool = Field(default=False, alias="DOCUMENT_ANONYMIZATION_ENABLED")
 
     model_config = SettingsConfigDict(
         env_file=".env",
