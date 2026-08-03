@@ -13,6 +13,9 @@ from app.schemas.enums import RunStatus
 from app.storage.local import LocalDocumentStorage
 
 
+MODEL_ANONYMIZATION_RUN_PARAMETER_KEY = "model_anonymization"
+
+
 def start_result_synthesis_step(
     *,
     session: Session,
@@ -41,7 +44,7 @@ def start_result_synthesis_step(
         {
             "key": "effective_run_parameters",
             "kind": "metadata",
-            "run_parameters": dict(run_parameters),
+            "run_parameters": _trace_safe_run_parameters(run_parameters),
         },
         {
             "key": "skill",
@@ -90,6 +93,16 @@ def fail_result_synthesis_step(
     failed_step.error_message = error_message
     failed_step.completed_at = utc_now()
     session.commit()
+
+
+def _trace_safe_run_parameters(run_parameters: dict[str, Any]) -> dict[str, Any]:
+    parameters = dict(run_parameters)
+    metadata = parameters.get(MODEL_ANONYMIZATION_RUN_PARAMETER_KEY)
+    if isinstance(metadata, dict):
+        safe_metadata = dict(metadata)
+        safe_metadata.pop("replacements", None)
+        parameters[MODEL_ANONYMIZATION_RUN_PARAMETER_KEY] = safe_metadata
+    return parameters
 
 
 def _step_skill_metadata(*, skill: Skill | None, fallback: dict[str, Any]) -> dict[str, Any]:

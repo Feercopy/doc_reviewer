@@ -474,6 +474,11 @@ def _sanitize_artifacts(artifacts: list | None, *, include_paths: bool) -> list[
         if not isinstance(artifact, dict):
             continue
         item = dict(artifact)
+        run_parameters = item.get("run_parameters")
+        if isinstance(run_parameters, dict):
+            safe_run_parameters = dict(run_parameters)
+            _strip_model_anonymization_replacements(safe_run_parameters)
+            item["run_parameters"] = safe_run_parameters
         if not include_paths:
             item.pop("path", None)
         sanitized.append(item)
@@ -490,9 +495,18 @@ def _sanitize_metadata(metadata: dict | None, *, include_paths: bool) -> dict:
 
 def _sanitize_run_parameters(run_parameters: dict | None, *, include_paths: bool) -> dict:
     parameters = dict(run_parameters or {})
+    _strip_model_anonymization_replacements(parameters)
     if include_paths:
         return parameters
     return _strip_path_values(parameters)
+
+
+def _strip_model_anonymization_replacements(parameters: dict) -> None:
+    metadata = parameters.get("model_anonymization")
+    if isinstance(metadata, dict):
+        safe_metadata = dict(metadata)
+        safe_metadata.pop("replacements", None)
+        parameters["model_anonymization"] = safe_metadata
 
 
 def _strip_path_values(value):

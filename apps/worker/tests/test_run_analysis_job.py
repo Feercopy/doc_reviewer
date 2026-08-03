@@ -84,6 +84,82 @@ def test_run_analysis_persists_structured_and_raw_output(tmp_path):
         _close_session(db)
 
 
+def test_run_analysis_anonymizes_prompt_and_deanonymizes_structured_output(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOCUMENT_ANONYMIZATION_ENABLED", "true")
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        document.title = "Иван Петров Gate 2"
+        document.parsed_text = (
+            "Gate 2 MVP metrics traction risks. Иван Петров owns launch. "
+            "Contact ivan.petrov@example.com or +7 999 123-45-67."
+        )
+        skill = _create_skill(db)
+        key = ProviderKey(
+            owner_id=_create_user(db, role=Role.ADMIN).id,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            base_url=None,
+            default_model="gpt-test",
+            encrypted_api_key=encrypt_secret("sk-test"),
+            api_key_fingerprint="openai_compatible:...test",
+        )
+        db.add(key)
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "provider_api": "chat_completions",
+                "mock_provider_result": {
+                    "structured_text": _main_analysis_summary_json("[PERSON_001] needs stronger metric evidence."),
+                    "raw_output": "raw provider text with [PERSON_001]",
+                    "input_tokens": 10,
+                    "output_tokens": 20,
+                    "latency_ms": 30,
+                }
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        run_analysis(str(analysis.id), db=db)
+
+        db.refresh(document)
+        db.refresh(analysis)
+        assert "Иван Петров" in document.parsed_text
+        assert document.title == "Иван Петров Gate 2"
+        assert analysis.status == RunStatus.COMPLETED.value
+        assert analysis.summary == "Иван Петров needs stronger metric evidence."
+        assert analysis.structured_output["assessment_markdown"].startswith("Оценка документа")
+        assert "Иван Петров needs stronger metric evidence." in analysis.structured_output["assessment_markdown"]
+        assert analysis.raw_output == "raw provider text with [PERSON_001]"
+        prompt_path = Path(analysis.run_parameters["rendered_prompt_artifact_path"])
+        prompt = prompt_path.read_text(encoding="utf-8")
+        assert "Иван Петров" not in prompt
+        assert "ivan.petrov@example.com" not in prompt
+        assert "+7 999 123-45-67" not in prompt
+        assert "[PERSON_001]" in prompt
+        assert "[EMAIL_001]" in prompt
+        assert "[PHONE_001]" in prompt
+        assert "https://json-schema.org/draft/2020-12/schema" in prompt
+        metadata = analysis.run_parameters["model_anonymization"]
+        assert metadata["enabled"] is True
+        assert metadata["replacement_count"] >= 3
+        assert any(item["placeholder"] == "[PERSON_001]" and item["value"] == "Иван Петров" for item in metadata["replacements"])
+    finally:
+        _close_session(db)
+        monkeypatch.delenv("DOCUMENT_ANONYMIZATION_ENABLED", raising=False)
+        monkeypatch.delenv("STORAGE_ROOT", raising=False)
+        get_settings.cache_clear()
+
+
 def test_run_analysis_skips_cancelled_run_without_provider_call(tmp_path):
     db = _create_session()
     try:

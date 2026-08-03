@@ -19,6 +19,12 @@ from app.services.provider_keys import get_shared_provider_key
 from app.storage.local import LocalDocumentStorage
 from providers.base import ProviderResponseRequest, ProviderRunRequest
 from providers.registry import get_provider_adapter
+from privacy.model_anonymization import (
+    RUN_PARAMETER_KEY,
+    anonymize_value_for_model,
+    deanonymize_model_value,
+    provider_safe_run_parameters,
+)
 from results.schema_validation import parse_and_validate_json_output
 from skills.output_language import output_language_instruction
 
@@ -74,7 +80,8 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
             previous_response_id=str(previous_response_id) if previous_response_id else None,
         )
         run_parameters = {**(analysis.run_parameters or {}), **(detail_run.run_parameters or {})}
-        adapter = get_provider_adapter(provider, run_parameters)
+        provider_parameters = provider_safe_run_parameters(run_parameters)
+        adapter = get_provider_adapter(provider, provider_parameters)
         if previous_response_id:
             request = ProviderResponseRequest(
                 provider=provider,
@@ -84,7 +91,7 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
                 input=prompt,
                 response_schema=schema,
                 previous_response_id=str(previous_response_id),
-                run_parameters=run_parameters,
+                run_parameters=provider_parameters,
             )
             result = adapter.run_response(request)
         else:
@@ -95,7 +102,7 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
                 base_url=provider_key.base_url if provider_key else None,
                 prompt=prompt,
                 response_schema=schema,
-                run_parameters=run_parameters,
+                run_parameters=provider_parameters,
             )
             result = adapter.run(request)
         provider_raw_output = result.raw_output
@@ -109,6 +116,11 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
         structured = parse_and_validate_json_output(
             structured_text=result.structured_text,
             schema_path=DETAILS_SCHEMA_PATH,
+        )
+        structured = deanonymize_model_value(
+            structured,
+            metadata=(detail_run.run_parameters or {}).get(RUN_PARAMETER_KEY)
+            or (analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
         )
 
         if not _complete_detail_run_if_running(
@@ -281,6 +293,15 @@ def _render_and_persist_detail_prompt(
     original_prompt = _original_gate_challenger_prompt(analysis)
     if previous_response_id is None and original_prompt is None:
         raise RuntimeError("gate_challenger_detail_context_missing")
+    context = {
+        "structured_output": analysis.structured_output or {},
+        "original_prompt": original_prompt if original_prompt is not None else "Unavailable.",
+    }
+    anonymization = anonymize_value_for_model(
+        context,
+        existing_metadata=(analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
+    )
+    anonymized = anonymization.value if isinstance(anonymization.value, dict) else context
     parts = [
         "Gate Challenger lazy detail expansion.",
         (
@@ -303,9 +324,9 @@ def _render_and_persist_detail_prompt(
         "If details contradict the Stage 2 verdict, keep the original verdict field stable, set revision_required to true, "
         "and explain the contradiction in revision_reason.",
         "Compact Stage 2 structured output:",
-        json.dumps(analysis.structured_output or {}, ensure_ascii=False, sort_keys=True),
+        json.dumps(anonymized.get("structured_output") or {}, ensure_ascii=False, sort_keys=True),
         "Saved original Gate Challenger prompt:",
-        original_prompt if original_prompt is not None else "Unavailable.",
+        str(anonymized.get("original_prompt") or "Unavailable."),
         "Return only JSON matching this schema:",
         json.dumps(schema, ensure_ascii=False, sort_keys=True),
     ]
@@ -315,6 +336,7 @@ def _render_and_persist_detail_prompt(
     run_parameters = dict(detail_run.run_parameters or {})
     run_parameters["provider_api"] = "responses" if previous_response_id else "chat_completions_fallback"
     run_parameters["previous_response_id"] = previous_response_id
+    run_parameters[RUN_PARAMETER_KEY] = anonymization.metadata
     if previous_response_id is None:
         run_parameters["fallback_reason"] = "gate_challenger_response_id_missing"
         run_parameters["fallback_context_source"] = "rendered_prompt_artifact_path" if original_prompt is not None else "unavailable"

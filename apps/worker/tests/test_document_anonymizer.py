@@ -1,5 +1,6 @@
 from parsers.anonymizer import PersonalDataAnonymizer, residual_counts
 from parsers.artifact import ParseBlock, ParsedDocument, ParserInfo, ParseQuality
+from privacy.model_anonymization import provider_safe_run_parameters
 
 
 def test_anonymizer_scrubs_supported_pii_and_comment_author_metadata():
@@ -149,3 +150,20 @@ def test_anonymizer_keeps_link_and_identifier_context_in_placeholders():
     assert "[LINK_FIGMA_001]" in anonymized
     assert "[LINK_DASHBOARD_001]" in anonymized
     assert "[IDENTIFIER_EXPERIMENT_001]" in anonymized
+
+
+def test_provider_safe_run_parameters_do_not_leak_anonymization_mapping_or_context():
+    safe = provider_safe_run_parameters(
+        {
+            "temperature": 0.2,
+            "max_output_tokens": 1000,
+            "gate_challenger_layer_4_context": {"markdown": "Иван Петров"},
+            "model_anonymization": {
+                "enabled": True,
+                "replacements": [{"kind": "name", "placeholder": "[PERSON_001]", "value": "Иван Петров"}],
+            },
+            "skill_source_snapshot": {"artifact_path": "/private/snapshot"},
+        }
+    )
+
+    assert safe == {"temperature": 0.2, "max_output_tokens": 1000}

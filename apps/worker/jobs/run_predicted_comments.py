@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID
 
 from redis import Redis
@@ -23,6 +24,12 @@ from app.services.skill_sources import SkillSourceValidationError, refresh_skill
 from app.storage.local import LocalDocumentStorage
 from providers.base import ProviderRunRequest
 from providers.registry import get_provider_adapter
+from privacy.model_anonymization import (
+    RUN_PARAMETER_KEY,
+    anonymize_value_for_model,
+    deanonymize_model_value,
+    provider_safe_run_parameters,
+)
 from results.schema_validation import parse_and_validate_json_output
 from skills.devils_advocate_renderer import render_devils_advocate_prompt
 from skills.prompt_renderer import render_prompt
@@ -83,6 +90,7 @@ def run_predicted_comments(predicted_comment_run_id: str, *, db: Session | None 
             skill=skill,
             schema=schema,
         )
+        provider_parameters = provider_safe_run_parameters(predicted_run.run_parameters)
         request = ProviderRunRequest(
             provider=provider,
             model=predicted_run.model,
@@ -90,9 +98,9 @@ def run_predicted_comments(predicted_comment_run_id: str, *, db: Session | None 
             base_url=provider_key.base_url if provider_key else None,
             prompt=prompt,
             response_schema=schema,
-            run_parameters=predicted_run.run_parameters,
+            run_parameters=provider_parameters,
         )
-        result = get_provider_adapter(provider, predicted_run.run_parameters).run(request)
+        result = get_provider_adapter(provider, provider_parameters).run(request)
         provider_raw_output = result.raw_output
         provider_structured_text = result.structured_text
         if _predicted_run_cancelled(session=session, predicted_run=predicted_run):
@@ -100,6 +108,10 @@ def run_predicted_comments(predicted_comment_run_id: str, *, db: Session | None 
         structured = parse_and_validate_json_output(
             structured_text=result.structured_text,
             schema_path=skill.result_schema_path,
+        )
+        structured = deanonymize_model_value(
+            structured,
+            metadata=(predicted_run.run_parameters or {}).get(RUN_PARAMETER_KEY),
         )
 
         _complete_predicted_run_if_running(
@@ -229,11 +241,16 @@ def _render_and_persist_prompt(
     schema: dict,
 ) -> str:
     run_parameters = predicted_run.run_parameters or {}
+    prompt_context = _anonymized_prompt_context(
+        analysis=analysis,
+        document=document,
+        run_parameters=run_parameters,
+    )
     if skill.name == "devils_advocate_predefense":
         source_snapshot, retrieval_snapshot = _load_devils_snapshots(skill=skill, run_parameters=run_parameters)
         prompt = render_devils_advocate_prompt(
-            document=document,
-            analysis=analysis,
+            document=prompt_context["document"],
+            analysis=prompt_context["analysis"],
             skill=skill,
             response_schema=schema,
             source_snapshot=source_snapshot,
@@ -242,17 +259,52 @@ def _render_and_persist_prompt(
             run_parameters=run_parameters,
         )
     else:
-        prompt = render_prompt(document=document, skill=skill, response_schema=schema, run_parameters=run_parameters)
+        prompt = render_prompt(
+            document=prompt_context["document"],
+            skill=skill,
+            response_schema=schema,
+            run_parameters=run_parameters,
+        )
 
     storage = LocalDocumentStorage(get_settings().storage_root)
     prompt_path = storage.save_rendered_prompt(analysis_id=predicted_run.id, prompt=prompt)
     updated_parameters = dict(run_parameters)
     updated_parameters["rendered_prompt_artifact_path"] = str(prompt_path)
     updated_parameters["prompt_fingerprint"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    updated_parameters[RUN_PARAMETER_KEY] = prompt_context["metadata"]
     predicted_run.run_parameters = updated_parameters
     flag_modified(predicted_run, "run_parameters")
     session.commit()
     return prompt
+
+
+def _anonymized_prompt_context(*, analysis: Analysis, document: Document, run_parameters: dict) -> dict:
+    existing_metadata = run_parameters.get(RUN_PARAMETER_KEY) or (analysis.run_parameters or {}).get(RUN_PARAMETER_KEY)
+    context = {
+        "document_title": document.title,
+        "parsed_text": document.parsed_text or "",
+        "analysis_verdict": analysis.verdict,
+        "analysis_summary": analysis.summary,
+        "analysis_structured_output": analysis.structured_output,
+    }
+    anonymization = anonymize_value_for_model(context, existing_metadata=existing_metadata)
+    anonymized = anonymization.value if isinstance(anonymization.value, dict) else context
+    prompt_document = SimpleNamespace(
+        title=anonymized.get("document_title", document.title),
+        parsed_text=anonymized.get("parsed_text", document.parsed_text or ""),
+        manual_document_type=document.manual_document_type,
+        detected_document_type=document.detected_document_type,
+    )
+    prompt_analysis = SimpleNamespace(
+        verdict=anonymized.get("analysis_verdict", analysis.verdict),
+        summary=anonymized.get("analysis_summary", analysis.summary),
+        structured_output=anonymized.get("analysis_structured_output", analysis.structured_output),
+    )
+    return {
+        "document": prompt_document,
+        "analysis": prompt_analysis,
+        "metadata": anonymization.metadata,
+    }
 
 
 def _load_devils_snapshots(*, skill: Skill, run_parameters: dict):

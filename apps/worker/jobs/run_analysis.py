@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -32,6 +33,12 @@ from app.storage.local import LocalDocumentStorage
 from jobs.run_predicted_comments import run_predicted_comments
 from providers.base import ProviderResponseRequest, ProviderRunRequest
 from providers.registry import get_provider_adapter
+from privacy.model_anonymization import (
+    RUN_PARAMETER_KEY,
+    anonymize_value_for_model,
+    deanonymize_model_value,
+    provider_safe_run_parameters,
+)
 from results.schema_validation import parse_and_validate_json_output
 from skills.layer_4_synthesis import build_layer_4_synthesis, format_layer_4_synthesis_markdown
 from skills.prompt_renderer import render_prompt
@@ -108,6 +115,7 @@ def run_analysis(
         schema = json.loads(_resolve_schema_path(schema_path).read_text(encoding="utf-8"))
         prompt = _render_and_persist_prompt(session=session, analysis=analysis, document=document, skill=skill, schema=schema)
         if use_responses_api:
+            provider_parameters = provider_safe_run_parameters(analysis.run_parameters)
             request = ProviderResponseRequest(
                 provider=provider,
                 model=analysis.model,
@@ -115,10 +123,11 @@ def run_analysis(
                 base_url=provider_key.base_url if provider_key else None,
                 input=prompt,
                 response_schema=schema,
-                run_parameters=analysis.run_parameters,
+                run_parameters=provider_parameters,
             )
-            result = get_provider_adapter(provider, analysis.run_parameters).run_response(request)
+            result = get_provider_adapter(provider, provider_parameters).run_response(request)
         else:
+            provider_parameters = provider_safe_run_parameters(analysis.run_parameters)
             request = ProviderRunRequest(
                 provider=provider,
                 model=analysis.model,
@@ -126,9 +135,9 @@ def run_analysis(
                 base_url=provider_key.base_url if provider_key else None,
                 prompt=prompt,
                 response_schema=schema,
-                run_parameters=analysis.run_parameters,
+                run_parameters=provider_parameters,
             )
-            result = get_provider_adapter(provider, analysis.run_parameters).run(request)
+            result = get_provider_adapter(provider, provider_parameters).run(request)
         provider_raw_output = result.raw_output
         provider_structured_text = result.structured_text
         if _analysis_cancelled(session=session, analysis=analysis):
@@ -142,6 +151,10 @@ def run_analysis(
             schema_path=schema_path,
             document_type=(analysis.run_parameters or {}).get("document_type"),
             enforce_stage_checklist=skill.name == "gate2_challenger_main_analysis",
+        )
+        structured = deanonymize_model_value(
+            structured,
+            metadata=(analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
         )
 
         completed_run_parameters = analysis.run_parameters
@@ -427,21 +440,51 @@ def _render_and_persist_prompt(
     skill: Skill,
     schema: dict,
 ) -> str:
+    prompt_context = _anonymized_prompt_context(analysis=analysis, document=document)
     prompt = render_prompt(
-        document=document,
+        document=prompt_context["document"],
         skill=skill,
         response_schema=schema,
-        run_parameters=analysis.run_parameters,
+        run_parameters=prompt_context["run_parameters"],
     )
     storage = LocalDocumentStorage(get_settings().storage_root)
     prompt_path = storage.save_rendered_prompt(analysis_id=analysis.id, prompt=prompt)
     run_parameters = dict(analysis.run_parameters or {})
     run_parameters["rendered_prompt_artifact_path"] = str(prompt_path)
     run_parameters["prompt_fingerprint"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    run_parameters[RUN_PARAMETER_KEY] = prompt_context["metadata"]
     analysis.run_parameters = run_parameters
     flag_modified(analysis, "run_parameters")
     session.commit()
     return prompt
+
+
+def _anonymized_prompt_context(*, analysis: Analysis, document: Document) -> dict:
+    run_parameters = dict(analysis.run_parameters or {})
+    context = {
+        "document_title": document.title,
+        "parsed_text": document.parsed_text or "",
+        "gate_challenger_layer_4_context": run_parameters.get("gate_challenger_layer_4_context"),
+    }
+    anonymization = anonymize_value_for_model(
+        context,
+        existing_metadata=run_parameters.get(RUN_PARAMETER_KEY),
+    )
+    anonymized = anonymization.value if isinstance(anonymization.value, dict) else context
+    prompt_parameters = dict(run_parameters)
+    if "gate_challenger_layer_4_context" in prompt_parameters:
+        prompt_parameters["gate_challenger_layer_4_context"] = anonymized.get("gate_challenger_layer_4_context")
+    prompt_document = SimpleNamespace(
+        title=anonymized.get("document_title", document.title),
+        parsed_text=anonymized.get("parsed_text", document.parsed_text or ""),
+        manual_document_type=document.manual_document_type,
+        detected_document_type=document.detected_document_type,
+    )
+    return {
+        "document": prompt_document,
+        "run_parameters": prompt_parameters,
+        "metadata": anonymization.metadata,
+    }
 
 
 def _run_devils_advocate_prepass(*, session: Session, analysis: Analysis, document: Document) -> None:

@@ -187,11 +187,17 @@ class PiiResidueError(ValueError):
 
 
 class PersonalDataAnonymizer:
-    def __init__(self) -> None:
+    def __init__(self, replacements: list[dict[str, str]] | None = None) -> None:
         self._placeholders: dict[str, dict[str, str]] = {kind: {} for kind in PLACEHOLDER_PREFIXES}
         self._name_aliases: dict[str, str] = {}
         self._replacement_counts: dict[str, int] = {}
         self._residuals: dict[str, int] = {}
+        for item in replacements or []:
+            kind = item.get("kind")
+            placeholder = item.get("placeholder")
+            value = item.get("value")
+            if kind in self._placeholders and placeholder and value:
+                self._seed_placeholder(kind, value, placeholder)
 
     def anonymize_document(self, document: ParsedDocument) -> tuple[ParsedDocument, AnonymizationReport]:
         self._collect_name_aliases_from_text(document.plain_text)
@@ -296,6 +302,24 @@ class PersonalDataAnonymizer:
             return {key: self.anonymize_value(item, current_key=key) for key, item in value.items()}
         return value
 
+    def deanonymize_text(self, text: str) -> str:
+        return deanonymize_text(text, self.replacements())
+
+    def deanonymize_value(self, value: Any) -> Any:
+        return deanonymize_value(value, self.replacements())
+
+    def replacements(self) -> list[dict[str, str]]:
+        items: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for kind, values in self._placeholders.items():
+            for original, placeholder in values.items():
+                key = (kind, placeholder)
+                if key in seen:
+                    continue
+                seen.add(key)
+                items.append({"kind": kind, "placeholder": placeholder, "value": original})
+        return sorted(items, key=lambda item: (item["placeholder"], item["kind"], item["value"]))
+
     def report(self) -> AnonymizationReport:
         return AnonymizationReport(
             person_replacements=self._replacement_counts.get("name", 0),
@@ -352,6 +376,14 @@ class PersonalDataAnonymizer:
         for alias in {cleaned_name, *cleaned_name.split()}:
             if len(alias) >= 3 and not _is_non_person_name(alias):
                 self._name_aliases.setdefault(alias, placeholder)
+
+    def _seed_placeholder(self, kind: str, value: str, placeholder: str) -> None:
+        normalized = " ".join(value.split()) if kind in {"name", "address"} else value
+        self._placeholders[kind][normalized] = placeholder
+        if kind == "name":
+            for alias in {normalized, *normalized.split()}:
+                if len(alias) >= 3 and not _is_non_person_name(alias):
+                    self._name_aliases.setdefault(alias, placeholder)
 
     def _placeholder_for(self, kind: str, value: str) -> str:
         if kind == "name":
@@ -523,6 +555,28 @@ def residual_counts(text: str) -> dict[str, int]:
             if not _is_protected(*span, protected) and not (kind == "name" and _is_non_person_name(match.group(1))):
                 count(kind)
     return counts
+
+
+def deanonymize_text(text: str, replacements: list[dict[str, str]]) -> str:
+    if not text or not replacements:
+        return text
+    result = text
+    for item in sorted(replacements, key=lambda replacement: len(replacement.get("placeholder", "")), reverse=True):
+        placeholder = item.get("placeholder")
+        value = item.get("value")
+        if placeholder and value:
+            result = result.replace(placeholder, value)
+    return result
+
+
+def deanonymize_value(value: Any, replacements: list[dict[str, str]]) -> Any:
+    if isinstance(value, str):
+        return deanonymize_text(value, replacements)
+    if isinstance(value, list):
+        return [deanonymize_value(item, replacements) for item in value]
+    if isinstance(value, dict):
+        return {key: deanonymize_value(item, replacements) for key, item in value.items()}
+    return value
 
 
 def config_hash() -> str:
