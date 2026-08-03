@@ -490,9 +490,18 @@ def _sanitize_metadata(metadata: dict | None, *, include_paths: bool) -> dict:
 
 def _sanitize_run_parameters(run_parameters: dict | None, *, include_paths: bool) -> dict:
     parameters = dict(run_parameters or {})
+    _strip_model_anonymization_replacements(parameters)
     if include_paths:
         return parameters
     return _strip_path_values(parameters)
+
+
+def _strip_model_anonymization_replacements(parameters: dict) -> None:
+    metadata = parameters.get("model_anonymization")
+    if isinstance(metadata, dict):
+        safe_metadata = dict(metadata)
+        safe_metadata.pop("replacements", None)
+        parameters["model_anonymization"] = safe_metadata
 
 
 def _strip_path_values(value):

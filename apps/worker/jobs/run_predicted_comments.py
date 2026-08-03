@@ -23,6 +23,7 @@ from app.services.skill_sources import SkillSourceValidationError, refresh_skill
 from app.storage.local import LocalDocumentStorage
 from providers.base import ProviderRunRequest
 from providers.registry import get_provider_adapter
+from privacy.model_anonymization import RUN_PARAMETER_KEY, anonymize_prompt_for_model, deanonymize_model_value
 from results.schema_validation import parse_and_validate_json_output
 from skills.devils_advocate_renderer import render_devils_advocate_prompt
 from skills.prompt_renderer import render_prompt
@@ -100,6 +101,10 @@ def run_predicted_comments(predicted_comment_run_id: str, *, db: Session | None 
         structured = parse_and_validate_json_output(
             structured_text=result.structured_text,
             schema_path=skill.result_schema_path,
+        )
+        structured = deanonymize_model_value(
+            structured,
+            metadata=(predicted_run.run_parameters or {}).get(RUN_PARAMETER_KEY),
         )
 
         _complete_predicted_run_if_running(
@@ -244,11 +249,17 @@ def _render_and_persist_prompt(
     else:
         prompt = render_prompt(document=document, skill=skill, response_schema=schema, run_parameters=run_parameters)
 
+    anonymization = anonymize_prompt_for_model(
+        prompt,
+        existing_metadata=run_parameters.get(RUN_PARAMETER_KEY),
+    )
+    prompt = anonymization.prompt
     storage = LocalDocumentStorage(get_settings().storage_root)
     prompt_path = storage.save_rendered_prompt(analysis_id=predicted_run.id, prompt=prompt)
     updated_parameters = dict(run_parameters)
     updated_parameters["rendered_prompt_artifact_path"] = str(prompt_path)
     updated_parameters["prompt_fingerprint"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    updated_parameters[RUN_PARAMETER_KEY] = anonymization.metadata
     predicted_run.run_parameters = updated_parameters
     flag_modified(predicted_run, "run_parameters")
     session.commit()

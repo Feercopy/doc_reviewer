@@ -21,24 +21,21 @@ Primary plan index:
 
 ## Current Focus
 
-- [x] Add local-only document anonymization before review: added a worker-side
-  parser post-processing layer that scrubs PII from parsed text, markdown,
-  blocks, metadata, model-visible document titles, and UI/API-visible original
-  filenames before queued analyses consume the document; document type detection
-  still uses the raw parsed text locally so Gate classification is not damaged
-  by masking. Upgraded the sanitizer to strict local PII rules adapted
-  from the support-review sanitizer: names/FIO, Latin labeled names, emails,
-  phones, bank details, addresses, IPs, links, and long opaque identifiers are
-  masked with deterministic placeholders, existing masks are preserved, and
-  residual validation fails closed before model access. Hardened follow-up
-  behavior by preserving common product terms such as Contact Rate, North Star
-  Metric, Unit Economics, Product Market Fit, and Avito Sales, adding typed
-  link/identifier placeholders, and formatting residual PII failures clearly.
-  Enabled the flag in local and production worker Compose config, verified
-  focused worker/parser tests (`25 passed`), local/prod Compose config
-  rendering, rebuilt/restarted local worker containers, and confirmed workers
-  listen on `documents` plus `analysis, benchmark` with local API health `ok`.
-  Production deployment is intentionally out of scope.
+- [x] Add reversible model-only document anonymization before review: parsing
+  now preserves original parsed text, metadata, title, and filename for the UI
+  and case table, while worker model-call prompts are anonymized immediately
+  before provider access. The worker stores a local placeholder mapping in
+  internal run parameters, keeps rendered provider prompts/raw provider output
+  anonymized, and de-anonymizes structured outputs before saving reader-facing
+  Gate Challenger, lazy detail, predicted-comment, and IC Review results. API
+  responses strip the internal mapping from `run_parameters`. The sanitizer
+  preserves common product terms such as Contact Rate, North Star Metric, Unit
+  Economics, Product Market Fit, and Avito Sales, uses typed link/identifier
+  placeholders, and fails closed on residual PII before model access. Enabled
+  the flag in local and production worker Compose config; verified focused
+  worker parser/analysis tests (`27 passed`), predicted/detail tests (`13
+  passed`), IC Review tests (`49 passed`), and API analysis/IC tests (`38
+  passed`). Production deployment is handled separately.
 - [x] Restore lazy Layer 1 / Layer 2 detail loading for staged Gate Challenger
   summaries without a saved Responses API id: detail requests now remain
   available for older chat-completions runs and worker fallback uses the saved

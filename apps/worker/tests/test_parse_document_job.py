@@ -17,8 +17,7 @@ from app.schemas.enums import DocumentParseStatus, DocumentType, EntityStatus, R
 from app.services.analyses import DOCUMENT_PARSE_DEPENDENCY_KEY
 from app.security.passwords import hash_password
 from app.storage.local import LocalDocumentStorage
-from jobs.parse_document import _format_parse_error, parse_document
-from parsers.anonymizer import PiiResidueError
+from jobs.parse_document import parse_document
 
 
 def test_parse_document_success_updates_database_and_writes_artifact(tmp_path):
@@ -65,7 +64,7 @@ def test_parse_document_success_updates_database_and_writes_artifact(tmp_path):
         _close_session(db)
 
 
-def test_parse_document_anonymizes_personal_data_when_enabled(tmp_path, monkeypatch):
+def test_parse_document_preserves_personal_data_when_model_anonymization_enabled(tmp_path, monkeypatch):
     monkeypatch.setenv("DOCUMENT_ANONYMIZATION_ENABLED", "true")
     get_settings.cache_clear()
     db = _create_session()
@@ -93,36 +92,23 @@ def test_parse_document_anonymizes_personal_data_when_enabled(tmp_path, monkeypa
         assert document.parse_status == DocumentParseStatus.COMPLETED.value
         assert document.detected_document_type == DocumentType.GATE_2.value
         assert document.parsed_text is not None
-        assert "Иван" not in document.parsed_text
-        assert "Петров" not in document.parsed_text
-        assert "ivan.petrov@example.com" not in document.parsed_text
-        assert "+7 999 123-45-67" not in document.parsed_text
-        assert "Иван" not in document.title
-        assert "Петров" not in document.title
-        assert "[PERSON_001]" in document.title
-        assert document.original_filename == "anonymized-document.md"
-        assert "[PERSON_001]" in document.parsed_text
-        assert "[EMAIL_001]" in document.parsed_text
-        assert "[PHONE_001]" in document.parsed_text
+        assert "Иван Петров" in document.parsed_text
+        assert "ivan.petrov@example.com" in document.parsed_text
+        assert "+7 999 123-45-67" in document.parsed_text
+        assert document.title == "Иван Петров Gate 2"
+        assert document.original_filename == "ivan-petrov-gate-2.md"
 
         parsed_dir = tmp_path / "documents" / str(owner.id) / str(document.id) / "parsed"
         assert (parsed_dir / "parsed.txt").read_text(encoding="utf-8") == document.parsed_text
         structured = json.loads((parsed_dir / "structured.json").read_text(encoding="utf-8"))
-        assert structured["source"]["filename"] == "anonymized-document.md"
+        assert structured["source"]["filename"] == "ivan-petrov-gate-2.md"
         assert structured["outputs"]["plain_text"] == document.parsed_text
-        assert structured["anonymization"]["enabled"] is True
-        assert "Иван" not in json.dumps(structured, ensure_ascii=False)
-        assert "Петров" not in json.dumps(structured, ensure_ascii=False)
+        assert "anonymization" not in structured
+        assert "Иван Петров" in json.dumps(structured, ensure_ascii=False)
     finally:
         _close_session(db)
         monkeypatch.delenv("DOCUMENT_ANONYMIZATION_ENABLED", raising=False)
         get_settings.cache_clear()
-
-
-def test_parse_document_formats_pii_residue_errors_for_users():
-    error = _format_parse_error(PiiResidueError({"email": 1, "phone": 2}))
-
-    assert error == "PiiResidueError: personal_data_residue_detected residuals={'email': 1, 'phone': 2}"
 
 
 def test_parse_document_failure_marks_failed_and_preserves_raw_file(tmp_path):

@@ -12,7 +12,6 @@ from app.services.audit import record_audit
 from app.services.document_type_detector import detect_document_type
 from app.storage.local import LocalDocumentStorage
 from jobs.deferred_analyses import DeferredAnalysisEnqueue, enqueue_ready_deferred_analyses
-from parsers.anonymizer import PersonalDataAnonymizer, PiiResidueError
 from parsers import parse_file_to_document
 
 
@@ -43,15 +42,7 @@ def parse_document(
         storage_service = storage or LocalDocumentStorage(get_settings().storage_root)
         raw_path = Path(document.storage_path)
         parsed_document = parse_file_to_document(raw_path)
-        detection_text = parsed_document.plain_text
-        anonymization_report = None
         source_filename = document.original_filename
-        if get_settings().document_anonymization_enabled:
-            anonymizer = PersonalDataAnonymizer()
-            parsed_document, anonymization_report = anonymizer.anonymize_document(parsed_document)
-            document.title = anonymizer.anonymize_title(document.title)
-            source_filename = anonymizer.anonymize_source_filename(document.original_filename)
-            document.original_filename = source_filename
         parsed_text = parsed_document.plain_text
         structured_artifact = parsed_document.to_artifact(
             source_filename=source_filename,
@@ -59,11 +50,6 @@ def parse_document(
             source_sha256=document.file_hash_sha256,
             source_size_bytes=document.file_size_bytes,
         )
-        if anonymization_report is not None:
-            structured_artifact["anonymization"] = {
-                "enabled": True,
-                "report": anonymization_report.to_dict(),
-            }
         parsed_artifacts = storage_service.save_parsed_artifacts(
             owner_id=document.owner_id,
             document_id=document.id,
@@ -72,7 +58,7 @@ def parse_document(
             structured_artifact=structured_artifact,
             quality_report=parsed_document.quality.to_dict(),
         )
-        detection = detect_document_type(detection_text)
+        detection = detect_document_type(parsed_text)
 
         document.parsed_text = parsed_text
         document.detected_document_type = detection.document_type.value
@@ -93,7 +79,6 @@ def parse_document(
                 "parser": parsed_document.parser.name,
                 "parsed_artifacts": sorted(parsed_artifacts.keys()),
                 "parse_quality": parsed_document.quality.to_dict(),
-                "anonymization": anonymization_report.to_dict() if anonymization_report is not None else {"enabled": False},
             },
         )
         session.commit()
@@ -138,6 +123,4 @@ def parse_document(
 
 
 def _format_parse_error(error: Exception) -> str:
-    if isinstance(error, PiiResidueError):
-        return f"PiiResidueError: personal_data_residue_detected residuals={error.residuals}"
     return f"{error.__class__.__name__}: {error}"

@@ -19,6 +19,7 @@ from app.services.provider_keys import get_shared_provider_key
 from app.storage.local import LocalDocumentStorage
 from providers.base import ProviderResponseRequest, ProviderRunRequest
 from providers.registry import get_provider_adapter
+from privacy.model_anonymization import RUN_PARAMETER_KEY, anonymize_prompt_for_model, deanonymize_model_value
 from results.schema_validation import parse_and_validate_json_output
 from skills.output_language import output_language_instruction
 
@@ -109,6 +110,11 @@ def run_analysis_details(detail_run_id: str, *, db: Session | None = None) -> No
         structured = parse_and_validate_json_output(
             structured_text=result.structured_text,
             schema_path=DETAILS_SCHEMA_PATH,
+        )
+        structured = deanonymize_model_value(
+            structured,
+            metadata=(detail_run.run_parameters or {}).get(RUN_PARAMETER_KEY)
+            or (analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
         )
 
         if not _complete_detail_run_if_running(
@@ -310,11 +316,17 @@ def _render_and_persist_detail_prompt(
         json.dumps(schema, ensure_ascii=False, sort_keys=True),
     ]
     prompt = "\n\n".join(part for part in parts if part)
+    anonymization = anonymize_prompt_for_model(
+        prompt,
+        existing_metadata=(analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
+    )
+    prompt = anonymization.prompt
     storage = LocalDocumentStorage(get_settings().storage_root)
     prompt_path = storage.save_rendered_prompt(analysis_id=detail_run.id, prompt=prompt)
     run_parameters = dict(detail_run.run_parameters or {})
     run_parameters["provider_api"] = "responses" if previous_response_id else "chat_completions_fallback"
     run_parameters["previous_response_id"] = previous_response_id
+    run_parameters[RUN_PARAMETER_KEY] = anonymization.metadata
     if previous_response_id is None:
         run_parameters["fallback_reason"] = "gate_challenger_response_id_missing"
         run_parameters["fallback_context_source"] = "rendered_prompt_artifact_path" if original_prompt is not None else "unavailable"

@@ -43,6 +43,7 @@ class AnalysisPreconditionError(ValueError):
 ACTIVE_RUN_STATUSES = {RunStatus.QUEUED.value, RunStatus.RUNNING.value}
 ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY = "analysis_chain_cancel_requested_at"
 ANALYSIS_CHAIN_CANCELLED_BY_USER_ID_KEY = "analysis_chain_cancelled_by_user_id"
+MODEL_ANONYMIZATION_RUN_PARAMETER_KEY = "model_anonymization"
 DOCUMENT_PARSE_DEPENDENCY_KEY = "document_parse_dependency"
 
 
@@ -304,7 +305,7 @@ def read_analysis(*, db: Session, actor: User, analysis: Analysis) -> AnalysisRe
         input_tokens=analysis.input_tokens,
         output_tokens=analysis.output_tokens,
         estimated_cost=analysis.estimated_cost,
-        run_parameters=analysis.run_parameters,
+        run_parameters=_sanitize_model_anonymization_parameters(analysis.run_parameters),
         source_trace=_source_trace(analysis.run_parameters),
         created_at=analysis.created_at,
         started_at=analysis.started_at,
@@ -494,7 +495,7 @@ def _read_predicted_comment_run(
         input_tokens=predicted_run.input_tokens,
         output_tokens=predicted_run.output_tokens,
         estimated_cost=predicted_run.estimated_cost,
-        run_parameters=predicted_run.run_parameters,
+        run_parameters=_sanitize_model_anonymization_parameters(predicted_run.run_parameters),
         source_trace=_source_trace(predicted_run.run_parameters),
         retrieval_trace=_retrieval_trace(predicted_run.run_parameters),
         created_at=predicted_run.created_at,
@@ -523,7 +524,7 @@ def _read_analysis_detail_run(*, actor: User, detail_run: AnalysisDetailRun) -> 
         input_tokens=detail_run.input_tokens,
         output_tokens=detail_run.output_tokens,
         estimated_cost=detail_run.estimated_cost,
-        run_parameters=detail_run.run_parameters,
+        run_parameters=_sanitize_model_anonymization_parameters(detail_run.run_parameters),
         created_at=detail_run.created_at,
         started_at=detail_run.started_at,
         completed_at=detail_run.completed_at,
@@ -547,6 +548,16 @@ def _source_trace(run_parameters: dict | None) -> SourceTrace | None:
         prompt_fingerprint=parameters.get("prompt_fingerprint"),
         rendered_prompt_artifact_path=parameters.get("rendered_prompt_artifact_path"),
     )
+
+
+def _sanitize_model_anonymization_parameters(run_parameters: dict | None) -> dict:
+    parameters = dict(run_parameters or {})
+    metadata = parameters.get(MODEL_ANONYMIZATION_RUN_PARAMETER_KEY)
+    if isinstance(metadata, dict) and "replacements" in metadata:
+        safe_metadata = dict(metadata)
+        safe_metadata.pop("replacements", None)
+        parameters[MODEL_ANONYMIZATION_RUN_PARAMETER_KEY] = safe_metadata
+    return parameters
 
 
 def _retrieval_trace(run_parameters: dict | None) -> RetrievalTrace | None:

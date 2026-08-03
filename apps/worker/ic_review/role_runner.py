@@ -20,6 +20,7 @@ from ic_review.renderer import ROLE_SCHEMA_PATH, SnapshotTextReader, render_role
 from ic_review.schema_normalization import normalize_schema_bounded_strings
 from providers.base import AnalysisProviderResult, ProviderRunRequest
 from providers.registry import get_provider_adapter
+from privacy.model_anonymization import RUN_PARAMETER_KEY, anonymize_prompt_for_model, deanonymize_model_value
 from results.schema_validation import parse_json_output
 
 from .errors import IcReviewRunCancelled, safe_ic_review_error_message
@@ -74,6 +75,16 @@ def run_role_step(
             source_snapshot=source_snapshot,
             role_schema=schema,
         )
+        anonymization = anonymize_prompt_for_model(
+            prompt,
+            existing_metadata=(check_run.run_parameters or {}).get(RUN_PARAMETER_KEY)
+            or (analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
+        )
+        prompt = anonymization.prompt
+        check_run.run_parameters = {
+            **dict(check_run.run_parameters or {}),
+            RUN_PARAMETER_KEY: anonymization.metadata,
+        }
         storage_backend = storage or LocalDocumentStorage(get_settings().storage_root)
         prompt_path = write_prompt_artifact(
             storage=storage_backend,
@@ -132,6 +143,10 @@ def run_role_step(
             return structured
         structured = normalize_schema_bounded_strings(payload, schema, schema)
         validate(instance=structured, schema=schema)
+        structured = deanonymize_model_value(
+            structured,
+            metadata=(check_run.run_parameters or {}).get(RUN_PARAMETER_KEY),
+        )
         step.structured_output = structured
         step.status = RunStatus.COMPLETED.value
         step.completed_at = utc_now()

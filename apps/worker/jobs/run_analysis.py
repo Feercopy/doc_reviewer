@@ -32,6 +32,7 @@ from app.storage.local import LocalDocumentStorage
 from jobs.run_predicted_comments import run_predicted_comments
 from providers.base import ProviderResponseRequest, ProviderRunRequest
 from providers.registry import get_provider_adapter
+from privacy.model_anonymization import RUN_PARAMETER_KEY, anonymize_prompt_for_model, deanonymize_model_value
 from results.schema_validation import parse_and_validate_json_output
 from skills.layer_4_synthesis import build_layer_4_synthesis, format_layer_4_synthesis_markdown
 from skills.prompt_renderer import render_prompt
@@ -142,6 +143,10 @@ def run_analysis(
             schema_path=schema_path,
             document_type=(analysis.run_parameters or {}).get("document_type"),
             enforce_stage_checklist=skill.name == "gate2_challenger_main_analysis",
+        )
+        structured = deanonymize_model_value(
+            structured,
+            metadata=(analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
         )
 
         completed_run_parameters = analysis.run_parameters
@@ -433,11 +438,17 @@ def _render_and_persist_prompt(
         response_schema=schema,
         run_parameters=analysis.run_parameters,
     )
+    anonymization = anonymize_prompt_for_model(
+        prompt,
+        existing_metadata=(analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
+    )
+    prompt = anonymization.prompt
     storage = LocalDocumentStorage(get_settings().storage_root)
     prompt_path = storage.save_rendered_prompt(analysis_id=analysis.id, prompt=prompt)
     run_parameters = dict(analysis.run_parameters or {})
     run_parameters["rendered_prompt_artifact_path"] = str(prompt_path)
     run_parameters["prompt_fingerprint"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    run_parameters[RUN_PARAMETER_KEY] = anonymization.metadata
     analysis.run_parameters = run_parameters
     flag_modified(analysis, "run_parameters")
     session.commit()

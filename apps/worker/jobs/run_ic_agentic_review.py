@@ -43,6 +43,7 @@ from ic_review.script_runner import (
 from ic_review.workbook_parser import extract_workbook_snapshot
 from providers.base import AnalysisProviderResult, ProviderRunRequest
 from providers.registry import get_provider_adapter
+from privacy.model_anonymization import RUN_PARAMETER_KEY, anonymize_prompt_for_model, deanonymize_model_value
 from skills.result_rationale_synthesis import update_result_rationale
 from skills.result_summary_synthesis import update_result_short_summary
 from skills.snapshot_loader import load_skill_source_snapshot
@@ -205,6 +206,12 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
             source_snapshot=source_snapshot,
             review_schema=review_schema,
         )
+        synthesis_anonymization = anonymize_prompt_for_model(
+            synthesis_prompt,
+            existing_metadata=(check_run.run_parameters or {}).get(RUN_PARAMETER_KEY)
+            or (analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
+        )
+        synthesis_prompt = synthesis_anonymization.prompt
         synthesis_prompt_path = write_prompt_artifact(
             storage=storage,
             analysis_id=analysis.id,
@@ -215,6 +222,7 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         run_parameters = dict(check_run.run_parameters or {})
         run_parameters["synthesis_prompt_artifact_path"] = str(synthesis_prompt_path)
         run_parameters["synthesis_prompt_fingerprint"] = hashlib.sha256(synthesis_prompt.encode("utf-8")).hexdigest()
+        run_parameters[RUN_PARAMETER_KEY] = synthesis_anonymization.metadata
         check_run.run_parameters = run_parameters
         flag_modified(check_run, "run_parameters")
         session.commit()
@@ -248,6 +256,10 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
 
         try:
             compact_result = _parse_synthesis_compact(result.structured_text, review_schema)
+            compact_result = deanonymize_model_value(
+                compact_result,
+                metadata=(check_run.run_parameters or {}).get(RUN_PARAMETER_KEY),
+            )
         except json.JSONDecodeError as exc:
             compact_result = _fallback_compact_result_from_roles(role_outputs=role_outputs, review_schema=review_schema)
             run_parameters = dict(check_run.run_parameters or {})
