@@ -132,10 +132,31 @@ class LocalDocumentStorage:
         if run_dir.exists():
             shutil.rmtree(run_dir)
 
+    def delete_ic_review_analysis_dir(self, *, analysis_id: UUID) -> None:
+        analysis_dir = self._ensure_under_root(self.storage_root / "ic-review" / str(analysis_id))
+        if analysis_dir.exists():
+            shutil.rmtree(analysis_dir)
+
     def delete_document_dir(self, *, owner_id: UUID, document_id: UUID) -> None:
         document_dir = self._ensure_under_root(self.storage_root / "documents" / str(owner_id) / str(document_id))
         if document_dir.exists():
             shutil.rmtree(document_dir)
+
+    def delete_rendered_prompt_dir(self, *, run_id: UUID) -> None:
+        prompt_dir = self._ensure_under_root(self.storage_root / "rendered-prompts" / str(run_id))
+        if prompt_dir.exists():
+            shutil.rmtree(prompt_dir)
+
+    def delete_stored_path(self, path: str | None) -> None:
+        if not path:
+            return
+        stored_path = self.stored_path(path)
+        if stored_path == self.storage_root:
+            raise ValueError("Refusing to delete STORAGE_ROOT")
+        if stored_path.is_dir():
+            shutil.rmtree(stored_path)
+        else:
+            stored_path.unlink(missing_ok=True)
 
     def save_parsed_artifact(self, *, owner_id: UUID, document_id: UUID, parsed_text: str) -> Path:
         parsed_path = self.parsed_artifact_path(owner_id=owner_id, document_id=document_id)

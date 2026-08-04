@@ -13,6 +13,7 @@ from app.services.analyses import (
     AnalysisPreconditionError,
     cancel_analysis_for_actor,
     create_analysis_for_document,
+    delete_document_analysis_results_for_actor,
     delete_analysis_for_actor,
     get_latest_analysis_detail_run_for_actor,
     get_analysis_for_actor,
@@ -104,6 +105,22 @@ def delete_analysis(
         delete_analysis_for_actor(db=db, actor=current_user, analysis_id=analysis_id)
     except AnalysisNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+
+
+@router.delete("/documents/{document_id}/analyses", status_code=status.HTTP_204_NO_CONTENT)
+def delete_document_analysis_results(
+    document_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> None:
+    try:
+        delete_document_analysis_results_for_actor(db=db, actor=current_user, document_id=document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found") from exc
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+    except AnalysisPreconditionError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.post("/analyses/{analysis_id}/cancel", response_model=AnalysisRead)

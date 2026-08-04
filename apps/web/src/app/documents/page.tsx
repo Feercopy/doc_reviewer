@@ -4,6 +4,7 @@ import Link from "next/link";
 import { DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import {
   getProviderDefaultModel,
   listProviderModels,
@@ -11,7 +12,7 @@ import {
 } from "@/lib/api/provider-settings";
 import {
   USER_SELECTABLE_DOCUMENT_TYPES,
-  deleteDocument,
+  deleteDocumentAnalyses,
   listDocuments,
   listAnalyses,
   uploadDocument,
@@ -209,6 +210,7 @@ export default function DocumentsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState("");
+  const [casePendingDelete, setCasePendingDelete] = useState<DocumentRecord | null>(null);
   const [query, setQuery] = useState("");
   const [parseFilter, setParseFilter] = useState<ParseFilter>("all");
   const [title, setTitle] = useState("");
@@ -279,16 +281,21 @@ export default function DocumentsPage() {
   }, []);
 
   async function handleDelete(document: DocumentRecord) {
-    if (!window.confirm(`Delete document "${document.title}"?`)) {
+    setCasePendingDelete(document);
+  }
+
+  async function confirmDeleteCaseAnalyses() {
+    if (!casePendingDelete) {
       return;
     }
-    setDeletingId(document.id);
+    setDeletingId(casePendingDelete.id);
     setError("");
     try {
-      await deleteDocument(document.id);
+      await deleteDocumentAnalyses(casePendingDelete.id);
+      setCasePendingDelete(null);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete document");
+      setError(err instanceof Error ? err.message : "Failed to delete analysis results");
     } finally {
       setDeletingId("");
     }
@@ -739,6 +746,14 @@ export default function DocumentsPage() {
             </div>
           ) : null}
         </section>
+        {casePendingDelete ? (
+          <ConfirmDeleteDialog
+            busy={deletingId === casePendingDelete.id}
+            message="Are you sure you want to delete all the analysis results for this case?"
+            onCancel={() => setCasePendingDelete(null)}
+            onDelete={confirmDeleteCaseAnalyses}
+          />
+        ) : null}
       </main>
     </AppShell>
   );

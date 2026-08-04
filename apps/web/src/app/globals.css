@@ -463,6 +463,41 @@ tbody tr:last-child td {
   margin: 18px 24px 0;
 }
 
+.confirm-delete-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgba(17, 24, 39, 0.34);
+  padding: 24px;
+}
+
+.confirm-delete-dialog {
+  display: grid;
+  width: min(440px, 100%);
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 20px;
+}
+
+.confirm-delete-dialog h2 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 18px;
+  font-weight: 760;
+  line-height: 26px;
+}
+
+.confirm-delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .main,
 .page-shell {
   width: min(1240px, 100%);

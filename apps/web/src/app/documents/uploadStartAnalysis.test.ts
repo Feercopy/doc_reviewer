@@ -40,5 +40,9 @@ describe("documents upload start analysis flow", () => {
     expect(pageSource).toContain('target="_blank"');
     expect(pageSource).toContain("Open Case");
     expect(pageSource).toContain('className="gc-compact-link is-disabled"');
+    expect(pageSource).toContain("deleteDocumentAnalyses");
+    expect(pageSource).toContain("ConfirmDeleteDialog");
+    expect(pageSource).toContain("Are you sure you want to delete all the analysis results for this case?");
+    expect(pageSource).not.toContain("Delete document");
   });
 });

@@ -3,7 +3,7 @@ from uuid import UUID, uuid4
 from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisDetailRun, PredictedCommentRun
 from app.models.document import Document
 from app.models.provider_key import ProviderKey
-from app.models.skill_source import SkillSource, SkillSourceSnapshot
+from app.models.skill_source import RetrievalSnapshot, SkillSource, SkillSourceSnapshot
 from app.core.config import get_settings
 from app.schemas.enums import DocumentParseStatus, DocumentType, Provider, Role, RunStatus
 from app.security.secrets import encrypt_secret
@@ -458,6 +458,208 @@ def test_delete_analysis_hides_owned_analysis_from_detail_and_document_list(clie
     list_response = client.get(f"/documents/{document_id}/analyses")
     assert list_response.status_code == 200
     assert list_response.json()["analyses"] == []
+
+
+def test_delete_analysis_removes_result_runs_and_storage_artifacts(client, db_session, monkeypatch, tmp_path):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
+    user = create_user(db_session, "author", "secret")
+    skills = seed_baseline_skills(db_session)
+    skill_source = db_session.query(SkillSource).filter_by(slug="gate-challenger").one()
+    document_id = _create_completed_document(client, db_session, user)
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=user.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="need_evidence",
+        summary="Needs evidence",
+        structured_output={"verdict": "need_evidence"},
+        raw_output="raw secret output",
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.flush()
+    predicted_run = PredictedCommentRun(
+        analysis_id=analysis.id,
+        skill_id=skills[1].id,
+        skill_version=skills[1].version,
+        provider=analysis.provider,
+        model=analysis.model,
+        status=RunStatus.COMPLETED.value,
+        structured_output={"comments": []},
+        raw_output="raw da output",
+        run_parameters={},
+    )
+    detail_run = AnalysisDetailRun(
+        analysis_id=analysis.id,
+        status=RunStatus.COMPLETED.value,
+        provider=analysis.provider,
+        model=analysis.model,
+        structured_output={"layer_1": []},
+        raw_output="raw details",
+        run_parameters={},
+    )
+    check_run = AnalysisCheckRun(
+        analysis_id=analysis.id,
+        skill_id=skills[2].id,
+        skill_version=skills[2].version,
+        check_type="ic_agentic_review",
+        provider=analysis.provider,
+        model=analysis.model,
+        status=RunStatus.COMPLETED.value,
+        structured_output={"verdict": "ok"},
+        raw_output="raw ic",
+        run_parameters={},
+        artifacts=[],
+        uploaded_workbook_metadata={},
+    )
+    db_session.add_all([predicted_run, detail_run, check_run])
+    db_session.flush()
+    check_step = AnalysisCheckStep(
+        check_run_id=check_run.id,
+        step_type="role",
+        step_name="ic-product-analyst",
+        status=RunStatus.COMPLETED.value,
+        raw_output="raw role",
+        structured_output={"ok": True},
+        artifacts=[],
+    )
+    db_session.add(check_step)
+    db_session.flush()
+
+    analysis_prompt = tmp_path / "storage" / "rendered-prompts" / str(analysis.id) / "prompt.txt"
+    predicted_prompt = tmp_path / "storage" / "rendered-prompts" / str(predicted_run.id) / "prompt.txt"
+    source_snapshot_dir = tmp_path / "storage" / "skill-snapshots" / str(uuid4())
+    retrieval_snapshot_dir = tmp_path / "storage" / "retrieval-snapshots" / str(uuid4())
+    ic_artifact = tmp_path / "storage" / "ic-review" / str(analysis.id) / str(check_run.id) / "artifacts" / "raw.txt"
+    for path in [analysis_prompt, predicted_prompt, source_snapshot_dir / "manifest.json", retrieval_snapshot_dir / "dossier.json", ic_artifact]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("artifact", encoding="utf-8")
+    analysis.run_parameters = {"rendered_prompt_artifact_path": str(analysis_prompt)}
+    predicted_run.run_parameters = {"rendered_prompt_artifact_path": str(predicted_prompt)}
+    db_session.add(
+        SkillSourceSnapshot(
+            skill_source_id=skill_source.id,
+            analysis_id=analysis.id,
+            source_slug="gate-challenger",
+            source_kind="local_directory",
+            source_path=None,
+            repo_url=None,
+            requested_ref=None,
+            resolved_revision="abc123",
+            is_dirty=False,
+            dirty_details={},
+            snapshot_mode="development_current",
+            source_fingerprint="fingerprint",
+            file_manifest=[],
+            artifact_path=str(source_snapshot_dir),
+        )
+    )
+    db_session.add(
+        RetrievalSnapshot(
+            predicted_comment_run_id=predicted_run.id,
+            retrieval_mode="compact",
+            retrieval_version="v1",
+            corpus_fingerprint="corpus",
+            query_fingerprint="query",
+            selected_items={},
+            artifact_path=str(retrieval_snapshot_dir),
+        )
+    )
+    db_session.commit()
+    login(client, "author", "secret")
+
+    response = client.delete(f"/analyses/{analysis.id}")
+
+    assert response.status_code == 204
+    db_session.refresh(analysis)
+    assert analysis.deleted_at is not None
+    assert analysis.structured_output is None
+    assert analysis.raw_output is None
+    assert analysis.run_parameters["deleted_by_user_id"] == str(user.id)
+    assert db_session.query(PredictedCommentRun).filter_by(analysis_id=analysis.id).count() == 0
+    assert db_session.query(AnalysisDetailRun).filter_by(analysis_id=analysis.id).count() == 0
+    assert db_session.query(AnalysisCheckRun).filter_by(analysis_id=analysis.id).count() == 0
+    assert db_session.query(AnalysisCheckStep).filter_by(check_run_id=check_run.id).count() == 0
+    assert db_session.query(SkillSourceSnapshot).filter_by(analysis_id=analysis.id).count() == 0
+    assert db_session.query(RetrievalSnapshot).filter_by(predicted_comment_run_id=predicted_run.id).count() == 0
+    assert not analysis_prompt.parent.exists()
+    assert not predicted_prompt.parent.exists()
+    assert not source_snapshot_dir.exists()
+    assert not retrieval_snapshot_dir.exists()
+    assert not ic_artifact.exists()
+    get_settings.cache_clear()
+
+
+def test_delete_document_analysis_results_keeps_document_and_hides_all_owned_runs(client, db_session):
+    user = create_user(db_session, "author", "secret")
+    skill = seed_baseline_skills(db_session)[0]
+    document_id = _create_completed_document(client, db_session, user)
+    db_session.add_all(
+        [
+            Analysis(
+                document_id=document_id,
+                user_id=user.id,
+                skill_id=skill.id,
+                skill_version=skill.version,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                model="gpt-test",
+                status=RunStatus.COMPLETED.value,
+                structured_output={"verdict": "approve"},
+                raw_output="raw output",
+                run_parameters={},
+            ),
+            Analysis(
+                document_id=document_id,
+                user_id=user.id,
+                skill_id=skill.id,
+                skill_version=skill.version,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                model="gpt-test",
+                status=RunStatus.FAILED.value,
+                error_message="failed",
+                run_parameters={},
+            ),
+        ]
+    )
+    db_session.commit()
+    login(client, "author", "secret")
+
+    response = client.delete(f"/documents/{document_id}/analyses")
+
+    assert response.status_code == 204
+    assert client.get(f"/documents/{document_id}").status_code == 200
+    assert client.get(f"/documents/{document_id}/analyses").json()["analyses"] == []
+    assert db_session.query(Analysis).filter(Analysis.document_id == document_id, Analysis.deleted_at.is_(None)).count() == 0
+
+
+def test_delete_document_analysis_results_rejects_active_runs(client, db_session):
+    user = create_user(db_session, "author", "secret")
+    skill = seed_baseline_skills(db_session)[0]
+    document_id = _create_completed_document(client, db_session, user)
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=user.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.RUNNING.value,
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.commit()
+    login(client, "author", "secret")
+
+    response = client.delete(f"/documents/{document_id}/analyses")
+
+    assert response.status_code == 409
+    db_session.refresh(analysis)
+    assert analysis.deleted_at is None
 
 
 def test_document_owner_cannot_delete_analysis_created_by_admin(client, db_session):

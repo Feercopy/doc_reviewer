@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { resolveApiBaseUrl } from "@/lib/api/client";
 import {
@@ -15,6 +16,7 @@ import {
 import {
   cancelAnalysisChain,
   createAnalysis,
+  deleteAnalysis,
   deleteDocument,
   getDocument,
   getParsedText,
@@ -383,6 +385,8 @@ export default function DocumentDetailPage() {
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [cancellingAnalysisId, setCancellingAnalysisId] = useState("");
+  const [deletingAnalysisId, setDeletingAnalysisId] = useState("");
+  const [analysisPendingDelete, setAnalysisPendingDelete] = useState<AnalysisRecord | null>(null);
 
   async function refresh() {
     const nextDocument = await getDocument(documentId);
@@ -591,6 +595,28 @@ export default function DocumentDetailPage() {
       setError(err instanceof Error ? err.message : "Failed to stop analysis");
     } finally {
       setCancellingAnalysisId("");
+    }
+  }
+
+  function requestDeleteAnalysis(analysis: AnalysisRecord) {
+    setAnalysisPendingDelete(analysis);
+  }
+
+  async function confirmDeleteAnalysis() {
+    if (!analysisPendingDelete) {
+      return;
+    }
+    setDeletingAnalysisId(analysisPendingDelete.id);
+    setError("");
+    try {
+      await deleteAnalysis(analysisPendingDelete.id);
+      setAnalyses((items) => items.filter((item) => item.id !== analysisPendingDelete.id));
+      setAnalysisPendingDelete(null);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete analysis result");
+    } finally {
+      setDeletingAnalysisId("");
     }
   }
 
@@ -813,7 +839,7 @@ export default function DocumentDetailPage() {
                           <th>Status &amp; verdict</th>
                           <th>Provider</th>
                           <th>Run date</th>
-                          <th>Open</th>
+                          <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -845,9 +871,19 @@ export default function DocumentDetailPage() {
                                 {runDate.time ? <small>{runDate.time}</small> : null}
                               </td>
                               <td className="gc-open-cell">
-                                <Link className="gc-compact-link" href={`/analyses/${analysis.id}`}>
-                                  Open
-                                </Link>
+                                <div className="gc-run-actions">
+                                  <Link className="gc-compact-link" href={`/analyses/${analysis.id}`}>
+                                    Open
+                                  </Link>
+                                  <button
+                                    className="gc-compact-danger"
+                                    disabled={deletingAnalysisId === analysis.id}
+                                    type="button"
+                                    onClick={() => requestDeleteAnalysis(analysis)}
+                                  >
+                                    {deletingAnalysisId === analysis.id ? "Deleting" : "Delete"}
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -868,6 +904,14 @@ export default function DocumentDetailPage() {
         ) : (
           <section className="gc-panel gc-loading">Loading document...</section>
         )}
+        {analysisPendingDelete ? (
+          <ConfirmDeleteDialog
+            busy={deletingAnalysisId === analysisPendingDelete.id}
+            message="Are you sure you want to delete this analysis result?"
+            onCancel={() => setAnalysisPendingDelete(null)}
+            onDelete={confirmDeleteAnalysis}
+          />
+        ) : null}
       </main>
     </AppShell>
   );
@@ -1032,6 +1076,7 @@ const documentDetailStyles = `
 .document-detail .gc-ghost,
 .document-detail .gc-danger,
 .document-detail .gc-compact-link,
+.document-detail .gc-compact-danger,
 .document-detail .gc-copy-action {
   display: inline-flex;
   min-height: 44px;
@@ -1080,7 +1125,15 @@ const documentDetailStyles = `
   padding: 0 16px;
 }
 
-.document-detail .gc-danger:hover:not(:disabled) {
+.document-detail .gc-compact-danger {
+  border: 1px solid #f2d7d9;
+  background: #ffffff;
+  color: #c92036;
+  padding: 0 14px;
+}
+
+.document-detail .gc-danger:hover:not(:disabled),
+.document-detail .gc-compact-danger:hover:not(:disabled) {
   border-color: #e7a8b4;
   background: #fcecee;
   color: #a5122a;
@@ -1089,6 +1142,7 @@ const documentDetailStyles = `
 .document-detail .gc-primary:disabled,
 .document-detail .gc-ghost:disabled,
 .document-detail .gc-danger:disabled,
+.document-detail .gc-compact-danger:disabled,
 .document-detail .gc-title-edit-button:disabled,
 .document-detail .gc-title-save-button:disabled,
 .document-detail .gc-title-cancel-button:disabled,
@@ -1676,6 +1730,18 @@ const documentDetailStyles = `
 
 .document-detail .gc-open-cell {
   text-align: right;
+}
+
+.document-detail .gc-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.document-detail .gc-run-actions .gc-compact-link,
+.document-detail .gc-run-actions .gc-compact-danger {
+  flex: 0 0 auto;
 }
 
 .document-detail .gc-compact-link {

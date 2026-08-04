@@ -21,6 +21,18 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Add guarded deletion for analysis results without deleting cases: the
+  Documents table Delete action now opens an in-app confirmation and deletes
+  all non-running analysis results for the case via
+  `DELETE /documents/{document_id}/analyses`, while the document remains
+  visible. Document detail Analysis history now has per-run Delete actions with
+  a separate confirmation dialog. Backend deletion keeps authorization scoped to
+  analysis ownership/admin rights, rejects active queued/running chains, removes
+  heavy child run rows and storage artifacts, scrubs the deleted analysis row,
+  and records audit metadata. Verified focused API/document tests (`33 passed`),
+  focused web documents/API tests (`40 passed`), Python compile, `git diff
+  --check`, and rebuilt/restarted local `api` and `web`; local health and web
+  routes return `200`.
 - [x] Add reversible model-only document anonymization before review: parsing
   now preserves original parsed text, metadata, title, and filename for the UI
   and case table, while worker model-call prompts are anonymized immediately
