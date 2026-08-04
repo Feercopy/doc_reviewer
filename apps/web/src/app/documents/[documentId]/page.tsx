@@ -120,8 +120,15 @@ function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisRecord[]
 function isFullAnalysisComplete(analysis: AnalysisRecord): boolean {
   return (
     analysis.status === "completed" &&
-    analysis.predicted_comment_run?.status === "completed" &&
+    isDevilsAdvocateCompleteOrSkipped(analysis) &&
     analysis.ic_review_run?.status === "completed"
+  );
+}
+
+function isDevilsAdvocateCompleteOrSkipped(analysis: AnalysisRecord): boolean {
+  return (
+    analysis.predicted_comment_run?.status === "completed" ||
+    (!analysis.predicted_comment_run && analysis.status === "completed")
   );
 }
 

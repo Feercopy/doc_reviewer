@@ -83,6 +83,53 @@ def test_run_analysis_runs_predicted_comments_before_gate_after_success(tmp_path
         _close_session(db)
 
 
+def test_run_analysis_runs_devils_advocate_for_unknown_document_type(tmp_path):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, user)
+        document.detected_document_type = DocumentType.UNKNOWN.value
+        main_skill = _create_main_skill(db)
+        predicted_skill = _create_predicted_skill(db, tmp_path)
+        predicted_skill.supported_document_types = [DocumentType.GATE_2.value, DocumentType.UNKNOWN.value]
+        _create_provider_key(db, user)
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=main_skill.id,
+            skill_version=main_skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": _main_analysis_json("Needs stronger evidence."),
+                    "raw_output": "raw main",
+                    "latency_ms": 10,
+                },
+                "predicted_comments_mock_provider_result": {
+                    "structured_text": _devils_advocate_json(),
+                    "raw_output": "raw predicted",
+                    "latency_ms": 20,
+                },
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        run_analysis(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        predicted_run = db.execute(select(PredictedCommentRun)).scalar_one()
+        assert analysis.status == RunStatus.COMPLETED.value
+        assert predicted_run.status == RunStatus.COMPLETED.value
+        assert predicted_run.skill_id == predicted_skill.id
+        assert predicted_run.run_parameters["document_type"] == DocumentType.UNKNOWN.value
+        assert analysis.run_parameters["gate_challenger_layer_4_context"]["predicted_comment_run_id"] == str(predicted_run.id)
+    finally:
+        _close_session(db)
+
+
 def test_run_predicted_comments_skips_cancelled_run(tmp_path):
     db = _create_session()
     try:

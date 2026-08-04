@@ -78,6 +78,20 @@ def test_seed_baseline_skills_creates_external_source_registry(db_session):
     assert "scripts/invest/run_pipeline.py" in sources["ic-agentic-review"].required_paths
 
 
+def test_seeded_devils_advocate_skill_runs_for_unknown_documents(db_session):
+    skills = seed_baseline_skills(db_session)
+
+    devils_skill = next(skill for skill in skills if skill.name == "devils_advocate_predefense")
+
+    assert devils_skill.supported_document_types == [
+        DocumentType.GATE_2.value,
+        DocumentType.STREAM_REVIEW_1.value,
+        DocumentType.STREAM_REVIEW_2_PLUS.value,
+        DocumentType.GATE_3.value,
+        DocumentType.UNKNOWN.value,
+    ]
+
+
 def test_seeded_ic_agentic_review_skill_matches_source_contract(db_session):
     skills = seed_baseline_skills(db_session)
 

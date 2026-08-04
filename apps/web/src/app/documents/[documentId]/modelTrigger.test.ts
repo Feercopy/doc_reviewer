@@ -41,11 +41,13 @@ describe("document detail analysis controls", () => {
     expect(source).not.toContain('aria-label="Model settings"');
   });
 
-  it("waits for the full Gate, Devil's Advocate, and IC Review package before showing history rows", () => {
+  it("waits for Gate and IC Review while tolerating historical runs without Devil's Advocate", () => {
     const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
 
     expect(source).toContain("function isFullAnalysisComplete");
+    expect(source).toContain("function isDevilsAdvocateCompleteOrSkipped");
     expect(source).toContain('analysis.predicted_comment_run?.status === "completed"');
+    expect(source).toContain("!analysis.predicted_comment_run && analysis.status === \"completed\"");
     expect(source).toContain('analysis.ic_review_run?.status === "completed"');
     expect(source).toContain("const visibleAnalyses = useMemo");
     expect(source).toContain("Full analysis is running");

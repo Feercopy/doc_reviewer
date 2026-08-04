@@ -79,8 +79,15 @@ function getFinSummaryPresentation(document: DocumentRecord["linked_fin_summary_
 function isFullAnalysisComplete(analysis: AnalysisRecord): boolean {
   return (
     analysis.status === "completed" &&
-    analysis.predicted_comment_run?.status === "completed" &&
+    isDevilsAdvocateCompleteOrSkipped(analysis) &&
     analysis.ic_review_run?.status === "completed"
+  );
+}
+
+function isDevilsAdvocateCompleteOrSkipped(analysis: AnalysisRecord): boolean {
+  return (
+    analysis.predicted_comment_run?.status === "completed" ||
+    (!analysis.predicted_comment_run && analysis.status === "completed")
   );
 }
 
@@ -133,10 +140,7 @@ function getAnalysisStatusSignal(
   }
 
   const predictedStatus = analysis.predicted_comment_run?.status;
-  if (!predictedStatus) {
-    return { label: "Devils Advocate queued", tone: "warn" };
-  }
-  if (predictedStatus !== "completed") {
+  if (predictedStatus && predictedStatus !== "completed") {
     return { label: `Devils Advocate ${predictedStatus}`, tone: predictedStatus === "queued" ? "warn" : "info" };
   }
 

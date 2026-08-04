@@ -23,6 +23,7 @@ describe("documents upload start analysis flow", () => {
     expect(pageSource).toContain("function getFinSummaryPresentation");
     expect(pageSource).toContain('return { label: "Workbook attached", tone: "good" };');
     expect(pageSource).toContain("function isFullAnalysisComplete");
+    expect(pageSource).toContain("function isDevilsAdvocateCompleteOrSkipped");
     expect(pageSource).toContain("function getLatestCaseAnalysis");
     expect(pageSource).toContain("function getAnalysisStatusSignal");
     expect(pageSource).toContain("const filteredCases = useMemo");
@@ -43,6 +44,7 @@ describe("documents upload start analysis flow", () => {
     expect(pageSource).toContain("deleteDocumentAnalyses");
     expect(pageSource).toContain("ConfirmDeleteDialog");
     expect(pageSource).toContain("Are you sure you want to delete all the analysis results for this case?");
+    expect(pageSource).not.toContain('return { label: "Devils Advocate queued"');
     expect(pageSource).not.toContain("Delete document");
   });
 

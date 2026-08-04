@@ -187,6 +187,7 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
     wiki_fingerprint = _fingerprint_path(DEVILS_ADVOCATE_WIKI_PATH)
     benchmark_judge_prompt, benchmark_judge_metadata = _benchmark_judge_prompt()
     gate_challenger_document_types = [item.value for item in GATE_CHALLENGER_DOCUMENT_TYPES]
+    predefense_document_types = [*gate_challenger_document_types, DocumentType.UNKNOWN.value]
     gate_source = _upsert_skill_source(
         db,
         {
@@ -260,7 +261,7 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "description": "Devil's Advocate pre-defense comments skill snapshot source.",
             "version": "baseline",
             "skill_type": SkillType.PREDICTED_COMMENTS.value,
-            "supported_document_types": gate_challenger_document_types,
+            "supported_document_types": predefense_document_types,
             "source_type": SkillSourceType.LOCAL_KNOWLEDGE_BASE.value,
             "skill_source_id": devils_source.id,
             "source_uri": str(DEVILS_ADVOCATE_PATH),

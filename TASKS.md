@@ -21,6 +21,15 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Fix production-style analyses stuck on missing Devil's Advocate status:
+  Devil's Advocate pre-defense is now seeded for `unknown` documents as well as
+  explicit Gate/Stream types, so documents with weak type detection still get
+  the intended prepass. Documents and document-detail status logic now treats a
+  genuinely absent historical Devil's Advocate run as skipped instead of keeping
+  an otherwise completed Gate + IC chain in "running", while real queued/running
+  or failed Devil's Advocate runs still show their own status. Verified focused
+  seed tests (`9 passed`), worker Devil's Advocate tests (`9 passed`), web
+  document status tests (`13 passed`), and `git diff --check`.
 - [x] Tighten Documents page onboarding UI: aligned the anonymizer status badge
   to the same centered page grid, reduced the badge size and moved it closer to
   the app header, moved the white Russian instruction card directly below it,
