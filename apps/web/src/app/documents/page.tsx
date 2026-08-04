@@ -4,6 +4,7 @@ import Link from "next/link";
 import { DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import {
   getProviderDefaultModel,
   listProviderModels,
@@ -11,7 +12,7 @@ import {
 } from "@/lib/api/provider-settings";
 import {
   USER_SELECTABLE_DOCUMENT_TYPES,
-  deleteDocument,
+  deleteDocumentAnalyses,
   listDocuments,
   listAnalyses,
   uploadDocument,
@@ -209,6 +210,7 @@ export default function DocumentsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState("");
+  const [casePendingDelete, setCasePendingDelete] = useState<DocumentRecord | null>(null);
   const [query, setQuery] = useState("");
   const [parseFilter, setParseFilter] = useState<ParseFilter>("all");
   const [title, setTitle] = useState("");
@@ -279,16 +281,21 @@ export default function DocumentsPage() {
   }, []);
 
   async function handleDelete(document: DocumentRecord) {
-    if (!window.confirm(`Delete document "${document.title}"?`)) {
+    setCasePendingDelete(document);
+  }
+
+  async function confirmDeleteCaseAnalyses() {
+    if (!casePendingDelete) {
       return;
     }
-    setDeletingId(document.id);
+    setDeletingId(casePendingDelete.id);
     setError("");
     try {
-      await deleteDocument(document.id);
+      await deleteDocumentAnalyses(casePendingDelete.id);
+      setCasePendingDelete(null);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete document");
+      setError(err instanceof Error ? err.message : "Failed to delete analysis results");
     } finally {
       setDeletingId("");
     }
@@ -417,16 +424,27 @@ export default function DocumentsPage() {
     <AppShell>
       <main className="documents-review">
         <style>{documentsStyles}</style>
-        <section className="gc-hero">
-          <div>
-            <h1>Documents</h1>
-            <p className="gc-muted">Upload investment review and product defense documents.</p>
-          </div>
+        <section className="gc-instruction-card" aria-labelledby="gc-instruction-title">
+          <h2 id="gc-instruction-title">Инструкция</h2>
+          <ul>
+            <li>
+              <strong>Чтобы использовать Gate Challenger, приложите документ для защиты в поле Документ для защиты.</strong>
+            </li>
+            <li>
+              <strong>Чтобы повысить точность ответа также приложите документ Fin Summary в соответствующее поле.</strong>
+            </li>
+            <li>
+              <strong>Нажмите кнопку Start Analysis.</strong>
+            </li>
+          </ul>
         </section>
 
         {error ? <section className="gc-alert">{error}</section> : null}
 
         <section className="gc-upload-card" aria-label="Upload document">
+          <div className="gc-upload-heading">
+            <h1>Documents</h1>
+          </div>
           <form className="gc-upload-form" onSubmit={submitUpload}>
             <div className="gc-upload-zones" aria-label="Upload files">
               <div
@@ -460,7 +478,7 @@ export default function DocumentsPage() {
                   <p>{primaryFile ? "File selected" : "Drag and drop or click to browse"}</p>
                 </div>
                 <div className="gc-format-row" aria-label="Accepted formats">
-                  <span>Any file format</span>
+                  <span className="gc-format-note">Обязательный документ. Без него нельзя выполнить анализ</span>
                   <span>Parser optimized for {supportedExtensions.join(", ")}; max 25 MB</span>
                 </div>
               </div>
@@ -496,8 +514,10 @@ export default function DocumentsPage() {
                   <p>{finSummaryFile ? "File selected" : "Drag and drop or click to browse"}</p>
                 </div>
                 <div className="gc-format-row" aria-label="Accepted formats">
-                  <span>Any file format</span>
-                  <span>Optional attachment; max 25 MB</span>
+                  <span className="gc-format-note is-optional">
+                    Опциональный документ. Загрузите, чтобы повысить качество анализа
+                  </span>
+                  <span>Optimized for .xlsx; max 25 MB</span>
                 </div>
               </div>
             </div>
@@ -739,6 +759,14 @@ export default function DocumentsPage() {
             </div>
           ) : null}
         </section>
+        {casePendingDelete ? (
+          <ConfirmDeleteDialog
+            busy={deletingId === casePendingDelete.id}
+            message="Are you sure you want to delete all the analysis results for this case?"
+            onCancel={() => setCasePendingDelete(null)}
+            onDelete={confirmDeleteCaseAnalyses}
+          />
+        ) : null}
       </main>
     </AppShell>
   );
@@ -753,13 +781,11 @@ const documentsStyles = `
   color: #111827;
 }
 
-.gc-hero {
-  display: flex;
-  align-items: flex-start;
-  margin-bottom: 22px;
+.gc-upload-heading {
+  margin-bottom: 16px;
 }
 
-.gc-hero h1 {
+.gc-upload-heading h1 {
   margin: 0;
   color: #111827;
   font-size: 30px;
@@ -768,19 +794,44 @@ const documentsStyles = `
   letter-spacing: 0;
 }
 
-.gc-muted {
-  margin: 8px 0 0;
-  color: #5b6472;
-  font-size: 14px;
-  line-height: 22px;
-}
-
+.gc-instruction-card,
 .gc-upload-card,
 .gc-panel {
   border: 1px solid #e5eaf0;
   border-radius: 8px;
   background: #ffffff;
   box-shadow: none;
+}
+
+.gc-instruction-card {
+  margin-bottom: 22px;
+  padding: 18px;
+}
+
+.gc-instruction-card h2 {
+  margin: 0;
+  color: #c92036;
+  font-size: 18px;
+  font-weight: 850;
+  line-height: 24px;
+}
+
+.gc-instruction-card ul {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0 0 0 20px;
+}
+
+.gc-instruction-card li {
+  color: #111827;
+  padding-left: 2px;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.gc-instruction-card strong {
+  font-weight: 800;
 }
 
 .gc-upload-card {
@@ -912,6 +963,15 @@ const documentsStyles = `
   gap: 2px;
   font-size: 12px;
   line-height: 18px;
+}
+
+.gc-format-note {
+  color: #c92036;
+  font-weight: 700;
+}
+
+.gc-format-note.is-optional {
+  color: #075e45;
 }
 
 .gc-upload-details {
@@ -1579,8 +1639,7 @@ const documentsStyles = `
     min-height: 0;
   }
 
-  .gc-controls,
-  .gc-hero {
+  .gc-controls {
     align-items: stretch;
     flex-direction: column;
   }
@@ -1598,6 +1657,10 @@ const documentsStyles = `
   }
 
   .gc-upload-card {
+    padding: 14px;
+  }
+
+  .gc-instruction-card {
     padding: 14px;
   }
 

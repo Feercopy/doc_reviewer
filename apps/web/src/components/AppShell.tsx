@@ -80,9 +80,11 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
 
       <div className="content-shell">
         {error ? <div className="shell-alert panel error">{error}</div> : null}
-        <div className="anonymizer-banner" role="status" aria-label="Анонимизатор включен">
-          <span className="anonymizer-banner__dot" aria-hidden="true" />
-          <span>Анонимизатор включен</span>
+        <div className="anonymizer-banner-shell">
+          <div className="anonymizer-banner" role="status" aria-label="Анонимизатор включен">
+            <span className="anonymizer-banner__dot" aria-hidden="true" />
+            <span>Анонимизатор включен</span>
+          </div>
         </div>
         <div className="content-scroll">{children}</div>
       </div>

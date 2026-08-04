@@ -371,6 +371,10 @@ export async function deleteDocument(documentId: string): Promise<void> {
   return apiFetchNoContent(`/documents/${documentId}`, { method: "DELETE" });
 }
 
+export async function deleteDocumentAnalyses(documentId: string): Promise<void> {
+  return apiFetchNoContent(`/documents/${documentId}/analyses`, { method: "DELETE" });
+}
+
 export async function listAnalyses(documentId: string): Promise<AnalysesListResponse> {
   return apiFetch<AnalysesListResponse>(`/documents/${documentId}/analyses`);
 }

@@ -40,5 +40,41 @@ describe("documents upload start analysis flow", () => {
     expect(pageSource).toContain('target="_blank"');
     expect(pageSource).toContain("Open Case");
     expect(pageSource).toContain('className="gc-compact-link is-disabled"');
+    expect(pageSource).toContain("deleteDocumentAnalyses");
+    expect(pageSource).toContain("ConfirmDeleteDialog");
+    expect(pageSource).toContain("Are you sure you want to delete all the analysis results for this case?");
+    expect(pageSource).not.toContain("Delete document");
+  });
+
+  it("shows a compact instruction card above upload controls", () => {
+    const pageSource = source();
+    const instructionIndex = pageSource.indexOf('className="gc-instruction-card"');
+    const uploadCardIndex = pageSource.indexOf('className="gc-upload-card"');
+    const uploadCardSource = pageSource.slice(uploadCardIndex, pageSource.indexOf('<form className="gc-upload-form"'));
+
+    expect(pageSource).toContain('className="gc-instruction-card"');
+    expect(instructionIndex).toBeGreaterThan(-1);
+    expect(uploadCardIndex).toBeGreaterThan(instructionIndex);
+    expect(pageSource).toContain("Инструкция");
+    expect(pageSource).toContain("Чтобы использовать Gate Challenger, приложите документ для защиты в поле Документ для защиты.");
+    expect(pageSource).toContain("Чтобы повысить точность ответа также приложите документ Fin Summary в соответствующее поле.");
+    expect(pageSource).toContain("Нажмите кнопку Start Analysis.");
+    expect(uploadCardSource).toContain("<h1>Documents</h1>");
+    expect(pageSource).not.toContain("Upload investment review and product defense documents.");
+    expect(pageSource).not.toContain("gc-hero");
+  });
+
+  it("labels primary and fin summary upload requirements explicitly", () => {
+    const pageSource = source();
+
+    expect(pageSource).toContain("Обязательный документ. Без него нельзя выполнить анализ");
+    expect(pageSource).toContain("Опциональный документ. Загрузите, чтобы повысить качество анализа");
+    expect(pageSource).toContain("Optimized for .xlsx; max 25 MB");
+    expect(pageSource).toContain("gc-format-note");
+    expect(pageSource).toContain("gc-format-note is-optional");
+    expect(pageSource).toContain(".gc-format-note.is-optional");
+    expect(pageSource).toContain("color: #075e45");
+    expect(pageSource).not.toContain("Any file format");
+    expect(pageSource).not.toContain("Optional attachment");
   });
 });

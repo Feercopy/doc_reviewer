@@ -420,30 +420,35 @@ tbody tr:last-child td {
   gap: 10px;
 }
 
+.anonymizer-banner-shell {
+  width: min(1536px, 100%);
+  margin: 10px auto 0;
+  padding: 0 36px;
+}
+
 .anonymizer-banner {
   display: inline-flex;
   width: fit-content;
-  min-height: 52px;
+  min-height: 35px;
   align-items: center;
-  gap: 12px;
-  margin: 18px 36px 0;
+  gap: 8px;
   border-radius: 999px;
   background: var(--success-bg);
   color: #075e45;
-  padding: 0 22px;
-  font-size: 18px;
+  padding: 0 15px;
+  font-size: 12px;
   font-weight: 850;
-  line-height: 24px;
+  line-height: 16px;
   white-space: nowrap;
 }
 
 .anonymizer-banner__dot {
-  width: 12px;
-  height: 12px;
+  width: 8px;
+  height: 8px;
   flex: 0 0 auto;
   border-radius: 999px;
   background: currentColor;
-  box-shadow: 0 0 0 5px rgba(14, 159, 110, 0.14);
+  box-shadow: 0 0 0 3px rgba(14, 159, 110, 0.14);
 }
 
 .user-chip {
@@ -461,6 +466,41 @@ tbody tr:last-child td {
 
 .shell-alert {
   margin: 18px 24px 0;
+}
+
+.confirm-delete-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgba(17, 24, 39, 0.34);
+  padding: 24px;
+}
+
+.confirm-delete-dialog {
+  display: grid;
+  width: min(440px, 100%);
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 20px;
+}
+
+.confirm-delete-dialog h2 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 18px;
+  font-weight: 760;
+  line-height: 26px;
+}
+
+.confirm-delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .main,
@@ -1113,8 +1153,9 @@ details.details-panel[open] summary {
     margin-left: auto;
   }
 
-  .anonymizer-banner {
-    margin: 16px 16px 0;
+  .anonymizer-banner-shell {
+    margin-top: 8px;
+    padding: 0 16px;
   }
 
   .main,
@@ -1184,12 +1225,15 @@ details.details-panel[open] summary {
     flex: 0 0 auto;
   }
 
+  .anonymizer-banner-shell {
+    padding: 0 12px;
+  }
+
   .anonymizer-banner {
     width: auto;
-    min-height: 48px;
-    margin: 14px 12px 0;
-    padding: 0 18px;
-    font-size: 16px;
+    min-height: 34px;
+    padding: 0 14px;
+    font-size: 12px;
     white-space: normal;
   }
 

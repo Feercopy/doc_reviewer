@@ -7,6 +7,7 @@ import {
   createAnalysisDetails,
   deleteAnalysis,
   deleteDocument,
+  deleteDocumentAnalyses,
   getParsedText,
   patchDocumentTitle,
   patchDocumentType,
@@ -110,6 +111,18 @@ describe("documents api", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/documents/doc-id",
+      expect.objectContaining({ method: "DELETE", credentials: "include" }),
+    );
+  });
+
+  it("deletes document analysis results without deleting the document", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    global.fetch = fetchMock;
+
+    await deleteDocumentAnalyses("doc-id");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/documents/doc-id/analyses",
       expect.objectContaining({ method: "DELETE", credentials: "include" }),
     );
   });

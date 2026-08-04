@@ -59,6 +59,18 @@ describe("document detail analysis controls", () => {
     expect(source).not.toContain("window.location.href = appPath(`/analyses/${analysis.id}`)");
   });
 
+  it("lets users delete a single visible analysis result from history with a dialog", () => {
+    const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
+
+    expect(source).toContain("deleteAnalysis");
+    expect(source).toContain("requestDeleteAnalysis");
+    expect(source).toContain("confirmDeleteAnalysis");
+    expect(source).toContain("ConfirmDeleteDialog");
+    expect(source).toContain("Are you sure you want to delete this analysis result?");
+    expect(source).toContain('className="gc-run-actions"');
+    expect(source).toContain('onClick={() => requestDeleteAnalysis(analysis)}');
+  });
+
   it("shows IC Review subagent progress while a full analysis is running", () => {
     const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
 

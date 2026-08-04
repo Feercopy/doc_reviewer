@@ -21,6 +21,34 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Tighten Documents page onboarding UI: aligned the anonymizer status badge
+  to the same centered page grid, reduced the badge size and moved it closer to
+  the app header, moved the white Russian instruction card directly below it,
+  and moved the `Documents` title into the upload panel while removing the old
+  subtitle. Verified focused web documents/AppShell tests (`42 passed`) and
+  `git diff --check`; local web rebuild is handled for inspection.
+- [x] Replace generic upload format hints in the Documents upload zones with
+  Russian requirement copy: the primary defense document is marked required in
+  red, while Fin Summary is marked optional in green for analysis quality. Added
+  a focused source-read regression check before local web rebuild.
+- [x] Add guarded deletion for analysis results without deleting cases: the
+  Documents table Delete action now opens an in-app confirmation and deletes
+  all non-running analysis results for the case via
+  `DELETE /documents/{document_id}/analyses`, while the document remains
+  visible. Document detail Analysis history now has per-run Delete actions with
+  a separate confirmation dialog. Backend deletion keeps authorization scoped to
+  analysis ownership/admin rights, rejects active queued/running chains, removes
+  heavy child run rows and storage artifacts, scrubs the deleted analysis row,
+  and records audit metadata. Verified focused API/document tests (`33 passed`),
+  focused web documents/API tests (`40 passed`), Python compile, `git diff
+  --check`, and rebuilt/restarted local `api` and `web`; local health and web
+  routes return `200`.
+- [x] Harden analysis-result deletion before production merge: preflight all
+  analysis chains before filesystem cleanup, map direct active-run deletion to
+  `409`, ignore generic `run_parameters.path`, constrain IC artifact cleanup to
+  the owning IC run directory, and preserve top-level result trace fields when
+  feedback exists. Verified focused API analysis deletion tests (`25 passed`),
+  Python compile, and `git diff --check`.
 - [x] Add reversible model-only document anonymization before review: parsing
   now preserves original parsed text, metadata, title, and filename for the UI
   and case table, while worker model-call prompts are anonymized immediately

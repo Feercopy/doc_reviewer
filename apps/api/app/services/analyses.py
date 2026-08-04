@@ -1,6 +1,7 @@
+from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -9,8 +10,9 @@ from app.core.config import default_skill_source_snapshot_mode, get_settings
 from app.models.base import utc_now
 from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisCheckStep, AnalysisDetailRun, PredictedCommentRun
 from app.models.document import Document
+from app.models.feedback import Feedback
 from app.models.skill import Skill
-from app.models.skill_source import SkillSource
+from app.models.skill_source import RetrievalSnapshot, SkillSource, SkillSourceSnapshot
 from app.models.user import User
 from app.schemas.analyses import AnalysisDetailRunRead, AnalysisRead, PredictedCommentRunRead, RetrievalTrace, SourceTrace
 from app.schemas.enums import (
@@ -45,6 +47,15 @@ ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY = "analysis_chain_cancel_requested_at"
 ANALYSIS_CHAIN_CANCELLED_BY_USER_ID_KEY = "analysis_chain_cancelled_by_user_id"
 MODEL_ANONYMIZATION_RUN_PARAMETER_KEY = "model_anonymization"
 DOCUMENT_PARSE_DEPENDENCY_KEY = "document_parse_dependency"
+
+
+@dataclass(frozen=True)
+class AnalysisDeletionContext:
+    analysis: Analysis
+    predicted_runs: list[PredictedCommentRun]
+    detail_runs: list[AnalysisDetailRun]
+    check_runs: list[AnalysisCheckRun]
+    check_steps: list[AnalysisCheckStep]
 
 
 def create_analysis_for_document(
@@ -201,7 +212,134 @@ def delete_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) ->
     analysis = db.get(Analysis, analysis_id)
     if analysis is None or analysis.deleted_at is not None or not can_delete_analysis(actor, analysis):
         raise AnalysisNotFoundError("Analysis not found")
-    analysis.deleted_at = utc_now()
+    context = _analysis_deletion_context(db=db, analysis=analysis)
+    _ensure_deletable_analysis_chain(context)
+    _delete_analysis_result(db=db, actor=actor, context=context, deleted_at=utc_now())
+    db.commit()
+
+
+def delete_document_analysis_results_for_actor(*, db: Session, actor: User, document_id: UUID) -> None:
+    document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
+    analyses = list(
+        db.execute(
+            select(Analysis)
+            .where(Analysis.document_id == document.id, Analysis.deleted_at.is_(None))
+            .order_by(Analysis.created_at.desc())
+        )
+        .scalars()
+        .all()
+    )
+    forbidden = [analysis for analysis in analyses if not can_delete_analysis(actor, analysis)]
+    if forbidden:
+        raise AnalysisNotFoundError("Analysis not found")
+
+    contexts = [_analysis_deletion_context(db=db, analysis=analysis) for analysis in analyses]
+    for context in contexts:
+        _ensure_deletable_analysis_chain(context)
+
+    deleted_at = utc_now()
+    for context in contexts:
+        _delete_analysis_result(db=db, actor=actor, context=context, deleted_at=deleted_at)
+
+    record_audit(
+        db=db,
+        actor_id=actor.id,
+        action="document.analysis_results_deleted",
+        entity_type="document",
+        entity_id=document.id,
+        metadata={
+            "analysis_count": len(analyses),
+        },
+    )
+    db.commit()
+
+
+def _analysis_deletion_context(*, db: Session, analysis: Analysis) -> AnalysisDeletionContext:
+    predicted_runs = _analysis_predicted_comment_runs(db=db, analysis_id=analysis.id)
+    detail_runs = _analysis_detail_runs(db=db, analysis_id=analysis.id)
+    check_runs = _analysis_check_runs(db=db, analysis_id=analysis.id)
+    check_steps = [
+        step
+        for check_run in check_runs
+        for step in _analysis_check_steps(db=db, check_run_id=check_run.id)
+    ]
+    return AnalysisDeletionContext(
+        analysis=analysis,
+        predicted_runs=predicted_runs,
+        detail_runs=detail_runs,
+        check_runs=check_runs,
+        check_steps=check_steps,
+    )
+
+
+def _ensure_deletable_analysis_chain(context: AnalysisDeletionContext) -> None:
+    if _analysis_chain_has_active_runs(
+        analysis=context.analysis,
+        predicted_runs=context.predicted_runs,
+        detail_runs=context.detail_runs,
+        check_runs=context.check_runs,
+        check_steps=context.check_steps,
+    ):
+        raise AnalysisPreconditionError("Cannot delete analysis results while analysis is running")
+
+
+def _delete_analysis_result(*, db: Session, actor: User, context: AnalysisDeletionContext, deleted_at) -> None:
+    analysis = context.analysis
+    predicted_runs = context.predicted_runs
+    detail_runs = context.detail_runs
+    check_runs = context.check_runs
+    check_steps = context.check_steps
+    storage = LocalDocumentStorage(get_settings().storage_root)
+    deleted_storage_paths = _delete_analysis_storage_artifacts(
+        db=db,
+        storage=storage,
+        analysis=analysis,
+        predicted_runs=predicted_runs,
+        detail_runs=detail_runs,
+        check_runs=check_runs,
+        check_steps=check_steps,
+    )
+
+    predicted_run_ids = [run.id for run in predicted_runs]
+    check_run_ids = [run.id for run in check_runs]
+    if predicted_run_ids:
+        db.execute(delete(RetrievalSnapshot).where(RetrievalSnapshot.predicted_comment_run_id.in_(predicted_run_ids)))
+        db.execute(
+            delete(SkillSourceSnapshot).where(SkillSourceSnapshot.predicted_comment_run_id.in_(predicted_run_ids))
+        )
+        db.execute(delete(PredictedCommentRun).where(PredictedCommentRun.id.in_(predicted_run_ids)))
+    if check_run_ids:
+        db.execute(delete(SkillSourceSnapshot).where(SkillSourceSnapshot.analysis_check_run_id.in_(check_run_ids)))
+        db.execute(delete(AnalysisCheckStep).where(AnalysisCheckStep.check_run_id.in_(check_run_ids)))
+        db.execute(delete(AnalysisCheckRun).where(AnalysisCheckRun.id.in_(check_run_ids)))
+
+    db.execute(delete(SkillSourceSnapshot).where(SkillSourceSnapshot.analysis_id == analysis.id))
+    db.execute(delete(AnalysisDetailRun).where(AnalysisDetailRun.analysis_id == analysis.id))
+
+    previous_status = analysis.status
+    has_feedback = db.execute(select(Feedback.id).where(Feedback.analysis_id == analysis.id).limit(1)).first() is not None
+    analysis.deleted_at = deleted_at
+    if has_feedback:
+        analysis.run_parameters = {
+            **(analysis.run_parameters or {}),
+            "deleted_at": deleted_at.isoformat(),
+            "deleted_by_user_id": str(actor.id),
+            "deleted_result_trace_preserved_for_feedback": True,
+        }
+    else:
+        analysis.verdict = None
+        analysis.summary = None
+        analysis.structured_output = None
+        analysis.raw_output = None
+        analysis.error_message = None
+        analysis.latency_ms = None
+        analysis.input_tokens = None
+        analysis.output_tokens = None
+        analysis.estimated_cost = None
+        analysis.run_parameters = {
+            "deleted_at": deleted_at.isoformat(),
+            "deleted_by_user_id": str(actor.id),
+        }
     record_audit(
         db=db,
         actor_id=actor.id,
@@ -210,10 +348,182 @@ def delete_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) ->
         entity_id=analysis.id,
         metadata={
             "document_id": str(analysis.document_id),
-            "previous_status": analysis.status,
+            "previous_status": previous_status,
+            "storage_paths_deleted_count": len(deleted_storage_paths),
+            "predicted_comment_runs_deleted": len(predicted_runs),
+            "analysis_detail_runs_deleted": len(detail_runs),
+            "analysis_check_runs_deleted": len(check_runs),
+            "result_trace_preserved_for_feedback": has_feedback,
         },
     )
-    db.commit()
+
+
+def _analysis_chain_has_active_runs(
+    *,
+    analysis: Analysis,
+    predicted_runs: list[PredictedCommentRun],
+    detail_runs: list[AnalysisDetailRun],
+    check_runs: list[AnalysisCheckRun],
+    check_steps: list[AnalysisCheckStep],
+) -> bool:
+    if analysis.status in ACTIVE_RUN_STATUSES:
+        return True
+    return any(run.status in ACTIVE_RUN_STATUSES for run in [*predicted_runs, *detail_runs, *check_runs, *check_steps])
+
+
+def _delete_analysis_storage_artifacts(
+    *,
+    db: Session,
+    storage: LocalDocumentStorage,
+    analysis: Analysis,
+    predicted_runs: list[PredictedCommentRun],
+    detail_runs: list[AnalysisDetailRun],
+    check_runs: list[AnalysisCheckRun],
+    check_steps: list[AnalysisCheckStep],
+) -> list[str]:
+    paths: set[str] = set()
+    run_ids = [analysis.id]
+    run_ids.extend(run.id for run in predicted_runs)
+    run_ids.extend(run.id for run in detail_runs)
+    run_ids.extend(step.id for step in check_steps)
+
+    for run_id in run_ids:
+        storage.delete_rendered_prompt_dir(run_id=run_id)
+
+    storage.delete_ic_review_analysis_dir(analysis_id=analysis.id)
+
+    check_runs_by_id = {run.id: run for run in check_runs}
+    for run in check_runs:
+        paths.update(
+            _safe_ic_review_artifact_paths(
+                storage=storage,
+                analysis_id=analysis.id,
+                run_id=run.id,
+                raw_paths=[
+                    *_artifact_paths_from_items(run.artifacts),
+                    *_artifact_paths_from_metadata(run.uploaded_workbook_metadata),
+                ],
+            )
+        )
+    for step in check_steps:
+        check_run = check_runs_by_id.get(step.check_run_id)
+        if check_run is None:
+            continue
+        step_paths: set[str] = set()
+        if step.prompt_artifact_path:
+            step_paths.add(step.prompt_artifact_path)
+        step_paths.update(_artifact_paths_from_items(step.artifacts))
+        paths.update(
+            _safe_ic_review_artifact_paths(
+                storage=storage,
+                analysis_id=analysis.id,
+                run_id=check_run.id,
+                raw_paths=step_paths,
+            )
+        )
+
+    predicted_run_ids = [run.id for run in predicted_runs]
+    check_run_ids = [run.id for run in check_runs]
+    snapshot_rows = list(
+        db.execute(select(SkillSourceSnapshot).where(SkillSourceSnapshot.analysis_id == analysis.id)).scalars().all()
+    )
+    if predicted_run_ids:
+        snapshot_rows.extend(
+            db.execute(
+                select(SkillSourceSnapshot).where(SkillSourceSnapshot.predicted_comment_run_id.in_(predicted_run_ids))
+            )
+            .scalars()
+            .all()
+        )
+    if check_run_ids:
+        snapshot_rows.extend(
+            db.execute(
+                select(SkillSourceSnapshot).where(SkillSourceSnapshot.analysis_check_run_id.in_(check_run_ids))
+            )
+            .scalars()
+            .all()
+        )
+    for snapshot in snapshot_rows:
+        paths.add(snapshot.artifact_path)
+    if predicted_run_ids:
+        for snapshot in db.execute(
+            select(RetrievalSnapshot).where(RetrievalSnapshot.predicted_comment_run_id.in_(predicted_run_ids))
+        ).scalars():
+            paths.add(snapshot.artifact_path)
+
+    deleted_paths: list[str] = []
+    for path in sorted(paths):
+        try:
+            storage.delete_stored_path(path)
+        except (FileNotFoundError, ValueError):
+            continue
+        deleted_paths.append(path)
+    return deleted_paths
+
+
+def _artifact_paths_from_parameters(parameters: dict | None) -> set[str]:
+    if not isinstance(parameters, dict):
+        return set()
+    paths: set[str] = set()
+    for key in (
+        "rendered_prompt_artifact_path",
+        "source_snapshot_artifact_path",
+        "retrieval_snapshot_artifact_path",
+        "context_pack_artifact_path",
+        "synthesis_prompt_artifact_path",
+        "prompt_artifact_path",
+        "artifact_path",
+    ):
+        value = parameters.get(key)
+        if isinstance(value, str) and value:
+            paths.add(value)
+    for key in ("skill_source_snapshot", "retrieval_snapshot"):
+        value = parameters.get(key)
+        if isinstance(value, dict):
+            paths.update(_artifact_paths_from_parameters(value))
+    return paths
+
+
+def _artifact_paths_from_items(items: list | None) -> set[str]:
+    if not isinstance(items, list):
+        return set()
+    paths: set[str] = set()
+    for item in items:
+        if isinstance(item, dict):
+            paths.update(_artifact_paths_from_parameters(item))
+            value = item.get("path")
+            if isinstance(value, str) and value:
+                paths.add(value)
+    return paths
+
+
+def _artifact_paths_from_metadata(metadata: dict | None) -> set[str]:
+    if not isinstance(metadata, dict):
+        return set()
+    paths = _artifact_paths_from_parameters(metadata)
+    value = metadata.get("storage_path")
+    if isinstance(value, str) and value:
+        paths.add(value)
+    return paths
+
+
+def _safe_ic_review_artifact_paths(
+    *,
+    storage: LocalDocumentStorage,
+    analysis_id: UUID,
+    run_id: UUID,
+    raw_paths: set[str] | list[str],
+) -> set[str]:
+    run_dir = storage.ic_review_run_dir(analysis_id=analysis_id, run_id=run_id)
+    paths: set[str] = set()
+    for raw_path in raw_paths:
+        try:
+            path = storage.stored_path(raw_path)
+        except ValueError:
+            continue
+        if path.is_relative_to(run_dir):
+            paths.add(str(path))
+    return paths
 
 
 def cancel_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) -> Analysis:
