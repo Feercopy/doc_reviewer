@@ -92,6 +92,7 @@ def create_analysis_for_document(
         raise AnalysisPreconditionError("Hermes provider is disabled")
 
     merged_parameters = dict(run_parameters)
+    merged_parameters.setdefault("output_language", "ru")
     merged_parameters["document_type"] = document_type
     merged_parameters["skill_source_snapshot"] = skill_source_snapshot(skill)
     if not parse_completed:

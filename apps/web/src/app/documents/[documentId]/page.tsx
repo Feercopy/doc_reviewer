@@ -384,7 +384,7 @@ export default function DocumentDetailPage() {
   const [provider, setProvider] = useState<Provider>("openai_compatible");
   const [model, setModel] = useState("");
   const [modelEdited, setModelEdited] = useState(false);
-  const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>("en");
+  const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>("ru");
   const [copiedParsed, setCopiedParsed] = useState(false);
   const [titleEditing, setTitleEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");

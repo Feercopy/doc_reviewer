@@ -21,6 +21,10 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Default new product and financial analysis output to Russian: document
+  upload, manual Gate Challenger relaunch, manual IC Review relaunch, and API
+  analysis creation now use `output_language=ru` unless the user explicitly
+  selects or sends `en`. Added focused API and frontend regression checks.
 - [x] Optimize the Documents page initial status load for slow networks:
   `/documents` now embeds each case's latest analysis summary, so the main
   table can render completed/failed/running statuses on the first response

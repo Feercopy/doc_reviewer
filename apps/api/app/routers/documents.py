@@ -55,7 +55,7 @@ def create_document(
     manual_document_type: Annotated[DocumentType | None, Form()] = None,
     analysis_provider: Annotated[Provider | None, Form()] = None,
     analysis_model: Annotated[str | None, Form()] = None,
-    analysis_output_language: Annotated[Literal["ru", "en"], Form()] = "en",
+    analysis_output_language: Annotated[Literal["ru", "en"], Form()] = "ru",
     db: Session = Depends(get_db),
     current_user: User = Depends(require_current_user),
     storage: LocalDocumentStorage = Depends(get_document_storage),

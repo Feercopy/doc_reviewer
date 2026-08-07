@@ -8,6 +8,7 @@ describe("documents upload start analysis flow", () => {
   it("persists the analysis request with the upload and leaves parsing to the worker", () => {
     const pageSource = source();
 
+    expect(pageSource).toContain('const defaultOutputLanguage: OutputLanguage = "ru";');
     expect(pageSource).toContain('form.set("analysis_provider", analysisConfig.provider)');
     expect(pageSource).toContain('form.set("analysis_model", analysisConfig.model)');
     expect(pageSource).toContain('form.set("analysis_output_language", defaultOutputLanguage)');

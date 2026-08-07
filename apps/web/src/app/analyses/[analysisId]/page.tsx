@@ -118,7 +118,7 @@ export default function AnalysisDetailPage() {
   const [icReviewProvider, setIcReviewProvider] = useState<Provider>("openai_compatible");
   const [icReviewModel, setIcReviewModel] = useState("");
   const [icReviewModelEdited, setIcReviewModelEdited] = useState(false);
-  const [icReviewOutputLanguage, setIcReviewOutputLanguage] = useState<OutputLanguage>("en");
+  const [icReviewOutputLanguage, setIcReviewOutputLanguage] = useState<OutputLanguage>("ru");
   const [icReviewWorkbook, setIcReviewWorkbook] = useState<File | null>(null);
   const [icReviewWorkbookInputKey, setIcReviewWorkbookInputKey] = useState(0);
   const [icReviewWorkbookError, setIcReviewWorkbookError] = useState("");

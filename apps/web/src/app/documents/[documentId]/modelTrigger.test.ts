@@ -32,6 +32,7 @@ describe("document detail analysis controls", () => {
     expect(historyPanelSource).toContain('className="gc-analysis-toolbar"');
     expect(historyPanelSource).toContain('aria-label="Model"');
     expect(historyPanelSource).toContain('aria-label="Output language"');
+    expect(source).toContain('useState<OutputLanguage>("ru")');
     expect(historyPanelSource).toContain("▷ Start analysis");
     expect(historyPanelSource).toContain("changeModel");
     expect(source).not.toContain("gc-analysis-launch");

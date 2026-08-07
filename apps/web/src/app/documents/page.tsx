@@ -31,7 +31,7 @@ const supportedExtensions = [".docx", ".pdf", ".md", ".txt"];
 type UploadSlot = "primary" | "finSummary";
 type UploadStep = "uploading" | "parsing" | "starting_analysis";
 
-const defaultOutputLanguage: OutputLanguage = "en";
+const defaultOutputLanguage: OutputLanguage = "ru";
 
 const parseFilters: { label: string; value: ParseFilter }[] = [
   { label: "All", value: "all" },

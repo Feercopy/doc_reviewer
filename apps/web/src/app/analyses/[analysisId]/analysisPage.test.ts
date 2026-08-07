@@ -232,6 +232,7 @@ describe("analysis result page", () => {
     expect(pageSource).toContain("getProviderDefaultModel");
     expect(pageSource).toContain("type ProviderModelOptions");
     expect(pageSource).toContain("createIcReviewRun");
+    expect(pageSource).toContain('useState<OutputLanguage>("ru")');
     expect(pageSource).toContain("financial_model: icReviewWorkbook");
     expect(pageSource).toContain("icReviewWorkbookInputKey");
     expect(pageSource).toContain("key={workbookInputKey}");

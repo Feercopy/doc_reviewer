@@ -102,6 +102,7 @@ def test_create_analysis_queues_default_gate2_skill_with_snapshot(client, db_ses
         analysis = db_session.get(Analysis, UUID(payload["id"]))
         assert analysis.status == RunStatus.QUEUED.value
         assert analysis.model == "openai/gpt-5.5"
+        assert analysis.run_parameters["output_language"] == "ru"
         assert analysis.run_parameters["skill_source_snapshot"]["name"] == "gate2_challenger_main_analysis"
         source_snapshot_id = UUID(analysis.run_parameters["source_snapshot_id"])
         source_snapshot = db_session.get(SkillSourceSnapshot, source_snapshot_id)
