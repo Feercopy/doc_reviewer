@@ -7,7 +7,14 @@ from app.db.session import get_db
 from app.dependencies.auth import require_current_user
 from app.models.analysis import Analysis
 from app.models.user import User
-from app.schemas.analyses import AnalysesListResponse, AnalysisCreate, AnalysisDetailRunRead, AnalysisRead
+from app.schemas.analyses import (
+    AnalysesListResponse,
+    AnalysisCreate,
+    AnalysisDetailRunRead,
+    AnalysisRead,
+    AnalysisStatusesListResponse,
+    AnalysisStatusRead,
+)
 from app.services.analyses import (
     AnalysisNotFoundError,
     AnalysisPreconditionError,
@@ -15,8 +22,10 @@ from app.services.analyses import (
     create_analysis_for_document,
     delete_document_analysis_results_for_actor,
     delete_analysis_for_actor,
+    get_analysis_status_for_actor,
     get_latest_analysis_detail_run_for_actor,
     get_analysis_for_actor,
+    list_document_analysis_statuses_for_actor,
     list_document_analyses_for_actor,
     read_analysis,
     read_analysis_detail_run,
@@ -82,6 +91,23 @@ def list_document_analyses(
     return AnalysesListResponse(analyses=[read_analysis(db=db, actor=current_user, analysis=item) for item in analyses])
 
 
+@router.get("/documents/{document_id}/analyses/statuses", response_model=AnalysisStatusesListResponse)
+def list_document_analysis_statuses(
+    document_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> AnalysisStatusesListResponse:
+    try:
+        analyses = list_document_analysis_statuses_for_actor(
+            db=db,
+            actor=current_user,
+            document_id=document_id,
+        )
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found") from exc
+    return AnalysisStatusesListResponse(analyses=analyses)
+
+
 @router.get("/analyses/{analysis_id}", response_model=AnalysisRead)
 def get_analysis(
     analysis_id: UUID,
@@ -93,6 +119,18 @@ def get_analysis(
     except AnalysisNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
     return read_analysis(db=db, actor=current_user, analysis=analysis)
+
+
+@router.get("/analyses/{analysis_id}/status", response_model=AnalysisStatusRead)
+def get_analysis_status(
+    analysis_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> AnalysisStatusRead:
+    try:
+        return get_analysis_status_for_actor(db=db, actor=current_user, analysis_id=analysis_id)
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
 
 
 @router.delete("/analyses/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT)

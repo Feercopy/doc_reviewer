@@ -55,10 +55,14 @@ describe("document detail analysis controls", () => {
     expect(source).toContain("Stop Analysis");
     expect(source).toContain("cancelAnalysisChain");
     expect(source).toContain("isAnalysisChainCancelled");
-    expect(source).toContain("analysis_chain_cancel_requested_at");
+    expect(source).toContain("analysis.chain_cancel_requested");
     expect(source).toContain("Analysis stopped after Gate Challenger");
     expect(source).toContain("The completed result will appear here after Gate Challenger, Devils Advocate, and IC Review finish.");
-    expect(source).toContain("await refresh();");
+    expect(source).toContain("await refreshProgress();");
+    expect(source).toContain("getDocumentProgress");
+    expect(source).toContain("listAnalysisStatuses");
+    expect(source).not.toContain("listAnalyses(documentId)");
+    expect(source).not.toContain("window.setInterval");
     expect(source).not.toContain("window.location.href = appPath(`/analyses/${analysis.id}`)");
   });
 

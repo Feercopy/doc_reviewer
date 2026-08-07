@@ -11,13 +11,19 @@ from app.dependencies.auth import require_current_user
 from app.models.analysis import Analysis
 from app.models.document import Document
 from app.models.user import User
-from app.schemas.documents import DocumentRead, DocumentTitlePatch, DocumentTypePatch, DocumentsListResponse
+from app.schemas.documents import (
+    DocumentProgressRead,
+    DocumentRead,
+    DocumentTitlePatch,
+    DocumentTypePatch,
+    DocumentsListResponse,
+)
 from app.schemas.enums import DocumentParseStatus, DocumentType, Provider, RunStatus
 from app.services.analyses import (
     AnalysisPreconditionError,
     create_analysis_for_document,
-    latest_document_analyses_for_actor,
-    read_analysis,
+    latest_document_analysis_statuses_for_actor,
+    list_document_analysis_statuses_for_actor,
 )
 from app.services.document_jobs import ParseDocumentEnqueue, enqueue_parse_document
 from app.services.documents import (
@@ -144,7 +150,7 @@ def list_documents(
     current_user: User = Depends(require_current_user),
 ) -> DocumentsListResponse:
     documents = list_documents_for_actor(db=db, actor=current_user)
-    latest_analyses = latest_document_analyses_for_actor(
+    latest_analyses = latest_document_analysis_statuses_for_actor(
         db=db,
         actor=current_user,
         document_ids=[document.id for document in documents],
@@ -153,15 +159,40 @@ def list_documents(
         documents=[
             DocumentRead.model_validate(document).model_copy(
                 update={
-                    "latest_analysis": (
-                        read_analysis(db=db, actor=current_user, analysis=latest_analysis)
-                        if (latest_analysis := latest_analyses.get(document.id))
-                        else None
-                    )
+                    "latest_analysis": latest_analyses.get(document.id)
                 }
             )
             for document in documents
         ]
+    )
+
+
+@router.get("/{document_id}/progress", response_model=DocumentProgressRead)
+def get_document_progress(
+    document_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> DocumentProgressRead:
+    try:
+        document = get_document_for_actor(db=db, actor=current_user, document_id=document_id)
+        analyses = list_document_analysis_statuses_for_actor(
+            db=db,
+            actor=current_user,
+            document_id=document.id,
+        )
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found") from exc
+
+    return DocumentProgressRead(
+        id=document.id,
+        parse_status=document.parse_status,
+        parse_error=document.parse_error,
+        detected_document_type=document.detected_document_type,
+        document_type_confidence=document.document_type_confidence,
+        document_type_explanation=document.document_type_explanation,
+        manual_document_type=document.manual_document_type,
+        updated_at=document.updated_at,
+        analyses=analyses,
     )
 
 

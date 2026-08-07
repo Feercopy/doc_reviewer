@@ -36,6 +36,54 @@ class RetrievalTrace(BaseModel):
     rendered_prompt_artifact_path: str | None = None
 
 
+class RunStatusSummaryRead(BaseModel):
+    id: UUID
+    status: RunStatus
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
+class AnalysisCheckStepStatusRead(BaseModel):
+    id: UUID
+    step_name: str
+    status: RunStatus
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
+class AnalysisCheckRunStatusRead(RunStatusSummaryRead):
+    current_stage: str | None
+    steps: list[AnalysisCheckStepStatusRead] = Field(default_factory=list)
+
+
+class AnalysisStatusRead(BaseModel):
+    id: UUID
+    document_id: UUID
+    skill_name: str
+    skill_version: str
+    provider: Provider
+    model: str
+    status: RunStatus
+    verdict: str | None
+    error_message: str | None
+    chain_cancel_requested: bool = False
+    source_trace: SourceTrace | None = None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    predicted_comment_run: RunStatusSummaryRead | None = None
+    detail_run: RunStatusSummaryRead | None = None
+    ic_review_run: AnalysisCheckRunStatusRead | None = None
+
+
+class AnalysisStatusesListResponse(BaseModel):
+    analyses: list[AnalysisStatusRead]
+
+
 class AnalysisRead(BaseModel):
     id: UUID
     document_id: UUID

@@ -38,7 +38,7 @@ export type DocumentRecord = {
   parse_error: string | null;
   status: "active" | "archived" | "deleted";
   linked_fin_summary_document: LinkedDocumentRecord | null;
-  latest_analysis: AnalysisRecord | null;
+  latest_analysis: AnalysisStatusRecord | null;
   created_at: string;
   updated_at: string;
 };
@@ -86,6 +86,44 @@ export type AnalysisRecord = {
   predicted_comment_run: PredictedCommentRunRecord | null;
   detail_run: AnalysisDetailRunRecord | null;
   ic_review_run: AnalysisCheckRunRecord | null;
+};
+
+export type RunStatusSummaryRecord = {
+  id: string;
+  status: RunStatus;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+};
+
+export type AnalysisCheckStepStatusRecord = RunStatusSummaryRecord & {
+  step_name: string;
+};
+
+export type AnalysisCheckRunStatusRecord = RunStatusSummaryRecord & {
+  current_stage: string | null;
+  steps: AnalysisCheckStepStatusRecord[];
+};
+
+export type AnalysisStatusRecord = {
+  id: string;
+  document_id: string;
+  skill_name: string;
+  skill_version: string;
+  provider: Provider;
+  model: string;
+  status: RunStatus;
+  verdict: string | null;
+  error_message: string | null;
+  chain_cancel_requested: boolean;
+  source_trace: SourceTrace | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  predicted_comment_run: RunStatusSummaryRecord | null;
+  detail_run: RunStatusSummaryRecord | null;
+  ic_review_run: AnalysisCheckRunStatusRecord | null;
 };
 
 export type PredictedCommentRunRecord = {
@@ -318,6 +356,24 @@ export type AnalysesListResponse = {
   analyses: AnalysisRecord[];
 };
 
+export type AnalysisStatusesListResponse = {
+  analyses: AnalysisStatusRecord[];
+};
+
+export type DocumentProgressRecord = Pick<
+  DocumentRecord,
+  | "id"
+  | "parse_status"
+  | "parse_error"
+  | "detected_document_type"
+  | "document_type_confidence"
+  | "document_type_explanation"
+  | "manual_document_type"
+  | "updated_at"
+> & {
+  analyses: AnalysisStatusRecord[];
+};
+
 export type AnalysisCreatePayload = {
   provider: Provider;
   model: string;
@@ -334,6 +390,10 @@ export async function listDocuments(): Promise<DocumentsListResponse> {
 
 export async function getDocument(documentId: string): Promise<DocumentRecord> {
   return apiFetch<DocumentRecord>(`/documents/${documentId}`);
+}
+
+export async function getDocumentProgress(documentId: string): Promise<DocumentProgressRecord> {
+  return apiFetch<DocumentProgressRecord>(`/documents/${documentId}/progress`);
 }
 
 export async function uploadDocument(form: FormData): Promise<DocumentRecord> {
@@ -380,6 +440,10 @@ export async function listAnalyses(documentId: string): Promise<AnalysesListResp
   return apiFetch<AnalysesListResponse>(`/documents/${documentId}/analyses`);
 }
 
+export async function listAnalysisStatuses(documentId: string): Promise<AnalysisStatusesListResponse> {
+  return apiFetch<AnalysisStatusesListResponse>(`/documents/${documentId}/analyses/statuses`);
+}
+
 export async function createAnalysis(
   documentId: string,
   payload: AnalysisCreatePayload,
@@ -404,4 +468,8 @@ export async function deleteAnalysis(analysisId: string): Promise<void> {
 
 export async function getAnalysis(analysisId: string): Promise<AnalysisRecord> {
   return apiFetch<AnalysisRecord>(`/analyses/${analysisId}`);
+}
+
+export async function getAnalysisStatus(analysisId: string): Promise<AnalysisStatusRecord> {
+  return apiFetch<AnalysisStatusRecord>(`/analyses/${analysisId}/status`);
 }

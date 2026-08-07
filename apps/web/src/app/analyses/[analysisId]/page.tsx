@@ -10,15 +10,22 @@ import {
   createAnalysisDetails,
   deleteAnalysis,
   getAnalysis,
+  getAnalysisStatus,
   getDocument,
   getParsedText,
+  type AnalysisCheckRunStatusRecord,
+  type AnalysisCheckStepRecord,
+  type AnalysisCheckStepStatusRecord,
   type AnalysisCheckRunRecord,
+  type AnalysisDetailRunRecord,
   type AnalysisRecord,
+  type AnalysisStatusRecord,
   type DocumentRecord,
   type OutputLanguage,
   type PredictedCommentRunRecord,
   type Provider,
   type RetrievalTrace,
+  type RunStatusSummaryRecord,
   type SourceTrace,
 } from "@/lib/api/documents";
 import { submitFeedback } from "@/lib/api/feedback";
@@ -94,6 +101,7 @@ const feedbackRatings = [
 ] as const;
 
 const ANALYSIS_POLL_INTERVAL_MS = 5000;
+const ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY = "analysis_chain_cancel_requested_at";
 
 type FeedbackRating = (typeof feedbackRatings)[number]["value"];
 
@@ -177,30 +185,53 @@ export default function AnalysisDetailPage() {
       return;
     }
 
-    let ignore = false;
+    let cancelled = false;
+    let timer: number | undefined;
     async function refreshAnalysis() {
+      if (document.visibilityState !== "visible") {
+        if (!cancelled) {
+          timer = window.setTimeout(refreshAnalysis, ANALYSIS_POLL_INTERVAL_MS);
+        }
+        return;
+      }
+
       setIsRefreshingAnalysis(true);
+      let shouldContinue = true;
       try {
-        const refreshedAnalysis = await getAnalysis(params.analysisId);
-        if (!ignore) {
-          setAnalysis(refreshedAnalysis);
-          setError("");
+        const status = await getAnalysisStatus(params.analysisId);
+        if (isAnalysisRefreshPending(status)) {
+          if (!cancelled) {
+            setAnalysis((current) => (current ? mergeAnalysisStatus(current, status) : current));
+            setError("");
+          }
+        } else {
+          shouldContinue = false;
+          const refreshedAnalysis = await getAnalysis(params.analysisId);
+          if (!cancelled) {
+            setAnalysis(refreshedAnalysis);
+            setError("");
+          }
         }
       } catch (err) {
-        if (!ignore) {
+        if (!cancelled) {
           setError(err instanceof Error ? err.message : "Failed to refresh analysis");
         }
       } finally {
-        if (!ignore) {
+        if (!cancelled) {
           setIsRefreshingAnalysis(false);
+          if (shouldContinue) {
+            timer = window.setTimeout(refreshAnalysis, ANALYSIS_POLL_INTERVAL_MS);
+          }
         }
       }
     }
 
-    const intervalId = window.setInterval(refreshAnalysis, ANALYSIS_POLL_INTERVAL_MS);
+    timer = window.setTimeout(refreshAnalysis, ANALYSIS_POLL_INTERVAL_MS);
     return () => {
-      ignore = true;
-      window.clearInterval(intervalId);
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
     };
   }, [
     analysis?.status,
@@ -233,6 +264,24 @@ export default function AnalysisDetailPage() {
           setAnalysisDocument(null);
         }
       });
+
+    return () => {
+      ignore = true;
+    };
+  }, [analysis?.document_id]);
+
+  useEffect(() => {
+    if (
+      activeTopTab !== "fullReport" ||
+      activeFullReportTab !== "documentComments" ||
+      !analysis?.document_id ||
+      parsedDocumentText !== null ||
+      parsedDocumentError
+    ) {
+      return;
+    }
+
+    let ignore = false;
     getParsedText(analysis.document_id)
       .then((text) => {
         if (!ignore) {
@@ -248,7 +297,7 @@ export default function AnalysisDetailPage() {
     return () => {
       ignore = true;
     };
-  }, [analysis?.document_id]);
+  }, [activeFullReportTab, activeTopTab, analysis?.document_id, parsedDocumentError, parsedDocumentText]);
 
   const configuredProviderModels = useMemo(() => providerModels.filter((item) => item.has_key), [providerModels]);
   const selectedProviderModel = useMemo(
@@ -2421,14 +2470,176 @@ function formatNumber(value: number | null): string {
   return value === null ? "-" : new Intl.NumberFormat("en").format(value);
 }
 
-function isAnalysisRefreshPending(analysis: AnalysisRecord | null): boolean {
-  return Boolean(
-    analysis &&
-      (isActiveRunStatus(analysis.status) ||
-        isActiveRunStatus(analysis.predicted_comment_run?.status) ||
-        isActiveRunStatus(analysis.detail_run?.status) ||
-        isActiveRunStatus(analysis.ic_review_run?.status)),
+function mergeAnalysisStatus(analysis: AnalysisRecord, status: AnalysisStatusRecord): AnalysisRecord {
+  return {
+    ...analysis,
+    status: status.status,
+    verdict: status.verdict,
+    error_message: status.error_message,
+    source_trace: status.source_trace,
+    created_at: status.created_at,
+    started_at: status.started_at,
+    completed_at: status.completed_at,
+    predicted_comment_run: mergePredictedCommentStatus(
+      analysis.predicted_comment_run,
+      status.predicted_comment_run,
+      status,
+    ),
+    detail_run: mergeDetailRunStatus(analysis.detail_run, status.detail_run, status),
+    ic_review_run: mergeIcReviewStatus(analysis.ic_review_run, status.ic_review_run, status),
+  };
+}
+
+function mergePredictedCommentStatus(
+  current: PredictedCommentRunRecord | null,
+  summary: RunStatusSummaryRecord | null,
+  analysis: AnalysisStatusRecord,
+): PredictedCommentRunRecord | null {
+  if (!summary) {
+    return null;
+  }
+  if (current?.id === summary.id) {
+    return { ...current, ...summary };
+  }
+  return {
+    ...summary,
+    analysis_id: analysis.id,
+    skill_id: "",
+    skill_name: "Devils Advocate",
+    skill_version: "",
+    provider: analysis.provider,
+    model: analysis.model,
+    structured_output: null,
+    raw_output: null,
+    latency_ms: null,
+    input_tokens: null,
+    output_tokens: null,
+    estimated_cost: null,
+    run_parameters: {},
+    source_trace: null,
+    retrieval_trace: null,
+  };
+}
+
+function mergeDetailRunStatus(
+  current: AnalysisDetailRunRecord | null,
+  summary: RunStatusSummaryRecord | null,
+  analysis: AnalysisStatusRecord,
+): AnalysisDetailRunRecord | null {
+  if (!summary) {
+    return null;
+  }
+  if (current?.id === summary.id) {
+    return { ...current, ...summary };
+  }
+  return {
+    ...summary,
+    analysis_id: analysis.id,
+    provider: analysis.provider,
+    model: analysis.model,
+    previous_response_id: null,
+    response_id: null,
+    structured_output: null,
+    raw_output: null,
+    latency_ms: null,
+    input_tokens: null,
+    output_tokens: null,
+    estimated_cost: null,
+    run_parameters: {},
+  };
+}
+
+function mergeIcReviewStatus(
+  current: AnalysisCheckRunRecord | null,
+  summary: AnalysisCheckRunStatusRecord | null,
+  analysis: AnalysisStatusRecord,
+): AnalysisCheckRunRecord | null {
+  if (!summary) {
+    return null;
+  }
+  const currentSteps = new Map((current?.steps ?? []).map((step) => [step.id, step]));
+  const steps = summary.steps.map((step) => mergeIcReviewStep(currentSteps.get(step.id), step, summary.id));
+  if (current?.id === summary.id) {
+    return { ...current, ...summary, steps };
+  }
+  return {
+    ...summary,
+    analysis_id: analysis.id,
+    skill_id: "",
+    skill_name: "IC Review",
+    skill_version: "",
+    check_type: "ic_agentic_review",
+    provider: analysis.provider,
+    model: analysis.model,
+    structured_output: null,
+    legacy_output: null,
+    raw_output: null,
+    latency_ms: null,
+    input_tokens: null,
+    output_tokens: null,
+    estimated_cost: null,
+    run_parameters: {},
+    uploaded_workbook_metadata: {},
+    artifacts: [],
+    source_trace: null,
+    steps,
+  };
+}
+
+function mergeIcReviewStep(
+  current: AnalysisCheckStepRecord | undefined,
+  summary: AnalysisCheckStepStatusRecord,
+  checkRunId: string,
+): AnalysisCheckStepRecord {
+  if (current) {
+    return { ...current, ...summary };
+  }
+  return {
+    ...summary,
+    check_run_id: checkRunId,
+    step_type: "role",
+    prompt_fingerprint: null,
+    prompt_artifact_path: null,
+    raw_output: null,
+    structured_output: null,
+    latency_ms: null,
+    input_tokens: null,
+    output_tokens: null,
+    estimated_cost: null,
+    artifacts: [],
+  };
+}
+
+function isAnalysisRefreshPending(analysis: AnalysisRecord | AnalysisStatusRecord | null): boolean {
+  if (!analysis) {
+    return false;
+  }
+  if (isActiveRunStatus(analysis.detail_run?.status)) {
+    return true;
+  }
+  if (
+    isAnalysisChainCancelRequested(analysis) ||
+    analysis.status === "failed" ||
+    analysis.status === "cancelled" ||
+    analysis.predicted_comment_run?.status === "failed" ||
+    analysis.predicted_comment_run?.status === "cancelled" ||
+    analysis.ic_review_run?.status === "failed" ||
+    analysis.ic_review_run?.status === "cancelled"
+  ) {
+    return false;
+  }
+  return !(
+    analysis.status === "completed" &&
+    (!analysis.predicted_comment_run || analysis.predicted_comment_run.status === "completed") &&
+    analysis.ic_review_run?.status === "completed"
   );
+}
+
+function isAnalysisChainCancelRequested(analysis: AnalysisRecord | AnalysisStatusRecord): boolean {
+  if ("chain_cancel_requested" in analysis) {
+    return analysis.chain_cancel_requested;
+  }
+  return typeof analysis.run_parameters[ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY] === "string";
 }
 
 function shouldShowAnalysisWaitingPanel(analysis: AnalysisRecord | null): boolean {

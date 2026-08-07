@@ -22,6 +22,7 @@ from app.schemas.enums import DocumentParseStatus, DocumentType, EntityStatus, P
 from app.security.secrets import encrypt_secret
 from ic_review.renderer import ROLE_ORDER
 from ic_review.script_runner import ScriptPipelineResult, ScriptResult
+from jobs import orphaned_ic_review_runs
 from jobs.orphaned_ic_review_runs import mark_abandoned_ic_review_runs
 from jobs import run_ic_agentic_review as job
 from jobs.run_ic_agentic_review import run_ic_agentic_review
@@ -293,14 +294,48 @@ def test_synthesis_run_parameters_add_provider_timeouts_and_preserve_overrides()
         {"timeout_seconds": 240, "connect_timeout_seconds": 20, "max_retries": 1}
     )
 
-    assert defaulted["timeout_seconds"] == 600
+    assert defaulted["timeout_seconds"] == 300
     assert defaulted["connect_timeout_seconds"] == 30
-    assert defaulted["max_retries"] == 3
+    assert defaulted["max_retries"] == 0
     assert defaulted["max_output_tokens"] == 12000
     assert defaulted["ic_review_step"] == "synthesis"
     assert overridden["timeout_seconds"] == 240
     assert overridden["connect_timeout_seconds"] == 20
     assert overridden["max_retries"] == 1
+
+
+def test_active_ic_review_runs_only_include_jobs_owned_by_busy_workers(monkeypatch):
+    active_run_id = uuid4()
+    stale_run_id = uuid4()
+
+    class JobStub:
+        func_name = "jobs.run_ic_agentic_review.run_ic_agentic_review"
+
+        def __init__(self, run_id):
+            self.args = (str(run_id),)
+
+    class WorkerStub:
+        def __init__(self, state, job):
+            self._state = state
+            self._job = job
+
+        def get_state(self):
+            return self._state
+
+        def get_current_job(self):
+            return self._job
+
+    monkeypatch.setattr(
+        orphaned_ic_review_runs.Worker,
+        "all",
+        lambda connection: [
+            WorkerStub("busy", JobStub(active_run_id)),
+            WorkerStub("idle", JobStub(stale_run_id)),
+            WorkerStub("busy", None),
+        ],
+    )
+
+    assert orphaned_ic_review_runs._active_ic_review_run_ids(connection=object()) == {active_run_id}
 
 
 def test_provider_failure_after_role_three_preserves_first_three_raw_outputs_and_marks_failed(tmp_path, monkeypatch):

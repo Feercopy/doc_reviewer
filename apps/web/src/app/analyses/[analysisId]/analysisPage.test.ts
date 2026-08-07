@@ -221,8 +221,11 @@ describe("analysis result page", () => {
     expect(activeStatusSource).toContain("analysis.predicted_comment_run?.status");
     expect(activeStatusSource).toContain("analysis.detail_run?.status");
     expect(activeStatusSource).not.toContain("analysis.ic_review_run?.status");
-    expect(pageSource).toContain("window.setInterval(refreshAnalysis, ANALYSIS_POLL_INTERVAL_MS)");
-    expect(pageSource).toContain("window.clearInterval(intervalId)");
+    expect(pageSource).toContain("getAnalysisStatus(params.analysisId)");
+    expect(pageSource).toContain("mergeAnalysisStatus");
+    expect(pageSource).toContain("window.setTimeout(refreshAnalysis, ANALYSIS_POLL_INTERVAL_MS)");
+    expect(pageSource).toContain("window.clearTimeout(timer)");
+    expect(pageSource).not.toContain("window.setInterval");
   });
 
   it("wires IC review launch to configured provider models and optional xlsx upload", () => {
