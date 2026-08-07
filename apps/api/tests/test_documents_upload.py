@@ -16,7 +16,7 @@ from app.models.provider_key import ProviderKey
 from app.models.skill import Skill
 from app.routers import documents as documents_router
 from app.models.user import User
-from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus, Provider, Role, UserStatus
+from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus, Provider, Role, RunStatus, UserStatus
 from app.security.passwords import hash_password
 from app.security.secrets import encrypt_secret
 from app.seeds.skills import seed_baseline_skills
@@ -173,6 +173,57 @@ def test_upload_persists_deferred_analysis_before_parser_runs(api_client, db_ses
         "state": "waiting",
     }
     assert enqueued_parse_jobs == [str(document_id)]
+
+
+def test_documents_list_embeds_latest_analysis_status(api_client, db_session):
+    author = create_user(db_session, "author", "secret")
+    skill = seed_baseline_skills(db_session)[0]
+    login(api_client, "author", "secret")
+    upload = upload_document(api_client, "gate-2.txt", b"Gate 2 MVP metrics")
+    document_id = UUID(upload.json()["id"])
+
+    completed = Analysis(
+        document_id=document_id,
+        user_id=author.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="approve",
+        summary="Older completed analysis",
+        structured_output={"summary": "Older completed analysis"},
+        raw_output="raw secret output",
+        run_parameters={},
+    )
+    db_session.add(completed)
+    db_session.commit()
+
+    queued = Analysis(
+        document_id=document_id,
+        user_id=author.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.QUEUED.value,
+        verdict=None,
+        summary=None,
+        structured_output=None,
+        raw_output="raw queued output",
+        run_parameters={},
+    )
+    db_session.add(queued)
+    db_session.commit()
+
+    response = api_client.get("/documents")
+
+    assert response.status_code == 200
+    document = response.json()["documents"][0]
+    assert document["id"] == str(document_id)
+    assert document["latest_analysis"]["id"] == str(queued.id)
+    assert document["latest_analysis"]["status"] == RunStatus.QUEUED.value
+    assert document["latest_analysis"]["raw_output"] is None
 
 
 def test_upload_rejects_partial_analysis_config_before_storing_document(api_client, db_session, storage_root):

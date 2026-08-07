@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -206,6 +206,38 @@ def list_document_analyses_for_actor(*, db: Session, actor: User, document_id: U
         .order_by(Analysis.created_at.desc())
     )
     return list(db.execute(statement).scalars().all())
+
+
+def latest_document_analyses_for_actor(
+    *,
+    db: Session,
+    actor: User,
+    document_ids: list[UUID],
+) -> dict[UUID, Analysis]:
+    if not document_ids:
+        return {}
+
+    statement = (
+        select(Analysis)
+        .where(
+            Analysis.document_id.in_(document_ids),
+            Analysis.deleted_at.is_(None),
+        )
+        .order_by(
+            Analysis.document_id,
+            func.coalesce(Analysis.completed_at, Analysis.created_at).desc(),
+            Analysis.created_at.desc(),
+        )
+    )
+    latest_by_document_id: dict[UUID, Analysis] = {}
+    for analysis in db.execute(statement).scalars().all():
+        if analysis.document_id in latest_by_document_id:
+            continue
+        document = db.get(Document, analysis.document_id)
+        if document is None or not can_read_analysis(actor, analysis, document):
+            continue
+        latest_by_document_id[analysis.document_id] = analysis
+    return latest_by_document_id
 
 
 def delete_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) -> None:

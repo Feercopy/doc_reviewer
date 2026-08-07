@@ -38,6 +38,7 @@ export type DocumentRecord = {
   parse_error: string | null;
   status: "active" | "archived" | "deleted";
   linked_fin_summary_document: LinkedDocumentRecord | null;
+  latest_analysis: AnalysisRecord | null;
   created_at: string;
   updated_at: string;
 };

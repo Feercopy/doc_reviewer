@@ -24,7 +24,11 @@ describe("documents upload start analysis flow", () => {
     expect(pageSource).toContain('return { label: "Workbook attached", tone: "good" };');
     expect(pageSource).toContain("function isFullAnalysisComplete");
     expect(pageSource).toContain("function isDevilsAdvocateCompleteOrSkipped");
-    expect(pageSource).toContain("function getLatestCaseAnalysis");
+    expect(pageSource).toContain("function latestAnalysesByDocumentId");
+    expect(pageSource).toContain("document.latest_analysis ?? current[document.id]");
+    expect(pageSource).not.toContain("listAnalyses(document.id)");
+    expect(pageSource).not.toContain("Loading documents...");
+    expect(pageSource).toContain("Refreshing documents...");
     expect(pageSource).toContain("function getAnalysisStatusSignal");
     expect(pageSource).toContain("const filteredCases = useMemo");
     expect(pageSource).toContain("const caseDocuments = documents");

@@ -21,6 +21,18 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Optimize the Documents page initial status load for slow networks:
+  `/documents` now embeds each case's latest analysis summary, so the main
+  table can render completed/failed/running statuses on the first response
+  instead of briefly showing every completed case as pending while per-document
+  analysis requests finish. The frontend removed the N+1
+  `listAnalyses(document.id)` refresh path, preserves known latest-analysis
+  state during background refreshes, and replaced the blocking
+  `Loading documents...` empty state with a compact non-blocking refresh badge.
+  Verified API documents tests (`24 passed`), focused Documents web tests
+  (`4 passed`), production web build, Python syntax compile, and
+  `git diff --check`; full `tsc --noEmit` still reports pre-existing test
+  fixture typing issues outside this change.
 - [x] Fix production-style analyses stuck on missing Devil's Advocate status:
   Devil's Advocate pre-defense is now seeded for `unknown` documents as well as
   explicit Gate/Stream types, so documents with weak type detection still get

@@ -14,7 +14,6 @@ import {
   USER_SELECTABLE_DOCUMENT_TYPES,
   deleteDocumentAnalyses,
   listDocuments,
-  listAnalyses,
   uploadDocument,
   type AnalysisRecord,
   type DocumentRecord,
@@ -99,17 +98,6 @@ function isFullAnalysisFailed(analysis: AnalysisRecord): boolean {
     analysis.predicted_comment_run?.status === "cancelled" ||
     analysis.ic_review_run?.status === "failed" ||
     analysis.ic_review_run?.status === "cancelled"
-  );
-}
-
-function getLatestCaseAnalysis(analyses: AnalysisRecord[]): AnalysisRecord | null {
-  return (
-    analyses
-      .sort(
-        (left, right) =>
-          new Date(right.completed_at ?? right.created_at).getTime() -
-          new Date(left.completed_at ?? left.created_at).getTime(),
-      )[0] ?? null
   );
 }
 
@@ -209,6 +197,20 @@ function getUploadProgressCopy(step: UploadStep | null): { title: string; note: 
   };
 }
 
+function latestAnalysesByDocumentId(
+  documents: DocumentRecord[],
+  current: Record<string, AnalysisRecord>,
+): Record<string, AnalysisRecord> {
+  const next: Record<string, AnalysisRecord> = {};
+  for (const document of documents) {
+    const latestAnalysis = document.latest_analysis ?? current[document.id];
+    if (latestAnalysis) {
+      next[document.id] = latestAnalysis;
+    }
+  }
+  return next;
+}
+
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [error, setError] = useState("");
@@ -227,29 +229,15 @@ export default function DocumentsPage() {
   const [draggingUpload, setDraggingUpload] = useState<UploadSlot | null>(null);
   const [providerModels, setProviderModels] = useState<ProviderModelOptions[]>([]);
   const [caseAnalysesByDocumentId, setCaseAnalysesByDocumentId] = useState<Record<string, AnalysisRecord>>({});
+  const hasLoadedDocuments = useRef(false);
   const primaryFileInputRef = useRef<HTMLInputElement | null>(null);
   const finSummaryFileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function refresh() {
     const response = await listDocuments();
     setDocuments(response.documents);
-    await refreshCaseAnalyses(response.documents);
-  }
-
-  async function refreshCaseAnalyses(nextDocuments: DocumentRecord[]) {
-    const entries = await Promise.all(
-      nextDocuments.map(async (document) => {
-        try {
-          const response = await listAnalyses(document.id);
-          const latestAnalysis = getLatestCaseAnalysis(response.analyses);
-          return latestAnalysis ? ([document.id, latestAnalysis] as const) : null;
-        } catch {
-          return null;
-        }
-      }),
-    );
-
-    setCaseAnalysesByDocumentId(Object.fromEntries(entries.filter((entry) => entry !== null)));
+    setCaseAnalysesByDocumentId((current) => latestAnalysesByDocumentId(response.documents, current));
+    hasLoadedDocuments.current = true;
   }
 
   useEffect(() => {
@@ -651,7 +639,7 @@ export default function DocumentsPage() {
         </section>
 
         <section className="gc-panel gc-table-panel">
-          {loading ? <div className="gc-empty">Loading documents...</div> : null}
+          {loading ? <div className="gc-table-refresh">Refreshing documents...</div> : null}
           {!loading && documents.length === 0 ? (
             <div className="gc-empty">
               <strong>No documents yet.</strong>
@@ -1207,9 +1195,26 @@ const documentsStyles = `
 }
 
 .gc-table-panel {
+  position: relative;
   min-width: 0;
   overflow: hidden;
   padding: 0;
+}
+
+.gc-table-refresh {
+  position: absolute;
+  right: 18px;
+  top: 14px;
+  z-index: 1;
+  border: 1px solid #d9eee5;
+  border-radius: 999px;
+  background: #f1fbf6;
+  color: #075e45;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 16px;
+  pointer-events: none;
 }
 
 .gc-table-scroll {

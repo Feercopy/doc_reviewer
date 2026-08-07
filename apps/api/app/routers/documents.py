@@ -13,7 +13,12 @@ from app.models.document import Document
 from app.models.user import User
 from app.schemas.documents import DocumentRead, DocumentTitlePatch, DocumentTypePatch, DocumentsListResponse
 from app.schemas.enums import DocumentParseStatus, DocumentType, Provider, RunStatus
-from app.services.analyses import AnalysisPreconditionError, create_analysis_for_document
+from app.services.analyses import (
+    AnalysisPreconditionError,
+    create_analysis_for_document,
+    latest_document_analyses_for_actor,
+    read_analysis,
+)
 from app.services.document_jobs import ParseDocumentEnqueue, enqueue_parse_document
 from app.services.documents import (
     DocumentNotFoundError,
@@ -138,7 +143,26 @@ def list_documents(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_current_user),
 ) -> DocumentsListResponse:
-    return DocumentsListResponse(documents=list_documents_for_actor(db=db, actor=current_user))
+    documents = list_documents_for_actor(db=db, actor=current_user)
+    latest_analyses = latest_document_analyses_for_actor(
+        db=db,
+        actor=current_user,
+        document_ids=[document.id for document in documents],
+    )
+    return DocumentsListResponse(
+        documents=[
+            DocumentRead.model_validate(document).model_copy(
+                update={
+                    "latest_analysis": (
+                        read_analysis(db=db, actor=current_user, analysis=latest_analysis)
+                        if (latest_analysis := latest_analyses.get(document.id))
+                        else None
+                    )
+                }
+            )
+            for document in documents
+        ]
+    )
 
 
 @router.get("/{document_id}", response_model=DocumentRead)
