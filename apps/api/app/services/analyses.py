@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import delete, func, select
@@ -14,7 +15,17 @@ from app.models.feedback import Feedback
 from app.models.skill import Skill
 from app.models.skill_source import RetrievalSnapshot, SkillSource, SkillSourceSnapshot
 from app.models.user import User
-from app.schemas.analyses import AnalysisDetailRunRead, AnalysisRead, PredictedCommentRunRead, RetrievalTrace, SourceTrace
+from app.schemas.analyses import (
+    AnalysisCheckRunStatusRead,
+    AnalysisCheckStepStatusRead,
+    AnalysisDetailRunRead,
+    AnalysisRead,
+    AnalysisStatusRead,
+    PredictedCommentRunRead,
+    RetrievalTrace,
+    RunStatusSummaryRead,
+    SourceTrace,
+)
 from app.schemas.enums import (
     GATE_CHALLENGER_DOCUMENT_TYPES,
     DocumentParseStatus,
@@ -56,6 +67,23 @@ class AnalysisDeletionContext:
     detail_runs: list[AnalysisDetailRun]
     check_runs: list[AnalysisCheckRun]
     check_steps: list[AnalysisCheckStep]
+
+
+@dataclass(frozen=True)
+class AnalysisStatusSource:
+    id: UUID
+    document_id: UUID
+    skill_id: UUID
+    skill_version: str
+    provider: str
+    model: str
+    status: str
+    verdict: str | None
+    error_message: str | None
+    chain_cancel_requested: bool
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
 
 
 def create_analysis_for_document(
@@ -209,6 +237,78 @@ def list_document_analyses_for_actor(*, db: Session, actor: User, document_id: U
     return list(db.execute(statement).scalars().all())
 
 
+def list_document_analysis_statuses_for_actor(
+    *,
+    db: Session,
+    actor: User,
+    document_id: UUID,
+) -> list[AnalysisStatusRead]:
+    document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
+    statement = (
+        _analysis_status_select()
+        .where(Analysis.document_id == document.id, Analysis.deleted_at.is_(None))
+        .order_by(Analysis.created_at.desc(), Analysis.id.desc())
+    )
+    sources = [_analysis_status_source(row) for row in db.execute(statement).mappings().all()]
+    return read_analysis_statuses(db=db, sources=sources)
+
+
+def get_analysis_status_for_actor(*, db: Session, actor: User, analysis_id: UUID) -> AnalysisStatusRead:
+    statement = (
+        _analysis_status_select()
+        .join(Document, Document.id == Analysis.document_id)
+        .where(
+            Analysis.id == analysis_id,
+            Analysis.deleted_at.is_(None),
+            Document.status == EntityStatus.ACTIVE.value,
+        )
+    )
+    if actor.role != "admin":
+        statement = statement.where(Document.owner_id == actor.id)
+    row = db.execute(statement).mappings().first()
+    if row is None:
+        raise AnalysisNotFoundError("Analysis not found")
+    return read_analysis_statuses(db=db, sources=[_analysis_status_source(row)])[0]
+
+
+def latest_document_analysis_statuses_for_actor(
+    *,
+    db: Session,
+    actor: User,
+    document_ids: list[UUID],
+) -> dict[UUID, AnalysisStatusRead]:
+    if not document_ids:
+        return {}
+
+    status_statement = _analysis_status_select().join(Document, Document.id == Analysis.document_id)
+    if actor.role != "admin":
+        status_statement = status_statement.where(Document.owner_id == actor.id)
+    ranked = (
+        status_statement
+        .add_columns(
+            func.row_number()
+            .over(
+                partition_by=Analysis.document_id,
+                order_by=(
+                    func.coalesce(Analysis.completed_at, Analysis.created_at).desc(),
+                    Analysis.created_at.desc(),
+                    Analysis.id.desc(),
+                ),
+            )
+            .label("status_rank")
+        )
+        .where(
+            Analysis.document_id.in_(document_ids),
+            Analysis.deleted_at.is_(None),
+        )
+        .subquery()
+    )
+    rows = db.execute(select(ranked).where(ranked.c.status_rank == 1)).mappings().all()
+    sources = [_analysis_status_source(row) for row in rows]
+    statuses = read_analysis_statuses(db=db, sources=sources)
+    return {status.document_id: status for status in statuses}
+
+
 def latest_document_analyses_for_actor(
     *,
     db: Session,
@@ -239,6 +339,238 @@ def latest_document_analyses_for_actor(
             continue
         latest_by_document_id[analysis.document_id] = analysis
     return latest_by_document_id
+
+
+def read_analysis_statuses(*, db: Session, sources: list[AnalysisStatusSource]) -> list[AnalysisStatusRead]:
+    if not sources:
+        return []
+
+    analysis_ids = [source.id for source in sources]
+    skill_ids = {source.skill_id for source in sources}
+    skill_names = {
+        skill_id: name
+        for skill_id, name in db.execute(select(Skill.id, Skill.name).where(Skill.id.in_(skill_ids))).all()
+    }
+    predicted_runs = _latest_run_status_summaries(
+        db=db,
+        model=PredictedCommentRun,
+        analysis_ids=analysis_ids,
+    )
+    detail_runs = _latest_run_status_summaries(
+        db=db,
+        model=AnalysisDetailRun,
+        analysis_ids=analysis_ids,
+    )
+    ic_review_runs = _latest_ic_review_status_summaries(db=db, analysis_ids=analysis_ids)
+    source_traces = _analysis_source_traces(db=db, analysis_ids=analysis_ids)
+
+    return [
+        AnalysisStatusRead(
+            id=source.id,
+            document_id=source.document_id,
+            skill_name=skill_names.get(source.skill_id, "unknown"),
+            skill_version=source.skill_version,
+            provider=source.provider,
+            model=source.model,
+            status=source.status,
+            verdict=source.verdict,
+            error_message=source.error_message,
+            chain_cancel_requested=source.chain_cancel_requested,
+            source_trace=source_traces.get(source.id),
+            created_at=source.created_at,
+            started_at=source.started_at,
+            completed_at=source.completed_at,
+            predicted_comment_run=predicted_runs.get(source.id),
+            detail_run=detail_runs.get(source.id),
+            ic_review_run=ic_review_runs.get(source.id),
+        )
+        for source in sources
+    ]
+
+
+def _analysis_status_select():
+    chain_cancel_requested = (
+        Analysis.run_parameters[ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY]
+        .as_string()
+        .is_not(None)
+        .label("chain_cancel_requested")
+    )
+    return select(
+        Analysis.id.label("id"),
+        Analysis.document_id.label("document_id"),
+        Analysis.skill_id.label("skill_id"),
+        Analysis.skill_version.label("skill_version"),
+        Analysis.provider.label("provider"),
+        Analysis.model.label("model"),
+        Analysis.status.label("status"),
+        Analysis.verdict.label("verdict"),
+        Analysis.error_message.label("error_message"),
+        chain_cancel_requested,
+        Analysis.created_at.label("created_at"),
+        Analysis.started_at.label("started_at"),
+        Analysis.completed_at.label("completed_at"),
+    )
+
+
+def _analysis_status_source(row) -> AnalysisStatusSource:
+    return AnalysisStatusSource(
+        id=row["id"],
+        document_id=row["document_id"],
+        skill_id=row["skill_id"],
+        skill_version=row["skill_version"],
+        provider=row["provider"],
+        model=row["model"],
+        status=row["status"],
+        verdict=row["verdict"],
+        error_message=row["error_message"],
+        chain_cancel_requested=bool(row["chain_cancel_requested"]),
+        created_at=row["created_at"],
+        started_at=row["started_at"],
+        completed_at=row["completed_at"],
+    )
+
+
+def _latest_run_status_summaries(*, db: Session, model, analysis_ids: list[UUID]) -> dict[UUID, RunStatusSummaryRead]:
+    ranked = (
+        select(
+            model.id.label("id"),
+            model.analysis_id.label("analysis_id"),
+            model.status.label("status"),
+            model.error_message.label("error_message"),
+            model.created_at.label("created_at"),
+            model.started_at.label("started_at"),
+            model.completed_at.label("completed_at"),
+            func.row_number()
+            .over(
+                partition_by=model.analysis_id,
+                order_by=(model.created_at.desc(), model.id.desc()),
+            )
+            .label("status_rank"),
+        )
+        .where(model.analysis_id.in_(analysis_ids))
+        .subquery()
+    )
+    latest: dict[UUID, RunStatusSummaryRead] = {}
+    for row in db.execute(select(ranked).where(ranked.c.status_rank == 1)).mappings().all():
+        analysis_id = row["analysis_id"]
+        latest[analysis_id] = RunStatusSummaryRead(
+            id=row["id"],
+            status=row["status"],
+            error_message=row["error_message"],
+            created_at=row["created_at"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
+        )
+    return latest
+
+
+def _latest_ic_review_status_summaries(
+    *,
+    db: Session,
+    analysis_ids: list[UUID],
+) -> dict[UUID, AnalysisCheckRunStatusRead]:
+    ranked = (
+        select(
+            AnalysisCheckRun.id.label("id"),
+            AnalysisCheckRun.analysis_id.label("analysis_id"),
+            AnalysisCheckRun.status.label("status"),
+            AnalysisCheckRun.current_stage.label("current_stage"),
+            AnalysisCheckRun.error_message.label("error_message"),
+            AnalysisCheckRun.created_at.label("created_at"),
+            AnalysisCheckRun.started_at.label("started_at"),
+            AnalysisCheckRun.completed_at.label("completed_at"),
+            func.row_number()
+            .over(
+                partition_by=AnalysisCheckRun.analysis_id,
+                order_by=(AnalysisCheckRun.created_at.desc(), AnalysisCheckRun.id.desc()),
+            )
+            .label("status_rank"),
+        )
+        .where(
+            AnalysisCheckRun.analysis_id.in_(analysis_ids),
+            AnalysisCheckRun.check_type == "ic_agentic_review",
+        )
+        .subquery()
+    )
+    latest_rows = {
+        row["analysis_id"]: dict(row)
+        for row in db.execute(select(ranked).where(ranked.c.status_rank == 1)).mappings().all()
+    }
+
+    run_ids = [row["id"] for row in latest_rows.values()]
+    steps_by_run_id: dict[UUID, list[AnalysisCheckStepStatusRead]] = {run_id: [] for run_id in run_ids}
+    if run_ids:
+        steps_statement = (
+            select(
+                AnalysisCheckStep.id,
+                AnalysisCheckStep.check_run_id,
+                AnalysisCheckStep.step_name,
+                AnalysisCheckStep.status,
+                AnalysisCheckStep.error_message,
+                AnalysisCheckStep.created_at,
+                AnalysisCheckStep.started_at,
+                AnalysisCheckStep.completed_at,
+            )
+            .where(AnalysisCheckStep.check_run_id.in_(run_ids))
+            .order_by(AnalysisCheckStep.created_at, AnalysisCheckStep.id)
+        )
+        for row in db.execute(steps_statement).mappings().all():
+            steps_by_run_id[row["check_run_id"]].append(
+                AnalysisCheckStepStatusRead(
+                    id=row["id"],
+                    step_name=row["step_name"],
+                    status=row["status"],
+                    error_message=row["error_message"],
+                    created_at=row["created_at"],
+                    started_at=row["started_at"],
+                    completed_at=row["completed_at"],
+                )
+            )
+
+    return {
+        analysis_id: AnalysisCheckRunStatusRead(
+            id=row["id"],
+            status=row["status"],
+            current_stage=row["current_stage"],
+            error_message=row["error_message"],
+            created_at=row["created_at"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
+            steps=steps_by_run_id.get(row["id"], []),
+        )
+        for analysis_id, row in latest_rows.items()
+    }
+
+
+def _analysis_source_traces(*, db: Session, analysis_ids: list[UUID]) -> dict[UUID, SourceTrace]:
+    statement = (
+        select(
+            SkillSourceSnapshot.id,
+            SkillSourceSnapshot.analysis_id,
+            SkillSourceSnapshot.source_slug,
+            SkillSourceSnapshot.resolved_revision,
+            SkillSourceSnapshot.source_fingerprint,
+            SkillSourceSnapshot.snapshot_mode,
+            SkillSourceSnapshot.is_dirty,
+            SkillSourceSnapshot.created_at,
+        )
+        .where(SkillSourceSnapshot.analysis_id.in_(analysis_ids))
+        .order_by(SkillSourceSnapshot.analysis_id, SkillSourceSnapshot.created_at.desc())
+    )
+    traces: dict[UUID, SourceTrace] = {}
+    for row in db.execute(statement).mappings().all():
+        analysis_id = row["analysis_id"]
+        if analysis_id in traces:
+            continue
+        traces[analysis_id] = SourceTrace(
+            source_snapshot_id=row["id"],
+            source_slug=row["source_slug"],
+            source_revision=row["resolved_revision"],
+            source_fingerprint=row["source_fingerprint"],
+            snapshot_mode=row["snapshot_mode"],
+            is_dirty=row["is_dirty"],
+        )
+    return traces
 
 
 def delete_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) -> None:

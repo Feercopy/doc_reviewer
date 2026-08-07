@@ -401,6 +401,114 @@ def test_analysis_detail_hides_raw_output_from_non_admin(client, db_session):
     assert response.json()["raw_output"] is None
 
 
+def test_compact_status_endpoints_preserve_chain_progress_without_heavy_outputs(client, db_session):
+    user = create_user(db_session, "author", "secret")
+    create_user(db_session, "other", "secret")
+    skills = seed_baseline_skills(db_session)
+    document_id = _create_completed_document(client, db_session, user)
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=user.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="need_evidence",
+        summary="Heavy summary" * 10_000,
+        structured_output={"secret": "g" * 500_000},
+        raw_output="raw gate secret" * 20_000,
+        run_parameters={"analysis_chain_cancel_requested_at": "2026-08-07T12:00:00Z"},
+    )
+    db_session.add(analysis)
+    db_session.flush()
+    predicted = PredictedCommentRun(
+        analysis_id=analysis.id,
+        skill_id=skills[1].id,
+        skill_version=skills[1].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        structured_output={"secret": "d" * 500_000},
+        raw_output="raw predicted secret" * 20_000,
+        run_parameters={},
+    )
+    detail = AnalysisDetailRun(
+        analysis_id=analysis.id,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.QUEUED.value,
+        structured_output={"secret": "l" * 500_000},
+        raw_output="raw detail secret" * 20_000,
+        run_parameters={},
+    )
+    ic_review = AnalysisCheckRun(
+        analysis_id=analysis.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        check_type="ic_agentic_review",
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.RUNNING.value,
+        current_stage="role:ic-product-analyst",
+        structured_output={"secret": "i" * 500_000},
+        raw_output="raw ic secret" * 20_000,
+        run_parameters={},
+        artifacts=[],
+        uploaded_workbook_metadata={},
+    )
+    db_session.add_all([predicted, detail, ic_review])
+    db_session.flush()
+    step = AnalysisCheckStep(
+        check_run_id=ic_review.id,
+        step_type="role",
+        step_name="ic-financial-auditor",
+        status=RunStatus.COMPLETED.value,
+        raw_output="raw step secret" * 20_000,
+        structured_output={"secret": "s" * 500_000},
+        artifacts=[],
+    )
+    db_session.add(step)
+    db_session.commit()
+    login(client, "author", "secret")
+
+    responses = [
+        client.get(f"/analyses/{analysis.id}/status"),
+        client.get(f"/documents/{document_id}/analyses/statuses"),
+        client.get(f"/documents/{document_id}/progress"),
+    ]
+
+    for response in responses:
+        assert response.status_code == 200
+        assert len(response.content) < 20_000
+        assert b"raw gate secret" not in response.content
+        assert b"structured_output" not in response.content
+
+    payload = responses[0].json()
+    assert payload["chain_cancel_requested"] is True
+    assert payload["predicted_comment_run"]["status"] == RunStatus.COMPLETED.value
+    assert payload["detail_run"]["status"] == RunStatus.QUEUED.value
+    assert payload["ic_review_run"]["status"] == RunStatus.RUNNING.value
+    assert payload["ic_review_run"]["current_stage"] == "role:ic-product-analyst"
+    assert payload["ic_review_run"]["steps"] == [
+        {
+            "id": str(step.id),
+            "step_name": "ic-financial-auditor",
+            "status": RunStatus.COMPLETED.value,
+            "error_message": None,
+            "created_at": step.created_at.isoformat(),
+            "started_at": None,
+            "completed_at": None,
+        }
+    ]
+
+    client.post("/auth/logout")
+    login(client, "other", "secret")
+    assert client.get(f"/analyses/{analysis.id}/status").status_code == 404
+    assert client.get(f"/documents/{document_id}/analyses/statuses").status_code == 404
+    assert client.get(f"/documents/{document_id}/progress").status_code == 404
+
+
 def test_document_owner_can_open_analysis_created_by_admin_for_their_document(client, db_session):
     owner = create_user(db_session, "owner", "secret")
     admin = create_user(db_session, "admin", "secret", role=Role.ADMIN)

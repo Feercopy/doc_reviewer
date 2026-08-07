@@ -5,9 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from redis import Redis
-from rq import Queue
-from rq.job import Job
-from rq.registry import StartedJobRegistry
+from rq import Worker
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -19,7 +17,6 @@ from app.models.base import utc_now
 from app.schemas.enums import RunStatus
 
 
-ANALYSIS_QUEUE_NAME = "analysis"
 IC_REVIEW_CHECK_TYPE = "ic_agentic_review"
 RUN_IC_AGENTIC_REVIEW_JOB_PATH = "jobs.run_ic_agentic_review.run_ic_agentic_review"
 ABANDONED_ERROR_MESSAGE = "worker_job_abandoned"
@@ -90,16 +87,15 @@ def mark_abandoned_ic_review_runs(*, session: Session, active_run_ids: Iterable[
 
 
 def _active_ic_review_run_ids(*, connection: Redis) -> set[UUID]:
-    queue = Queue(ANALYSIS_QUEUE_NAME, connection=connection)
-    job_ids = [
-        *queue.job_ids,
-        *StartedJobRegistry(queue.name, connection=connection).get_job_ids(),
-    ]
     run_ids: set[UUID] = set()
-    for job_id in job_ids:
+    for worker in Worker.all(connection=connection):
+        if worker.get_state() != "busy":
+            continue
         try:
-            job = Job.fetch(job_id, connection=connection)
+            job = worker.get_current_job()
         except Exception:
+            continue
+        if job is None:
             continue
         run_id = _ic_review_run_id_from_job(job)
         if run_id is not None:

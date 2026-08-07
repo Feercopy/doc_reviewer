@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
@@ -19,12 +19,13 @@ import {
   deleteAnalysis,
   deleteDocument,
   getDocument,
+  getDocumentProgress,
   getParsedText,
-  listAnalyses,
+  listAnalysisStatuses,
   patchDocumentTitle,
   reparseDocument,
-  type AnalysisRecord,
-  type AnalysisCheckRunRecord,
+  type AnalysisCheckRunStatusRecord,
+  type AnalysisStatusRecord,
   type DocumentRecord,
   type OutputLanguage,
   type Provider,
@@ -46,7 +47,6 @@ const providerLabels: Record<Provider, string> = {
 };
 
 const outputLanguageOptions: readonly OutputLanguage[] = ["ru", "en"];
-const ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY = "analysis_chain_cancel_requested_at";
 const DOCUMENT_POLL_INTERVAL_MS = 5000;
 
 const icReviewRoleSteps = [
@@ -68,7 +68,7 @@ type IcReviewProgressStep = {
   state: "queued" | "running" | "completed" | "failed" | "cancelled";
 };
 
-function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisRecord[]): WorkflowStep[] {
+function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisStatusRecord[]): WorkflowStep[] {
   const completedAnalyses = analyses
     .filter(isFullAnalysisComplete)
     .sort(
@@ -117,7 +117,7 @@ function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisRecord[]
   ];
 }
 
-function isFullAnalysisComplete(analysis: AnalysisRecord): boolean {
+function isFullAnalysisComplete(analysis: AnalysisStatusRecord): boolean {
   return (
     analysis.status === "completed" &&
     isDevilsAdvocateCompleteOrSkipped(analysis) &&
@@ -125,14 +125,14 @@ function isFullAnalysisComplete(analysis: AnalysisRecord): boolean {
   );
 }
 
-function isDevilsAdvocateCompleteOrSkipped(analysis: AnalysisRecord): boolean {
+function isDevilsAdvocateCompleteOrSkipped(analysis: AnalysisStatusRecord): boolean {
   return (
     analysis.predicted_comment_run?.status === "completed" ||
     (!analysis.predicted_comment_run && analysis.status === "completed")
   );
 }
 
-function isFullAnalysisFailed(analysis: AnalysisRecord): boolean {
+function isFullAnalysisFailed(analysis: AnalysisStatusRecord): boolean {
   return (
     (!isFullAnalysisComplete(analysis) && isAnalysisChainCancelled(analysis)) ||
     analysis.status === "failed" ||
@@ -144,15 +144,15 @@ function isFullAnalysisFailed(analysis: AnalysisRecord): boolean {
   );
 }
 
-function isFullAnalysisInProgress(analysis: AnalysisRecord): boolean {
+function isFullAnalysisInProgress(analysis: AnalysisStatusRecord): boolean {
   return !isFullAnalysisComplete(analysis) && !isFullAnalysisFailed(analysis);
 }
 
-function isAnalysisChainCancelled(analysis: AnalysisRecord): boolean {
-  return typeof analysis.run_parameters?.[ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY] === "string";
+function isAnalysisChainCancelled(analysis: AnalysisStatusRecord): boolean {
+  return analysis.chain_cancel_requested;
 }
 
-function getFullAnalysisStatusLabel(analysis: AnalysisRecord): string {
+function getFullAnalysisStatusLabel(analysis: AnalysisStatusRecord): string {
   if (!isFullAnalysisComplete(analysis) && isAnalysisChainCancelled(analysis)) {
     return analysis.status === "completed" ? "Analysis stopped after Gate Challenger" : "Analysis stopped";
   }
@@ -179,7 +179,7 @@ function getFullAnalysisStatusLabel(analysis: AnalysisRecord): string {
   return "Completed";
 }
 
-function getIcReviewProgressStatusLabel(run: AnalysisCheckRunRecord): string {
+function getIcReviewProgressStatusLabel(run: AnalysisCheckRunStatusRecord): string {
   if (run.status === "queued") {
     return "IC Review queued";
   }
@@ -189,7 +189,7 @@ function getIcReviewProgressStatusLabel(run: AnalysisCheckRunRecord): string {
   return `IC Review ${formatLabel(run.status)}`;
 }
 
-function getIcReviewStageText(run: Pick<AnalysisCheckRunRecord, "current_stage" | "status">): string {
+function getIcReviewStageText(run: Pick<AnalysisCheckRunStatusRecord, "current_stage" | "status">): string {
   const stage = run.current_stage?.trim();
   if (!stage) {
     return run.status === "queued" ? "IC Review queued" : "IC Review running";
@@ -220,7 +220,7 @@ function getIcReviewStageText(run: Pick<AnalysisCheckRunRecord, "current_stage" 
   return stageLabels[stage] ?? `IC Review ${formatIcReviewStageName(stage)}`;
 }
 
-function buildIcReviewProgressSteps(run: AnalysisCheckRunRecord | null | undefined): IcReviewProgressStep[] {
+function buildIcReviewProgressSteps(run: AnalysisCheckRunStatusRecord | null | undefined): IcReviewProgressStep[] {
   const currentRole = run?.current_stage?.startsWith("role:") ? run.current_stage.slice("role:".length) : "";
   return icReviewRoleSteps.map((role) => {
     const stepStatus = run?.steps.find((step) => step.step_name === role.key)?.status;
@@ -231,7 +231,7 @@ function buildIcReviewProgressSteps(run: AnalysisCheckRunRecord | null | undefin
   });
 }
 
-function getIcReviewProgressPercent(run: AnalysisCheckRunRecord): number {
+function getIcReviewProgressPercent(run: AnalysisCheckRunStatusRecord): number {
   if (run.status === "completed") {
     return 100;
   }
@@ -289,7 +289,7 @@ function getAnalysisTone(status: RunStatus): "good" | "info" | "bad" | "neutral"
   return "neutral";
 }
 
-function getSourceTraceLabel(analysis: AnalysisRecord): string {
+function getSourceTraceLabel(analysis: AnalysisStatusRecord): string {
   const trace = analysis.source_trace;
   if (!trace) {
     return "-";
@@ -379,7 +379,7 @@ export default function DocumentDetailPage() {
   const documentId = params.documentId;
   const [document, setDocument] = useState<DocumentRecord | null>(null);
   const [parsedText, setParsedText] = useState("");
-  const [analyses, setAnalyses] = useState<AnalysisRecord[]>([]);
+  const [analyses, setAnalyses] = useState<AnalysisStatusRecord[]>([]);
   const [providerModels, setProviderModels] = useState<ProviderModelOptions[]>([]);
   const [provider, setProvider] = useState<Provider>("openai_compatible");
   const [model, setModel] = useState("");
@@ -393,28 +393,60 @@ export default function DocumentDetailPage() {
   const [pending, setPending] = useState(false);
   const [cancellingAnalysisId, setCancellingAnalysisId] = useState("");
   const [deletingAnalysisId, setDeletingAnalysisId] = useState("");
-  const [analysisPendingDelete, setAnalysisPendingDelete] = useState<AnalysisRecord | null>(null);
+  const [analysisPendingDelete, setAnalysisPendingDelete] = useState<AnalysisStatusRecord | null>(null);
+  const parsedTextLoadedRef = useRef(false);
 
-  async function refresh() {
-    const nextDocument = await getDocument(documentId);
-    setDocument(nextDocument);
-    listAnalyses(documentId)
-      .then((response) => setAnalyses(response.analyses))
-      .catch(() => setAnalyses([]));
-    if (nextDocument.parse_status === "completed") {
-      try {
-        setParsedText(await getParsedText(documentId));
-      } catch {
-        setParsedText("");
-      }
-    } else {
+  const loadParsedText = useCallback(async () => {
+    try {
+      setParsedText(await getParsedText(documentId));
+      parsedTextLoadedRef.current = true;
+    } catch {
       setParsedText("");
     }
-  }
+  }, [documentId]);
+
+  const loadPage = useCallback(async () => {
+    const [nextDocument, statuses] = await Promise.all([
+      getDocument(documentId),
+      listAnalysisStatuses(documentId),
+    ]);
+    setDocument(nextDocument);
+    setAnalyses(statuses.analyses);
+    if (nextDocument.parse_status === "completed") {
+      await loadParsedText();
+    } else {
+      setParsedText("");
+      parsedTextLoadedRef.current = false;
+    }
+  }, [documentId, loadParsedText]);
+
+  const refreshProgress = useCallback(async () => {
+    const progress = await getDocumentProgress(documentId);
+    setDocument((current) =>
+      current
+        ? {
+            ...current,
+            parse_status: progress.parse_status,
+            parse_error: progress.parse_error,
+            detected_document_type: progress.detected_document_type,
+            document_type_confidence: progress.document_type_confidence,
+            document_type_explanation: progress.document_type_explanation,
+            manual_document_type: progress.manual_document_type,
+            latest_analysis: progress.analyses[0] ?? null,
+            updated_at: progress.updated_at,
+          }
+        : current,
+    );
+    setAnalyses(progress.analyses);
+    if (progress.parse_status === "completed" && !parsedTextLoadedRef.current) {
+      await loadParsedText();
+    }
+  }, [documentId, loadParsedText]);
 
   useEffect(() => {
-    refresh().catch((err) => setError(err instanceof Error ? err.message : "Failed to load document"));
-  }, [documentId]);
+    parsedTextLoadedRef.current = false;
+    loadPage().catch((err) => setError(err instanceof Error ? err.message : "Failed to load document"));
+  }, [loadPage]);
 
   useEffect(() => {
     let ignore = false;
@@ -474,14 +506,29 @@ export default function DocumentDetailPage() {
   }, [provider, providerModels, configuredProviderModels]);
 
   useEffect(() => {
-    if (!hasPendingFullAnalysis) {
+    if (!parseInProgress && !hasPendingFullAnalysis) {
       return;
     }
-    const timer = window.setInterval(() => {
-      refresh().catch(() => undefined);
-    }, DOCUMENT_POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [documentId, hasPendingFullAnalysis]);
+
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      if (window.document.visibilityState === "visible") {
+        await refreshProgress().catch(() => undefined);
+      }
+      if (!cancelled) {
+        timer = window.setTimeout(poll, DOCUMENT_POLL_INTERVAL_MS);
+      }
+    };
+
+    timer = window.setTimeout(poll, DOCUMENT_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [hasPendingFullAnalysis, parseInProgress, refreshProgress]);
 
   function changeModel(nextModel: string) {
     setModel(nextModel);
@@ -547,6 +594,7 @@ export default function DocumentDetailPage() {
       const updated = await reparseDocument(documentId);
       setDocument(updated);
       setParsedText("");
+      parsedTextLoadedRef.current = false;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to reparse document");
     } finally {
@@ -581,7 +629,7 @@ export default function DocumentDetailPage() {
           output_language: outputLanguage,
         },
       });
-      await refresh();
+      await refreshProgress();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to launch analysis");
     } finally {
@@ -589,15 +637,12 @@ export default function DocumentDetailPage() {
     }
   }
 
-  async function stopAnalysis(analysis: AnalysisRecord) {
+  async function stopAnalysis(analysis: AnalysisStatusRecord) {
     setCancellingAnalysisId(analysis.id);
     setError("");
     try {
-      const updatedAnalysis = await cancelAnalysisChain(analysis.id);
-      setAnalyses((items) =>
-        items.map((item) => (item.id === updatedAnalysis.id ? updatedAnalysis : item)),
-      );
-      await refresh();
+      await cancelAnalysisChain(analysis.id);
+      await refreshProgress();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to stop analysis");
     } finally {
@@ -605,7 +650,7 @@ export default function DocumentDetailPage() {
     }
   }
 
-  function requestDeleteAnalysis(analysis: AnalysisRecord) {
+  function requestDeleteAnalysis(analysis: AnalysisStatusRecord) {
     setAnalysisPendingDelete(analysis);
   }
 
@@ -619,7 +664,7 @@ export default function DocumentDetailPage() {
       await deleteAnalysis(analysisPendingDelete.id);
       setAnalyses((items) => items.filter((item) => item.id !== analysisPendingDelete.id));
       setAnalysisPendingDelete(null);
-      await refresh();
+      await refreshProgress();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete analysis result");
     } finally {

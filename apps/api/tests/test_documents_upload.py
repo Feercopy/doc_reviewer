@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.main import app
-from app.models.analysis import Analysis
+from app.models.analysis import Analysis, AnalysisCheckRun, PredictedCommentRun
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.provider_key import ProviderKey
@@ -192,7 +192,7 @@ def test_documents_list_embeds_latest_analysis_status(api_client, db_session):
         status=RunStatus.COMPLETED.value,
         verdict="approve",
         summary="Older completed analysis",
-        structured_output={"summary": "Older completed analysis"},
+        structured_output={"summary": "x" * 500_000},
         raw_output="raw secret output",
         run_parameters={},
     )
@@ -210,10 +210,38 @@ def test_documents_list_embeds_latest_analysis_status(api_client, db_session):
         verdict=None,
         summary=None,
         structured_output=None,
-        raw_output="raw queued output",
+        raw_output="raw queued output" * 10_000,
         run_parameters={},
     )
     db_session.add(queued)
+    db_session.flush()
+    predicted = PredictedCommentRun(
+        analysis_id=queued.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.RUNNING.value,
+        structured_output={"secret": "y" * 500_000},
+        raw_output="predicted secret" * 10_000,
+        run_parameters={},
+    )
+    ic_review = AnalysisCheckRun(
+        analysis_id=queued.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        check_type="ic_agentic_review",
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.QUEUED.value,
+        current_stage="queued",
+        structured_output={"secret": "z" * 500_000},
+        raw_output="ic secret" * 10_000,
+        run_parameters={},
+        artifacts=[],
+        uploaded_workbook_metadata={},
+    )
+    db_session.add_all([predicted, ic_review])
     db_session.commit()
 
     response = api_client.get("/documents")
@@ -223,7 +251,12 @@ def test_documents_list_embeds_latest_analysis_status(api_client, db_session):
     assert document["id"] == str(document_id)
     assert document["latest_analysis"]["id"] == str(queued.id)
     assert document["latest_analysis"]["status"] == RunStatus.QUEUED.value
-    assert document["latest_analysis"]["raw_output"] is None
+    assert document["latest_analysis"]["predicted_comment_run"]["status"] == RunStatus.RUNNING.value
+    assert document["latest_analysis"]["ic_review_run"]["status"] == RunStatus.QUEUED.value
+    assert "structured_output" not in document["latest_analysis"]
+    assert "raw_output" not in document["latest_analysis"]
+    assert "run_parameters" not in document["latest_analysis"]
+    assert len(response.content) < 20_000
 
 
 def test_upload_rejects_partial_analysis_config_before_storing_document(api_client, db_session, storage_root):

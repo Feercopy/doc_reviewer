@@ -21,6 +21,59 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Bound IC Review role execution and recover cleanly from provider stalls.
+  A role previously inherited a 600-second provider timeout with three SDK
+  retries and could repeat the full call once more for malformed JSON, allowing
+  one stage such as `ic-tech-dd` to remain unchanged for roughly 80 minutes.
+  IC role and synthesis calls now default to a 300-second timeout with no hidden
+  SDK retries; a timed-out role persists an explicit schema-valid `data_gap`
+  fallback and lets the remaining roles continue. Abandoned-run cleanup now
+  trusts only jobs currently owned by a busy RQ worker instead of stale queued
+  or StartedJobRegistry entries, so a worker restart marks interrupted runs
+  terminal instead of leaving them spinning. Verified focused IC tests (`47
+  passed`), full worker tests (`172 passed`), full API tests (`207 passed`),
+  frontend tests (`148 passed`), and the production frontend build.
+- [x] Restore local external-skill mounts after the performance rebuild. A
+  one-off Compose invocation had overridden the `.env` host paths and mounted
+  the Doc Reviewer repository root as `/external/gate-challenger`, so analysis
+  preflight could not find `skills/gate-challenger/SKILL.md`. Recreated the API
+  and both workers from the canonical `.env` paths without reverting any code,
+  verified identical Gate Challenger, Devil's Advocate, and IC Review mounts in
+  all three containers, ran complete source-manifest validation for all three
+  skills, and confirmed healthy API/worker startup. The failed preflight did
+  not persist a new analysis for the reported document.
+- [x] Implement the first five performance-audit follow-ups without changing
+  analysis orchestration, skills, prompts, anonymization, or the existing
+  Documents-table status vocabulary. Added compact latest-analysis summaries
+  to `GET /documents`, compact document history/progress and per-analysis
+  status endpoints, batched latest-run queries, active-only sequential polling,
+  and lazy parsed-document loading on the analysis page. Full analysis output
+  remains available from the existing detail endpoint and is fetched once when
+  a run becomes terminal. On the same seven-case local dataset, the Documents
+  payload fell from 3.38 MB and 29 SQL queries to 19 KB and 9 queries; the
+  largest sampled history fell from 2.48 MB to 9 KB, and a polling response from
+  1.16 MB to 3.9 KB. Heavy-output regression fixtures verify compact responses
+  stay below 20 KB and preserve Gate Challenger, Devil's Advocate, IC Review,
+  cancellation, IC stage, and role-step statuses. Verified full API tests (`209
+  passed`), frontend tests (`148 passed`), production web build, local API/web
+  rebuild, health checks, and runtime logs. Pagination, private ETags, and JSON
+  compression remain separate future optimizations.
+- [x] Performance audit baseline: the production static shell is healthy
+  (HTTP/2, immutable hashed assets, roughly 120-150 KB compressed per primary
+  route), but authenticated API payloads and polling are the dominant slow-
+  network bottleneck. On the current local dataset with seven primary cases,
+  `GET /documents` returns 3.38 MB and executes 29 SQL queries, a document's
+  analysis history returns 2.48 MB, and one analysis detail returns 1.16 MB.
+  The Documents page currently repeats the full list every five seconds even
+  when no run is active; document and analysis detail polling also refetches
+  full structured outputs, and overlapping requests are not prevented. Plan a
+  compatibility-preserving optimization around compact summary/status DTOs,
+  batched latest-run queries, active-only sequential polling, lazy heavy detail
+  loading, pagination, private ETags, and JSON compression. Do not change worker
+  queue boundaries, analysis orchestration, skill snapshots, prompts, schemas,
+  or anonymization semantics as part of the transport optimization. Baseline
+  verification: focused API tests `49 passed`, worker tests `69 passed`, and
+  frontend workflow/status tests `52 passed`.
 - [x] Default new product and financial analysis output to Russian: document
   upload, manual Gate Challenger relaunch, manual IC Review relaunch, and API
   analysis creation now use `output_language=ru` unless the user explicitly

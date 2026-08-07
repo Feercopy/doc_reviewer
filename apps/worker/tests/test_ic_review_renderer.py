@@ -17,6 +17,7 @@ from app.storage.local import LocalDocumentStorage
 from ic_review.context import ICReviewContext
 from ic_review.context_pack import build_ic_review_context_pack
 from ic_review.renderer import ROLE_ORDER, render_role_prompt, render_synthesis_prompt
+from ic_review import role_runner
 from ic_review.role_runner import run_role_step, _role_run_parameters
 
 
@@ -383,14 +384,56 @@ def test_role_run_parameters_add_provider_timeouts_and_preserve_overrides():
         overrides={"timeout_seconds": 240},
     )
 
-    assert defaulted["timeout_seconds"] == 600
+    assert defaulted["timeout_seconds"] == 300
     assert defaulted["connect_timeout_seconds"] == 30
-    assert defaulted["max_retries"] == 3
+    assert defaulted["max_retries"] == 0
     assert defaulted["max_output_tokens"] == 32000
     assert defaulted["ic_review_role"] == "ic-product-analyst"
     assert overridden["timeout_seconds"] == 240
     assert overridden["connect_timeout_seconds"] == 15
     assert overridden["max_retries"] == 1
+
+
+def test_run_role_step_provider_timeout_falls_back_without_failing_run(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        check_run = _check_run(analysis_id=analysis.id, run_parameters={})
+        db.add_all([analysis, check_run])
+        db.commit()
+
+        monkeypatch.setattr(
+            role_runner,
+            "_run_role_provider_with_json_retry",
+            lambda **kwargs: (_ for _ in ()).throw(TimeoutError("provider timed out")),
+        )
+
+        structured = run_role_step(
+            session=db,
+            check_run=check_run,
+            analysis=analysis,
+            role="ic-tech-dd",
+            context=_context(),
+            source_snapshot=_snapshot(),
+            storage=LocalDocumentStorage(tmp_path / "storage"),
+        )
+
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        db.refresh(check_run)
+        assert structured["role"] == "ic-tech-dd"
+        assert structured["findings"][0]["severity"] == "data_gap"
+        assert "превышено время" in structured["data_gaps"][0]
+        assert step.status == RunStatus.COMPLETED.value
+        assert step.error_message is None
+        assert step.artifacts[-1] == {
+            "key": "role_timeout_fallback",
+            "kind": "metadata",
+            "reason": "provider_timeout",
+            "source": "bounded_role_execution",
+        }
+        assert check_run.status == RunStatus.RUNNING.value
+    finally:
+        db.close()
 
 
 def test_run_role_step_marks_prompt_render_failure_failed(tmp_path):

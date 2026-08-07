@@ -31,9 +31,9 @@ from results.schema_validation import parse_json_output
 from .errors import IcReviewRunCancelled, safe_ic_review_error_message
 
 
-IC_REVIEW_PROVIDER_TIMEOUT_SECONDS = 600
+IC_REVIEW_PROVIDER_TIMEOUT_SECONDS = 300
 IC_REVIEW_PROVIDER_CONNECT_TIMEOUT_SECONDS = 30
-IC_REVIEW_PROVIDER_MAX_RETRIES = 3
+IC_REVIEW_PROVIDER_MAX_RETRIES = 0
 IC_REVIEW_ROLE_MAX_OUTPUT_TOKENS = 32000
 FINANCIAL_AUDITOR_ROLE = "ic-financial-auditor"
 
@@ -161,6 +161,31 @@ def run_role_step(
     except IcReviewRunCancelled:
         raise
     except Exception as exc:
+        if _is_provider_timeout(exc):
+            session.rollback()
+            timed_out_step = session.get(AnalysisCheckStep, step.id)
+            if timed_out_step is None:
+                raise
+            structured = _provider_timeout_role_fallback(
+                role=role,
+                schema=schema,
+                output_language=context.output_language,
+            )
+            timed_out_step.structured_output = structured
+            timed_out_step.status = RunStatus.COMPLETED.value
+            timed_out_step.error_message = None
+            timed_out_step.artifacts = [
+                *list(timed_out_step.artifacts or []),
+                {
+                    "key": "role_timeout_fallback",
+                    "kind": "metadata",
+                    "reason": "provider_timeout",
+                    "source": "bounded_role_execution",
+                },
+            ]
+            timed_out_step.completed_at = utc_now()
+            session.commit()
+            return structured
         session.rollback()
         safe_error = safe_ic_review_error_message(exc)
         failed_step = session.get(AnalysisCheckStep, step.id)
@@ -403,6 +428,94 @@ def _missing_workbook_financial_role_fallback(*, role: str, schema: dict[str, An
     structured = normalize_schema_bounded_strings(structured, schema, schema)
     validate(instance=structured, schema=schema)
     return structured
+
+
+def _provider_timeout_role_fallback(
+    *,
+    role: str,
+    schema: dict[str, Any],
+    output_language: str | None,
+) -> dict[str, Any]:
+    if str(output_language or "").lower().startswith("ru"):
+        summary = (
+            f"Роль {role} не завершила проверку за отведенное время. "
+            "Этот блок нельзя считать подтвержденным; он сохранен как пробел в данных для ручной проверки."
+        )
+        finding = {
+            "title": "Проверка роли не завершена",
+            "severity": "data_gap",
+            "evidence": f"Вызов провайдера для роли {role} превысил допустимое время.",
+            "recommendation": "Проверьте этот блок вручную или повторите IC Review позже.",
+        }
+        gap = f"Нет завершенного вывода роли {role}: превышено время ожидания провайдера."
+        recommendation = "Провести ручную проверку этого блока перед принятием решения."
+    else:
+        summary = (
+            f"The {role} role did not finish within its execution budget. "
+            "Treat this section as an unresolved data gap that requires manual review."
+        )
+        finding = {
+            "title": "Role review did not complete",
+            "severity": "data_gap",
+            "evidence": f"The provider call for {role} exceeded the allowed execution time.",
+            "recommendation": "Review this section manually or rerun IC Review later.",
+        }
+        gap = f"No completed {role} output is available because the provider timed out."
+        recommendation = "Complete a manual review of this section before making a decision."
+
+    structured = {
+        "role": role,
+        "section_keys": [],
+        "summary": summary,
+        "findings": [finding],
+        "data_gaps": [gap],
+        "numbers_used": [],
+        "full_report_materials": {
+            "section_drafts": [],
+            "tables": [],
+            "risks": [],
+            "data_gaps": [
+                {
+                    "title": finding["title"],
+                    "detail": gap,
+                    "severity": "data_gap",
+                    "evidence_ids": [],
+                }
+            ],
+            "recommendations": [
+                {
+                    "title": finding["title"],
+                    "detail": recommendation,
+                    "severity": "high",
+                    "evidence_ids": [],
+                }
+            ],
+            "scenarios": [],
+            "primary_verify_notes": [gap],
+        },
+    }
+    structured = normalize_schema_bounded_strings(structured, schema, schema)
+    validate(instance=structured, schema=schema)
+    return structured
+
+
+def _is_provider_timeout(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    timeout_names = {
+        "APITimeoutError",
+        "ConnectTimeout",
+        "PoolTimeout",
+        "ReadTimeout",
+        "TimeoutException",
+        "WriteTimeout",
+    }
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, TimeoutError) or current.__class__.__name__ in timeout_names:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def apply_ic_review_provider_defaults(parameters: dict[str, Any]) -> dict[str, Any]:

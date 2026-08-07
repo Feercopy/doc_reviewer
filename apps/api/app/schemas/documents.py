@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.analyses import AnalysisRead
+from app.schemas.analyses import AnalysisStatusRead
 from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus
 
 
@@ -56,7 +56,7 @@ class DocumentRead(BaseModel):
     parse_error: str | None
     status: EntityStatus
     linked_fin_summary_document: LinkedDocumentRead | None
-    latest_analysis: AnalysisRead | None = None
+    latest_analysis: AnalysisStatusRead | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -65,3 +65,15 @@ class DocumentRead(BaseModel):
 
 class DocumentsListResponse(BaseModel):
     documents: list[DocumentRead]
+
+
+class DocumentProgressRead(BaseModel):
+    id: UUID
+    parse_status: DocumentParseStatus
+    parse_error: str | None
+    detected_document_type: DocumentType
+    document_type_confidence: Decimal | None
+    document_type_explanation: str | None
+    manual_document_type: DocumentType | None
+    updated_at: datetime
+    analyses: list[AnalysisStatusRead]

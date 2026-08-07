@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
@@ -15,7 +15,7 @@ import {
   deleteDocumentAnalyses,
   listDocuments,
   uploadDocument,
-  type AnalysisRecord,
+  type AnalysisStatusRecord,
   type DocumentRecord,
   type DocumentType,
   type OutputLanguage,
@@ -75,7 +75,7 @@ function getFinSummaryPresentation(document: DocumentRecord["linked_fin_summary_
   return getDocumentParsePresentation(document.parse_status);
 }
 
-function isFullAnalysisComplete(analysis: AnalysisRecord): boolean {
+function isFullAnalysisComplete(analysis: AnalysisStatusRecord): boolean {
   return (
     analysis.status === "completed" &&
     isDevilsAdvocateCompleteOrSkipped(analysis) &&
@@ -83,14 +83,14 @@ function isFullAnalysisComplete(analysis: AnalysisRecord): boolean {
   );
 }
 
-function isDevilsAdvocateCompleteOrSkipped(analysis: AnalysisRecord): boolean {
+function isDevilsAdvocateCompleteOrSkipped(analysis: AnalysisStatusRecord): boolean {
   return (
     analysis.predicted_comment_run?.status === "completed" ||
     (!analysis.predicted_comment_run && analysis.status === "completed")
   );
 }
 
-function isFullAnalysisFailed(analysis: AnalysisRecord): boolean {
+function isFullAnalysisFailed(analysis: AnalysisStatusRecord): boolean {
   return (
     analysis.status === "failed" ||
     analysis.status === "cancelled" ||
@@ -102,7 +102,7 @@ function isFullAnalysisFailed(analysis: AnalysisRecord): boolean {
 }
 
 function getAnalysisStatusSignal(
-  analysis: AnalysisRecord | undefined,
+  analysis: AnalysisStatusRecord | undefined,
   parseStatus: ParseStatus,
 ): { label: string; tone: "good" | "info" | "warn" | "bad" } {
   if (!analysis) {
@@ -199,9 +199,9 @@ function getUploadProgressCopy(step: UploadStep | null): { title: string; note: 
 
 function latestAnalysesByDocumentId(
   documents: DocumentRecord[],
-  current: Record<string, AnalysisRecord>,
-): Record<string, AnalysisRecord> {
-  const next: Record<string, AnalysisRecord> = {};
+  current: Record<string, AnalysisStatusRecord>,
+): Record<string, AnalysisStatusRecord> {
+  const next: Record<string, AnalysisStatusRecord> = {};
   for (const document of documents) {
     const latestAnalysis = document.latest_analysis ?? current[document.id];
     if (latestAnalysis) {
@@ -209,6 +209,16 @@ function latestAnalysesByDocumentId(
     }
   }
   return next;
+}
+
+function isCaseStatusActive(document: DocumentRecord, analysis: AnalysisStatusRecord | undefined): boolean {
+  if (document.parse_status === "queued" || document.parse_status === "running") {
+    return true;
+  }
+  if (!analysis) {
+    return false;
+  }
+  return !isFullAnalysisComplete(analysis) && !isFullAnalysisFailed(analysis);
 }
 
 export default function DocumentsPage() {
@@ -228,33 +238,54 @@ export default function DocumentsPage() {
   const [uploadStep, setUploadStep] = useState<UploadStep | null>(null);
   const [draggingUpload, setDraggingUpload] = useState<UploadSlot | null>(null);
   const [providerModels, setProviderModels] = useState<ProviderModelOptions[]>([]);
-  const [caseAnalysesByDocumentId, setCaseAnalysesByDocumentId] = useState<Record<string, AnalysisRecord>>({});
-  const hasLoadedDocuments = useRef(false);
+  const [caseAnalysesByDocumentId, setCaseAnalysesByDocumentId] = useState<Record<string, AnalysisStatusRecord>>({});
   const primaryFileInputRef = useRef<HTMLInputElement | null>(null);
   const finSummaryFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     const response = await listDocuments();
     setDocuments(response.documents);
     setCaseAnalysesByDocumentId((current) => latestAnalysesByDocumentId(response.documents, current));
-    hasLoadedDocuments.current = true;
-  }
+  }, []);
+
+  const hasActiveCases = useMemo(
+    () =>
+      documents.some((document) =>
+        isCaseStatusActive(document, caseAnalysesByDocumentId[document.id]),
+      ),
+    [caseAnalysesByDocumentId, documents],
+  );
 
   useEffect(() => {
     refresh()
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load documents"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
-    if (documents.length === 0) {
+    if (!hasActiveCases) {
       return;
     }
-    const timer = window.setInterval(() => {
-      refresh().catch(() => undefined);
-    }, 5000);
-    return () => window.clearInterval(timer);
-  }, [documents.length]);
+
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      if (document.visibilityState === "visible") {
+        await refresh().catch(() => undefined);
+      }
+      if (!cancelled) {
+        timer = window.setTimeout(poll, 5000);
+      }
+    };
+
+    timer = window.setTimeout(poll, 5000);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [hasActiveCases, refresh]);
 
   useEffect(() => {
     let ignore = false;
@@ -284,6 +315,11 @@ export default function DocumentsPage() {
     setError("");
     try {
       await deleteDocumentAnalyses(casePendingDelete.id);
+      setCaseAnalysesByDocumentId((current) => {
+        const next = { ...current };
+        delete next[casePendingDelete.id];
+        return next;
+      });
       setCasePendingDelete(null);
       await refresh();
     } catch (err) {
