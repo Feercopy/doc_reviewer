@@ -726,9 +726,6 @@ export default function DocumentDetailPage() {
                   </div>
 
                   <div className="gc-document-actions" aria-label="Document actions">
-                    <a className="gc-ghost" href={`${resolveApiBaseUrl()}/documents/${document.id}/raw`}>
-                      Download raw
-                    </a>
                     <button className="gc-ghost" disabled={pending} type="button" onClick={reparse}>
                       Reparse
                     </button>
@@ -738,7 +735,17 @@ export default function DocumentDetailPage() {
                   </div>
                 </div>
                 <p className="gc-muted">
-                  {document.original_filename} · {formatDate(document.created_at)}
+                  <span>{document.original_filename}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{formatDate(document.created_at)}</span>
+                  <span aria-hidden="true">·</span>
+                  <a
+                    className="gc-original-download"
+                    download={document.original_filename}
+                    href={`${resolveApiBaseUrl()}/documents/${document.id}/raw`}
+                  >
+                    Скачать оригинальный документ
+                  </a>
                 </p>
 
                 <div className="gc-stepper" aria-label="Document workflow status">
@@ -1109,10 +1116,31 @@ const documentDetailStyles = `
 }
 
 .document-detail .gc-muted {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   margin: -8px 0 0;
   color: #5b6472;
   font-size: 13px;
   line-height: 18px;
+}
+
+.document-detail .gc-original-download {
+  color: #087d5f;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.document-detail .gc-original-download:hover {
+  color: #075e45;
+  text-decoration: underline;
+}
+
+.document-detail .gc-original-download:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid #0e9f6e;
+  outline-offset: 3px;
 }
 
 .document-detail .gc-document-actions {

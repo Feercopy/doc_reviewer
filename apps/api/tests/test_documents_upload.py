@@ -617,6 +617,23 @@ def test_get_raw_download_requires_owner_and_preserves_content(api_client, db_se
     assert forbidden.status_code == 404
 
 
+def test_get_raw_download_rejects_storage_path_outside_storage_root(api_client, db_session, tmp_path):
+    create_user(db_session, "alice", "secret")
+    login(api_client, "alice", "secret")
+    upload = upload_document(api_client, "gate.txt", b"raw Gate 2 defense")
+    document_id = UUID(upload.json()["id"])
+    document = db_session.get(Document, document_id)
+    outside_path = tmp_path.parent / "outside-storage.txt"
+    outside_path.write_bytes(b"must not be served")
+    document.storage_path = str(outside_path)
+    db_session.commit()
+
+    response = api_client.get(f"/documents/{document_id}/raw")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Document file not found"
+
+
 def test_reparse_resets_parse_state_and_enqueues_job(api_client, db_session, enqueued_parse_jobs):
     create_user(db_session, "author", "secret")
     login(api_client, "author", "secret")

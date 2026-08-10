@@ -32,6 +32,7 @@ from app.security.passwords import hash_password
 from app.security.secrets import encrypt_secret
 from app.storage.local import LocalDocumentStorage
 from jobs.run_analysis import _should_use_responses_api, run_analysis
+from providers.base import AnalysisProviderResult
 
 
 def test_run_analysis_persists_structured_and_raw_output(tmp_path):
@@ -551,6 +552,91 @@ def test_run_analysis_uses_responses_api_for_gate_challenger_summary(tmp_path):
         _close_session(db)
 
 
+def test_run_analysis_retries_invalid_responses_json_from_previous_response(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
+    db = _create_session()
+    calls = []
+
+    class FakeResponsesAdapter:
+        def run(self, request):
+            raise AssertionError("chat completions must not be used")
+
+        def run_response(self, request):
+            calls.append(request)
+            if len(calls) == 1:
+                return AnalysisProviderResult(
+                    structured_text='{"verdict":',
+                    raw_output="first malformed responses output",
+                    input_tokens=20,
+                    output_tokens=10,
+                    latency_ms=30,
+                    provider_metadata={
+                        "response_id": "resp-invalid",
+                        "response_status": "incomplete",
+                        "incomplete_reason": "max_output_tokens",
+                    },
+                )
+            return AnalysisProviderResult(
+                structured_text=_main_analysis_summary_json("Recovered through Responses API."),
+                raw_output="second valid responses output",
+                input_tokens=5,
+                output_tokens=25,
+                latency_ms=40,
+                provider_metadata={"response_id": "resp-valid", "response_status": "completed"},
+            )
+
+    adapter = FakeResponsesAdapter()
+    monkeypatch.setattr("jobs.run_analysis.get_provider_adapter", lambda *_: adapter)
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        db.add(
+            ProviderKey(
+                owner_id=_create_user(db, role=Role.ADMIN).id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url="https://admllm.test/v1",
+                default_model="openai/gpt-5.5",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="openai/gpt-5.5",
+            status=RunStatus.QUEUED.value,
+            run_parameters={"provider_api": "responses"},
+        )
+        db.add(analysis)
+        db.commit()
+
+        run_analysis(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        assert analysis.status == RunStatus.COMPLETED.value, analysis.error_message
+        assert analysis.summary == "Recovered through Responses API."
+        assert analysis.run_parameters["gate_challenger_response_id"] == "resp-valid"
+        assert analysis.input_tokens == 25
+        assert analysis.output_tokens == 35
+        assert len(calls) == 2
+        assert calls[0].previous_response_id is None
+        assert calls[1].previous_response_id == "resp-invalid"
+        assert calls[1].input.startswith("## JSON Retry Instruction")
+        assert calls[1].run_parameters["max_output_tokens"] == 20000
+        retry_trace = analysis.run_parameters["analysis_json_retry"]
+        assert retry_trace["provider_attempts"][0]["incomplete_reason"] == "max_output_tokens"
+        assert retry_trace["provider_attempts"][1]["response_status"] == "completed"
+    finally:
+        _close_session(db)
+        monkeypatch.delenv("STORAGE_ROOT", raising=False)
+        get_settings.cache_clear()
+
+
 def test_gate_challenger_does_not_auto_use_responses_api_for_quotio_base_url(tmp_path):
     db = _create_session()
     try:
@@ -748,8 +834,77 @@ def test_run_analysis_persists_structured_text_when_json_parse_fails(tmp_path):
 
         db.refresh(analysis)
         assert analysis.status == RunStatus.FAILED.value
-        assert "Expecting value" in analysis.error_message
+        assert analysis.error_message == "invalid_json_after_retry:Expecting value"
         assert analysis.raw_output == "Оценка документа\nnot json"
+        assert analysis.run_parameters["analysis_json_retry"]["attempts"] == 2
+    finally:
+        _close_session(db)
+
+
+def test_run_analysis_retries_invalid_json_once_and_completes(tmp_path):
+    db = _create_session()
+    try:
+        user = _create_user(db)
+        document = _create_document(db, tmp_path, user)
+        skill = _create_skill(db)
+        db.add(
+            ProviderKey(
+                owner_id=_create_user(db, role=Role.ADMIN).id,
+                provider=Provider.OPENAI_COMPATIBLE.value,
+                base_url=None,
+                default_model="gpt-test",
+                encrypted_api_key=encrypt_secret("sk-test"),
+                api_key_fingerprint="openai_compatible:...test",
+            )
+        )
+        analysis = Analysis(
+            document_id=document.id,
+            user_id=user.id,
+            skill_id=skill.id,
+            skill_version=skill.version,
+            provider=Provider.OPENAI_COMPATIBLE.value,
+            model="gpt-test",
+            status=RunStatus.QUEUED.value,
+            run_parameters={
+                "mock_provider_result": {
+                    "structured_text": '{"verdict":',
+                    "raw_output": "first malformed response",
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                    "latency_ms": 30,
+                    "provider_metadata": {"finish_reason": "length"},
+                },
+                "analysis_json_retry_mock_provider_result": {
+                    "structured_text": _main_analysis_summary_json("Recovered after retry."),
+                    "raw_output": "second valid response",
+                    "input_tokens": 12,
+                    "output_tokens": 20,
+                    "latency_ms": 40,
+                    "provider_metadata": {"finish_reason": "stop"},
+                },
+            },
+        )
+        db.add(analysis)
+        db.commit()
+
+        run_analysis(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        retry_trace = analysis.run_parameters["analysis_json_retry"]
+        assert analysis.status == RunStatus.COMPLETED.value
+        assert analysis.summary == "Recovered after retry."
+        assert analysis.raw_output == "second valid response"
+        assert analysis.input_tokens == 22
+        assert analysis.output_tokens == 25
+        assert analysis.latency_ms == 70
+        assert retry_trace["attempts"] == 2
+        assert retry_trace["reason"] == "Expecting value"
+        assert retry_trace["provider_attempts"][0]["finish_reason"] == "length"
+        assert retry_trace["provider_attempts"][1]["finish_reason"] == "stop"
+        assert Path(retry_trace["first_attempt_raw_output_path"]).read_text(encoding="utf-8") == (
+            "first malformed response"
+        )
+        assert analysis.run_parameters["gate_challenger_provider_metadata"]["finish_reason"] == "stop"
     finally:
         _close_session(db)
 
