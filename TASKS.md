@@ -2251,3 +2251,21 @@ Exit criteria:
   (`test_ic_review_renderer.py` + `test_run_ic_agentic_review_job.py`, `42
   passed`), rebuilt/restarted local `worker`, and confirmed the running worker
   uses role output limit `32000`.
+- 2026-08-10: Added persisted bilingual Summary views for every completed
+  analysis package. The worker now saves the native Summary and a faithful
+  translation containing the short summary, Gate product narrative, fixed
+  stage checklist, and compact IC financial analysis; immutable verdicts,
+  checklist statuses, severity values, numbers, and validation counts are
+  copied in code rather than translated. New IC runs enqueue localization
+  automatically, while historical pages lazily create and persist missing RU
+  or EN variants. Mixed-language historical runs are normalized to Russian
+  before English is produced. The Summary UI preloads both variants, polls only
+  while generation is active, and switches the entire Summary immediately with
+  `РУС` / `ENG` controls. Added row locking, stale-job recovery, trace steps,
+  provider-side anonymization, isolated queue-failure recovery that cannot
+  downgrade a completed IC Review, shared schema validation,
+  and focused API/worker/web regression coverage. Verified API (`28 passed`),
+  worker (`34 passed`), web (`149 passed`), Python compile, Docker Compose
+  config, and diff checks; the Next production build compiles and type-checks
+  successfully before reaching the repository's pre-existing `/404` `<Html>`
+  prerender failure.

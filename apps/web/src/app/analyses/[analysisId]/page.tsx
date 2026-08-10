@@ -9,10 +9,12 @@ import { StatusBadge } from "@/components/StatusBadge";
 import {
   createAnalysisDetails,
   deleteAnalysis,
+  ensureSummaryLocalizations,
   getAnalysis,
   getAnalysisStatus,
   getDocument,
   getParsedText,
+  getSummaryLocalizations,
   type AnalysisCheckRunStatusRecord,
   type AnalysisCheckStepRecord,
   type AnalysisCheckStepStatusRecord,
@@ -27,6 +29,7 @@ import {
   type RetrievalTrace,
   type RunStatusSummaryRecord,
   type SourceTrace,
+  type SummaryLocalizationsRecord,
 } from "@/lib/api/documents";
 import { submitFeedback } from "@/lib/api/feedback";
 import { createIcReviewRun, icReviewArtifactUrl } from "@/lib/api/ic-review";
@@ -131,6 +134,9 @@ export default function AnalysisDetailPage() {
   const [icReviewWorkbookInputKey, setIcReviewWorkbookInputKey] = useState(0);
   const [icReviewWorkbookError, setIcReviewWorkbookError] = useState("");
   const [isLaunchingIcReview, setIsLaunchingIcReview] = useState(false);
+  const [summaryLanguage, setSummaryLanguage] = useState<OutputLanguage>("ru");
+  const [summaryLocalizations, setSummaryLocalizations] = useState<SummaryLocalizationsRecord | null>(null);
+  const [summaryLocalizationError, setSummaryLocalizationError] = useState("");
 
   useEffect(() => {
     let ignore = false;
@@ -153,6 +159,47 @@ export default function AnalysisDetailPage() {
       ignore = true;
     };
   }, [params.analysisId]);
+
+  useEffect(() => {
+    if (analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed") {
+      setSummaryLocalizations(null);
+      setSummaryLocalizationError("");
+      return;
+    }
+
+    let cancelled = false;
+    let timer: number | undefined;
+    const hasPendingVariant = (value: SummaryLocalizationsRecord) =>
+      [value.ru.status, value.en.status].some((status) => status === "queued" || status === "running");
+
+    async function refreshLocalizations(initial: boolean) {
+      try {
+        const loaded = initial
+          ? await ensureSummaryLocalizations(params.analysisId)
+          : await getSummaryLocalizations(params.analysisId);
+        if (cancelled) {
+          return;
+        }
+        setSummaryLocalizations(loaded);
+        setSummaryLocalizationError("");
+        if (hasPendingVariant(loaded)) {
+          timer = window.setTimeout(() => refreshLocalizations(false), 2000);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setSummaryLocalizationError(err instanceof Error ? err.message : "Failed to prepare Summary translations");
+        }
+      }
+    }
+
+    void refreshLocalizations(true);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [analysis?.id, analysis?.status, analysis?.ic_review_run?.id, analysis?.ic_review_run?.status, params.analysisId]);
 
   useEffect(() => {
     let ignore = false;
@@ -531,7 +578,15 @@ export default function AnalysisDetailPage() {
                   ))}
                 </nav>
 
-                {activeTopTab === "executiveSummary" ? <ResultPanel analysis={analysis} /> : null}
+                {activeTopTab === "executiveSummary" ? (
+                  <ResultPanel
+                    analysis={analysis}
+                    language={summaryLanguage}
+                    localizations={summaryLocalizations}
+                    localizationError={summaryLocalizationError}
+                    onLanguageChange={setSummaryLanguage}
+                  />
+                ) : null}
                 {activeTopTab === "fullReport" ? (
                   <>
                     <nav className="analysis-tabs" aria-label="Full report sections">
@@ -806,58 +861,145 @@ function RunDetailsDialog({ analysis, onClose }: { analysis: AnalysisRecord; onC
   );
 }
 
-function ResultPanel({ analysis }: { analysis: AnalysisRecord }) {
+const summaryLabels = {
+  ru: {
+    languageSelector: "Язык Summary",
+    preparing: "Готовим русскую версию Summary. Она появится здесь автоматически.",
+    translationError: "Не удалось подготовить перевод Summary. Повторная попытка начнётся при следующем открытии страницы.",
+    systemVerdict: "Системный вердикт",
+    agentVerdicts: "Вердикты агентов",
+    shortSummary: "Краткое саммари",
+    noShortSummary: "Краткое саммари для этого анализа пока недоступно.",
+    summaryReport: "Итоговый отчёт",
+    productAnalysis: "Продуктовый анализ",
+    financialAnalysis: "Финансовый анализ",
+    noProductOutput: "Текст продуктового анализа пока недоступен.",
+    noFinancialOutput: "Завершённый финансовый анализ пока недоступен.",
+  },
+  en: {
+    languageSelector: "Summary language",
+    preparing: "Preparing the English Summary. It will appear here automatically.",
+    translationError: "The Summary translation could not be prepared. It will retry when the page is opened again.",
+    systemVerdict: "System verdict",
+    agentVerdicts: "Agent verdicts",
+    shortSummary: "Short Summary",
+    noShortSummary: "No short summary is available for this analysis yet.",
+    summaryReport: "Summary analysis report",
+    productAnalysis: "Product analysis",
+    financialAnalysis: "Financial analysis",
+    noProductOutput: "No Gate Challenger text output is available for this analysis yet.",
+    noFinancialOutput: "No completed IC Review text output is available for this analysis yet.",
+  },
+} as const;
+
+function localizedVerdictLabel(label: string, language: OutputLanguage): string {
+  if (language === "en") {
+    return label;
+  }
+  return {
+    Rejected: "Отклонено",
+    "Need Evidence": "Нужны подтверждения",
+    Approved: "Одобрено",
+  }[label] ?? label;
+}
+
+function ResultPanel({
+  analysis,
+  language,
+  localizations,
+  localizationError,
+  onLanguageChange,
+}: {
+  analysis: AnalysisRecord;
+  language: OutputLanguage;
+  localizations: SummaryLocalizationsRecord | null;
+  localizationError: string;
+  onLanguageChange: (language: OutputLanguage) => void;
+}) {
   const verdict = buildFinalVerdict(analysis);
   const agentVerdicts = buildAgentVerdicts(analysis);
-  const shortSummary = analysisShortSummary(analysis);
-  const productMarkdown = resultProductAnalysisMarkdown(analysis);
-  const stageChecklist = analysisStageChecklist(analysis);
+  const variant = localizations?.[language];
+  const localizedPayload = variant?.status === "completed" ? variant.payload : null;
+  const nativeLanguage: OutputLanguage = analysis.run_parameters?.output_language === "en" ? "en" : "ru";
+  const fallbackToNative = !localizedPayload && language === nativeLanguage;
+  const shortSummary = localizedPayload?.short_summary ?? (fallbackToNative ? analysisShortSummary(analysis) : null);
+  const productMarkdown = localizedPayload?.product_analysis_markdown ?? (fallbackToNative ? resultProductAnalysisMarkdown(analysis) : null);
+  const stageChecklist = localizedPayload?.stage_checklist ?? (fallbackToNative ? analysisStageChecklist(analysis) : []);
+  const financialResult = localizedPayload?.financial_analysis ?? (
+    fallbackToNative && analysis.ic_review_run?.status === "completed" && isIcReviewCompactResult(analysis.ic_review_run.structured_output)
+      ? analysis.ic_review_run.structured_output
+      : null
+  );
   const financialDisplay =
-    analysis.ic_review_run?.status === "completed" && isIcReviewCompactResult(analysis.ic_review_run.structured_output)
-      ? buildIcReviewCompactDisplay(analysis.ic_review_run.structured_output)
+    financialResult && isIcReviewCompactResult(financialResult)
+      ? buildIcReviewCompactDisplay(financialResult, language)
       : null;
+  const labels = summaryLabels[language];
+  const isPreparing = !localizedPayload && !fallbackToNative && (!variant || variant.status === "queued" || variant.status === "running" || variant.status === "missing");
 
   return (
-    <section className="analysis-result-surface" aria-label="Result">
+    <section className="analysis-result-surface" aria-label={labels.summaryReport}>
+      <div className="analysis-summary-language-switch" aria-label={labels.languageSelector}>
+        <button
+          aria-pressed={language === "ru"}
+          className={language === "ru" ? "analysis-summary-language-button analysis-summary-language-button--active" : "analysis-summary-language-button"}
+          type="button"
+          onClick={() => onLanguageChange("ru")}
+        >
+          РУС
+        </button>
+        <button
+          aria-pressed={language === "en"}
+          className={language === "en" ? "analysis-summary-language-button analysis-summary-language-button--active" : "analysis-summary-language-button"}
+          type="button"
+          onClick={() => onLanguageChange("en")}
+        >
+          ENG
+        </button>
+      </div>
+      {localizationError || variant?.status === "failed" ? <div className="analysis-alert">{labels.translationError}</div> : null}
+      {isPreparing ? <div className="analysis-summary-language-loading" aria-live="polite">{labels.preparing}</div> : null}
       <div className="analysis-result-stack">
-        <section className={`analysis-result-verdict analysis-result-verdict--${verdict.tone}`} aria-label="System verdict">
-          <span>System verdict</span>
-          <strong>{verdict.label}</strong>
-          <div className="analysis-result-agent-verdicts" aria-label="Agent verdicts">
-            {agentVerdicts.map((agentVerdict) => (
+        {!isPreparing ? <>
+        <section className={`analysis-result-verdict analysis-result-verdict--${verdict.tone}`} aria-label={labels.systemVerdict}>
+          <span>{labels.systemVerdict}</span>
+          <strong>{localizedVerdictLabel(verdict.label, language)}</strong>
+          <div className="analysis-result-agent-verdicts" aria-label={labels.agentVerdicts}>
+            {agentVerdicts.map((agentVerdict, index) => (
               <div className="analysis-result-agent-verdict" key={agentVerdict.label}>
-                <span className="analysis-result-agent-verdict__label">{agentVerdict.label}</span>
+                <span className="analysis-result-agent-verdict__label">{index === 0 ? labels.productAnalysis : labels.financialAnalysis}</span>
                 <span className="analysis-result-agent-verdict__value">
                   <span
                     className={`analysis-result-agent-verdict__marker analysis-result-agent-verdict__marker--${agentVerdict.verdict.tone}`}
                     aria-hidden="true"
                   />
-                  {agentVerdict.verdict.label}
+                  {localizedVerdictLabel(agentVerdict.verdict.label, language)}
                 </span>
               </div>
             ))}
           </div>
         </section>
-        <section className="analysis-result-summary" aria-label="Short Summary">
-          <h2>Short Summary</h2>
-          <p>{shortSummary || "No short summary is available for this analysis yet."}</p>
+        <section className="analysis-result-summary" aria-label={labels.shortSummary}>
+          <h2>{labels.shortSummary}</h2>
+          <p>{shortSummary || labels.noShortSummary}</p>
         </section>
-        <section className="analysis-result-report" aria-label="Summary analysis report">
-          <ResultReportSection title="Продуктовый анализ">
-            {stageChecklist.length ? <StageChecklist items={stageChecklist} /> : null}
+        <section className="analysis-result-report" aria-label={labels.summaryReport}>
+          <ResultReportSection title={labels.productAnalysis}>
+            {stageChecklist.length ? <StageChecklist items={stageChecklist} language={language} /> : null}
             {productMarkdown ? <MarkdownPreview markdown={productMarkdown} className="gc-markdown-preview--narrative" unboxed /> : null}
             {!productMarkdown && !stageChecklist.length ? (
-              <p className="analysis-muted">No Gate Challenger text output is available for this analysis yet.</p>
+              <p className="analysis-muted">{labels.noProductOutput}</p>
             ) : null}
           </ResultReportSection>
-          <ResultReportSection title="Финансовый анализ">
+          <ResultReportSection title={labels.financialAnalysis}>
             {financialDisplay ? (
-              <IcReviewTextOutput display={financialDisplay} />
+              <IcReviewTextOutput display={financialDisplay} language={language} />
             ) : (
-              <p className="analysis-muted">No completed IC Review text output is available for this analysis yet.</p>
+              <p className="analysis-muted">{labels.noFinancialOutput}</p>
             )}
           </ResultReportSection>
         </section>
+        </> : null}
       </div>
     </section>
   );
@@ -872,13 +1014,13 @@ function ResultReportSection({ children, title }: { children: ReactNode; title: 
   );
 }
 
-function StageChecklist({ items }: { items: StageChecklistItem[] }) {
+function StageChecklist({ items, language }: { items: StageChecklistItem[]; language: OutputLanguage }) {
   return (
-    <section className="analysis-stage-checklist" aria-label="Stage checklist">
-      <h3>Обязательные элементы</h3>
+    <section className="analysis-stage-checklist" aria-label={language === "ru" ? "Обязательные элементы" : "Required elements"}>
+      <h3>{language === "ru" ? "Обязательные элементы" : "Required elements"}</h3>
       <ul>
         {items.map((item) => {
-          const statusLabel = item.status === "green" ? "Есть" : "Нет";
+          const statusLabel = item.status === "green" ? (language === "ru" ? "Есть" : "Present") : (language === "ru" ? "Нет" : "Missing");
           return (
             <li
               aria-label={`${statusLabel}: ${item.label}`}
@@ -901,7 +1043,7 @@ function StageChecklist({ items }: { items: StageChecklistItem[] }) {
   );
 }
 
-function IcReviewTextOutput({ display }: { display: ReturnType<typeof buildIcReviewCompactDisplay> }) {
+function IcReviewTextOutput({ display, language }: { display: ReturnType<typeof buildIcReviewCompactDisplay>; language: OutputLanguage }) {
   return (
     <div className="analysis-result-ic-output">
       <div className="analysis-ic-verdict">
@@ -909,16 +1051,16 @@ function IcReviewTextOutput({ display }: { display: ReturnType<typeof buildIcRev
         <span>{display.confidence}</span>
       </div>
       <section className="analysis-short-summary">
-        <h3>Executive brief</h3>
+        <h3>{language === "ru" ? "Краткий вывод" : "Executive brief"}</h3>
         <p>{display.executiveBrief}</p>
       </section>
       <div className="analysis-ic-summary-grid">
         <div className="analysis-metric">
-          <span>Spreadsheet audit status</span>
+          <span>{language === "ru" ? "Статус проверки таблицы" : "Spreadsheet audit status"}</span>
           <strong>{display.spreadsheetAudit}</strong>
         </div>
         <div className="analysis-metric">
-          <span>Validation summary</span>
+          <span>{language === "ru" ? "Результат валидации" : "Validation summary"}</span>
           <strong>{display.validation}</strong>
         </div>
       </div>
@@ -932,7 +1074,7 @@ function IcReviewTextOutput({ display }: { display: ReturnType<typeof buildIcRev
               ))}
             </ul>
           ) : (
-            <p className="analysis-muted">No items reported.</p>
+            <p className="analysis-muted">{language === "ru" ? "Пункты отсутствуют." : "No items reported."}</p>
           )}
         </section>
       ))}
@@ -3014,6 +3156,7 @@ const analysisStyles = `
 
 .analysis-result-surface {
   display: grid;
+  gap: 14px;
   width: 100%;
   height: auto;
   min-height: 0;
@@ -3023,6 +3166,49 @@ const analysisStyles = `
   border-radius: 8px;
   background: #ffffff;
   padding: 18px;
+}
+
+.analysis-summary-language-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, 64px);
+  width: fit-content;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.analysis-summary-language-button {
+  min-height: 44px;
+  border: 0;
+  border-right: 1px solid #cbd5e1;
+  background: transparent;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.analysis-summary-language-button:last-child {
+  border-right: 0;
+}
+
+.analysis-summary-language-button--active {
+  background: #087f5b;
+  color: #ffffff;
+}
+
+.analysis-summary-language-loading {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d6dee8;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 700;
+  text-align: center;
+  padding: 24px;
 }
 
 .analysis-result-stack {

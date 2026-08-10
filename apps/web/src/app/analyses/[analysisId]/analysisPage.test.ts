@@ -79,17 +79,17 @@ describe("analysis result page", () => {
     expect(pageSource).toContain("function ResultPanel");
     expect(pageSource).toContain('activeTopTab === "executiveSummary"');
     expect(pageSource).toContain('activeTopTab === "fullReport"');
-    expect(pageSource).toContain("const shortSummary = analysisShortSummary(analysis)");
-    expect(pageSource).toContain("const stageChecklist = analysisStageChecklist(analysis)");
+    expect(pageSource).toContain("fallbackToNative ? analysisShortSummary(analysis) : null");
+    expect(pageSource).toContain("fallbackToNative ? analysisStageChecklist(analysis) : []");
     expect(pageSource).toContain("const agentVerdicts = buildAgentVerdicts(analysis)");
     expect(pageSource).toContain('className="analysis-result-agent-verdicts"');
     expect(pageSource).toContain("analysis-result-agent-verdict__marker");
-    expect(pageSource).toContain("<h2>Short Summary</h2>");
+    expect(pageSource).toContain("<h2>{labels.shortSummary}</h2>");
     expect(pageSource).toContain("analysis-result-summary");
     expect(pageSource).toContain("analysis-result-report");
     expect(pageSource).toContain("function ResultReportSection");
-    expect(pageSource).toContain('title="Продуктовый анализ"');
-    expect(pageSource).toContain('title="Финансовый анализ"');
+    expect(pageSource).toContain("title={labels.productAnalysis}");
+    expect(pageSource).toContain("title={labels.financialAnalysis}");
     expect(pageSource).toContain("resultProductAnalysisMarkdown(analysis)");
     expect(pageSource).toContain("truncateGateMarkdownBeforeIcRecommendations");
     expect(pageSource).toContain("function IcReviewTextOutput");
@@ -364,7 +364,7 @@ describe("analysis result page", () => {
       pageSource.indexOf(".analysis-result-stack {"),
     );
 
-    expect(pageSource).toContain('<section className="analysis-result-surface" aria-label="Result">');
+    expect(pageSource).toContain('<section className="analysis-result-surface" aria-label={labels.summaryReport}>');
     expect(resultSurfaceStyles).toContain("display: grid;");
     expect(resultSurfaceStyles).toContain("width: 100%;");
     expect(resultSurfaceStyles).toContain("height: auto;");
@@ -378,17 +378,34 @@ describe("analysis result page", () => {
       pageSource.indexOf("function MainSkillMarkdownPanel"),
     );
 
-    expect(resultPanelSource).toContain('<ResultReportSection title="Продуктовый анализ">');
-    expect(resultPanelSource).toContain("<StageChecklist items={stageChecklist} />");
-    expect(resultPanelSource).toContain('<ResultReportSection title="Финансовый анализ">');
+    expect(resultPanelSource).toContain("<ResultReportSection title={labels.productAnalysis}>");
+    expect(resultPanelSource).toContain("<StageChecklist items={stageChecklist} language={language} />");
+    expect(resultPanelSource).toContain("<ResultReportSection title={labels.financialAnalysis}>");
     expect(resultPanelSource).toContain("<details className=\"analysis-result-report-section\" open>");
     expect(resultPanelSource).toContain("productAnalysisMarkdownForSummary(sections.main)");
     expect(resultPanelSource).toContain("removeProductAnalysisSummaryExcludedSections");
     expect(resultPanelSource).toContain("Рекомендация инвестиционного комитета");
     expect(resultPanelSource).toContain("Что (?:можно|нужно) улучшить в документе");
-    expect(resultPanelSource).toContain("<IcReviewTextOutput display={financialDisplay} />");
+    expect(resultPanelSource).toContain("<IcReviewTextOutput display={financialDisplay} language={language} />");
     expect(resultPanelSource).not.toContain("IcReviewFullReportDownloads");
     expect(pageSource).toContain(".analysis-result-report-section__body > .gc-markdown-preview");
+  });
+
+  it("preloads persisted RU and EN Summary variants and switches without reloading", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const resultPanelSource = pageSource.slice(
+      pageSource.indexOf("function ResultPanel"),
+      pageSource.indexOf("function MainSkillMarkdownPanel"),
+    );
+
+    expect(pageSource).toContain("ensureSummaryLocalizations(params.analysisId)");
+    expect(pageSource).toContain("getSummaryLocalizations(params.analysisId)");
+    expect(pageSource).toContain('useState<OutputLanguage>("ru")');
+    expect(resultPanelSource).toContain("onLanguageChange(\"ru\")");
+    expect(resultPanelSource).toContain("onLanguageChange(\"en\")");
+    expect(resultPanelSource).toContain("РУС");
+    expect(resultPanelSource).toContain("ENG");
+    expect(resultPanelSource).not.toContain("window.location.reload");
   });
 
   it("renders the stage checklist as a red and green traffic-light block above Summary product analysis", () => {
@@ -405,7 +422,7 @@ describe("analysis result page", () => {
     expect(resultPanelSource.indexOf("<StageChecklist items={stageChecklist} />")).toBeLessThan(
       resultPanelSource.indexOf("<MarkdownPreview markdown={productMarkdown}"),
     );
-    expect(stageChecklistSource).toContain('aria-label="Stage checklist"');
+    expect(stageChecklistSource).toContain('aria-label={language === "ru" ? "Обязательные элементы" : "Required elements"}');
     expect(stageChecklistSource).toContain('aria-label={`${statusLabel}: ${item.label}`}');
     expect(stageChecklistSource).toContain('className="analysis-stage-checklist__status"');
     expect(stageChecklistSource).toContain("analysis-stage-checklist__item--${item.status}");

@@ -84,6 +84,21 @@ class AnalysisStatusesListResponse(BaseModel):
     analyses: list[AnalysisStatusRead]
 
 
+class SummaryLocalizationVariantRead(BaseModel):
+    status: str
+    payload: dict | None = None
+    error_message: str | None = None
+    source_language: str | None = None
+    source_fingerprint: str | None = None
+
+
+class SummaryLocalizationsRead(BaseModel):
+    analysis_id: UUID
+    source_revision: str | None = None
+    ru: SummaryLocalizationVariantRead
+    en: SummaryLocalizationVariantRead
+
+
 class AnalysisRead(BaseModel):
     id: UUID
     document_id: UUID
