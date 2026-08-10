@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
-from jsonschema import validate
+from jsonschema import ValidationError, validate
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -21,7 +21,7 @@ from privacy.model_anonymization import (
     deanonymize_model_value,
     provider_safe_run_parameters,
 )
-from providers.base import ProviderRunRequest
+from providers.base import AnalysisProviderResult, ProviderRunRequest
 from providers.registry import get_provider_adapter
 from results.schema_validation import parse_json_output
 from skills.result_synthesis_trace import (
@@ -32,7 +32,10 @@ from skills.result_synthesis_trace import (
 
 
 SCHEMA_PATH = "contracts/schemas/summary-localization.schema.json"
-MAX_OUTPUT_TOKENS = 24000
+MAX_OUTPUT_TOKENS = 8000
+MAX_SEGMENT_CHARS = 4000
+MAX_BATCH_CHARS = 12000
+MAX_BATCH_SEGMENTS = 20
 LANGUAGES = ("ru", "en")
 
 
@@ -98,32 +101,40 @@ def translate_and_persist_summary(
     base_url: str | None,
 ) -> dict[str, Any]:
     paths = _translatable_paths(source_payload)
-    source_segments = {f"s{index:04d}": _get_path(source_payload, path) for index, path in enumerate(paths)}
-    segment_contexts = {
-        f"s{index:04d}": ".".join(str(part) for part in path)
-        for index, path in enumerate(paths)
-    }
+    source_segments, segment_contexts, path_plans = _translation_plan(source_payload, paths)
     anonymization = anonymize_value_for_model(
         source_segments,
         existing_metadata=(check_run.run_parameters or {}).get(RUN_PARAMETER_KEY)
         or (analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
     )
     segments = anonymization.value if isinstance(anonymization.value, dict) else source_segments
-    response_schema = _translation_schema(language=target_language, segment_ids=list(source_segments))
-    prompt = _translation_prompt(
-        source_language=source_language,
-        target_language=target_language,
-        segments=segments,
-        segment_contexts=segment_contexts,
-        response_schema=response_schema,
-    )
+    batches = _translation_batches(segments)
+    batch_prompts = []
+    for batch_index, batch in enumerate(batches):
+        response_schema = _translation_schema(language=target_language, segment_ids=list(batch))
+        batch_prompts.append(
+            _translation_prompt(
+                source_language=source_language,
+                target_language=target_language,
+                segments=batch,
+                segment_contexts={segment_id: segment_contexts[segment_id] for segment_id in batch},
+                response_schema=response_schema,
+                batch_index=batch_index,
+                batch_count=len(batches),
+            )
+        )
+    prompt = "\n\n--- TRANSLATION BATCH ---\n\n".join(batch_prompts)
     run_parameters = dict(check_run.run_parameters or {})
     mock_results = run_parameters.get("summary_localization_mock_provider_results")
     if isinstance(mock_results, dict) and isinstance(mock_results.get(target_language), dict):
         run_parameters["mock_provider_result"] = mock_results[target_language]
     apply_ic_review_provider_defaults(run_parameters)
     run_parameters["max_output_tokens"] = MAX_OUTPUT_TOKENS
+    run_parameters["max_retries"] = max(1, int(run_parameters.get("max_retries") or 0))
     run_parameters["summary_localization_language"] = target_language
+    run_parameters["summary_localization_batch_count"] = len(batches)
+    run_parameters["summary_localization_provider"] = provider.value
+    run_parameters["summary_localization_model"] = model
     run_parameters[RUN_PARAMETER_KEY] = anonymization.metadata
     step = start_result_synthesis_step(
         session=session,
@@ -134,7 +145,7 @@ def translate_and_persist_summary(
         skill=None,
         fallback_skill_metadata={
             "name": "summary_localization",
-            "version": "1",
+            "version": "2",
             "source_type": "inline_prompt",
             "result_schema_path": SCHEMA_PATH,
         },
@@ -145,35 +156,45 @@ def translate_and_persist_summary(
         check_run=check_run,
         language=target_language,
     )
-    raw_output = None
+    provider_results: list[AnalysisProviderResult] = []
     try:
-        provider_parameters = provider_safe_run_parameters(run_parameters)
-        provider_result = get_provider_adapter(provider, provider_parameters).run(
-            ProviderRunRequest(
+        translated_segments: dict[str, str] = {}
+        for batch_index, (batch, batch_prompt) in enumerate(zip(batches, batch_prompts, strict=True)):
+            response_schema = _translation_schema(language=target_language, segment_ids=list(batch))
+            translated = _run_translation_batch_with_json_retry(
                 provider=provider,
                 model=model,
                 api_key=api_key,
                 base_url=base_url,
-                prompt=prompt,
+                prompt=batch_prompt,
                 response_schema=response_schema,
-                run_parameters=provider_parameters,
+                run_parameters=run_parameters,
+                batch_index=batch_index,
+                batch_segments=batch,
+                attempt_results=provider_results,
             )
-        )
-        raw_output = provider_result.raw_output or provider_result.structured_text
-        translated = parse_json_output(provider_result.structured_text)
-        validate(instance=translated, schema=response_schema)
+            translated_segments.update(translated["translations"])
         translated_segments = deanonymize_model_value(
-            translated["translations"],
+            translated_segments,
             metadata=run_parameters.get(RUN_PARAMETER_KEY),
         )
         payload = deepcopy(source_payload)
         payload["language"] = target_language
-        for index, path in enumerate(paths):
-            _set_path(payload, path, translated_segments[f"s{index:04d}"])
+        for path, parts in path_plans.items():
+            translated_text = "".join(
+                translated_segments[value] if kind == "segment" else value
+                for kind, value in parts
+            )
+            _set_path(payload, path, translated_text)
         validate(instance=payload, schema=_summary_schema())
     except Exception as exc:
         session.rollback()
-        fail_result_synthesis_step(session=session, step=step, error_message=str(exc), raw_output=raw_output)
+        fail_result_synthesis_step(
+            session=session,
+            step=step,
+            error_message=str(exc),
+            raw_output=_combined_raw_output(provider_results),
+        )
         raise
 
     state = _state_for_revision(analysis=analysis, revision=str(check_run.id))
@@ -189,12 +210,12 @@ def translate_and_persist_summary(
     complete_result_synthesis_step(
         session=session,
         step=step,
-        raw_output=raw_output,
+        raw_output=_combined_raw_output(provider_results),
         structured_output=payload,
-        input_tokens=provider_result.input_tokens,
-        output_tokens=provider_result.output_tokens,
-        latency_ms=provider_result.latency_ms,
-        estimated_cost=provider_result.estimated_cost,
+        input_tokens=_sum_optional(provider_results, "input_tokens"),
+        output_tokens=_sum_optional(provider_results, "output_tokens"),
+        latency_ms=_sum_optional(provider_results, "latency_ms"),
+        estimated_cost=_sum_optional(provider_results, "estimated_cost"),
     )
     return payload
 
@@ -306,6 +327,226 @@ def _translatable_paths(payload: dict[str, Any]) -> list[tuple[str | int, ...]]:
     return [path for path in paths if isinstance(_get_path(payload, path), str)]
 
 
+def _translation_plan(
+    payload: dict[str, Any],
+    paths: list[tuple[str | int, ...]],
+) -> tuple[dict[str, str], dict[str, str], dict[tuple[str | int, ...], list[tuple[str, str]]]]:
+    segments: dict[str, str] = {}
+    contexts: dict[str, str] = {}
+    plans: dict[tuple[str | int, ...], list[tuple[str, str]]] = {}
+    next_index = 0
+    for path in paths:
+        path_parts: list[tuple[str, str]] = []
+        for kind, value in _bounded_text_parts(_get_path(payload, path)):
+            if kind == "literal":
+                path_parts.append((kind, value))
+                continue
+            segment_id = f"s{next_index:04d}"
+            next_index += 1
+            segments[segment_id] = value
+            contexts[segment_id] = ".".join(str(part) for part in path)
+            path_parts.append(("segment", segment_id))
+        plans[path] = path_parts
+    return segments, contexts, plans
+
+
+def _bounded_text_parts(text: str) -> list[tuple[str, str]]:
+    parts: list[tuple[str, str]] = []
+    for paragraph_part in re.split(r"(\n{2,})", text):
+        if not paragraph_part:
+            continue
+        if re.fullmatch(r"\n{2,}", paragraph_part):
+            parts.append(("literal", paragraph_part))
+            continue
+        _append_bounded_part(parts, paragraph_part)
+    return parts
+
+
+def _append_bounded_part(parts: list[tuple[str, str]], value: str) -> None:
+    if not value.strip():
+        parts.append(("literal", value))
+        return
+    leading = re.match(r"^\s*", value).group(0)
+    trailing = re.search(r"\s*$", value).group(0)
+    core_end = len(value) - len(trailing) if trailing else len(value)
+    core = value[len(leading) : core_end]
+    if leading:
+        parts.append(("literal", leading))
+    while len(core) > MAX_SEGMENT_CHARS:
+        boundary = _last_whitespace_boundary(core, MAX_SEGMENT_CHARS)
+        if boundary is None:
+            parts.append(("segment", core[:MAX_SEGMENT_CHARS]))
+            core = core[MAX_SEGMENT_CHARS:]
+            continue
+        start, end = boundary
+        if start > 0:
+            parts.append(("segment", core[:start]))
+        parts.append(("literal", core[start:end]))
+        core = core[end:]
+    if core:
+        parts.append(("segment", core))
+    if trailing:
+        parts.append(("literal", trailing))
+
+
+def _last_whitespace_boundary(value: str, limit: int) -> tuple[int, int] | None:
+    matches = list(re.finditer(r"\s+", value[: limit + 1]))
+    if not matches:
+        return None
+    match = matches[-1]
+    if match.start() == 0:
+        return None
+    return match.start(), match.end()
+
+
+def _translation_batches(segments: dict[str, str]) -> list[dict[str, str]]:
+    if not segments:
+        return [{}]
+    batches: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    current_chars = 0
+    for segment_id, value in segments.items():
+        if current and (
+            len(current) >= MAX_BATCH_SEGMENTS
+            or current_chars + len(value) > MAX_BATCH_CHARS
+        ):
+            batches.append(current)
+            current = {}
+            current_chars = 0
+        current[segment_id] = value
+        current_chars += len(value)
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _run_translation_batch_with_json_retry(
+    *,
+    provider: Provider,
+    model: str,
+    api_key: str | None,
+    base_url: str | None,
+    prompt: str,
+    response_schema: dict[str, Any],
+    run_parameters: dict[str, Any],
+    batch_index: int,
+    batch_segments: dict[str, str],
+    attempt_results: list[AnalysisProviderResult],
+) -> dict[str, Any]:
+    result = _call_translation_provider(
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        prompt=prompt,
+        response_schema=response_schema,
+        run_parameters=_batch_run_parameters(
+            run_parameters,
+            batch_index=batch_index,
+            batch_segments=batch_segments,
+            retry=False,
+        ),
+    )
+    attempt_results.append(result)
+    try:
+        return _validated_translation(result, response_schema)
+    except (json.JSONDecodeError, ValidationError) as exc:
+        retry_prompt = (
+            prompt.rstrip()
+            + "\n\nJSON RETRY: The previous response was incomplete or did not match the schema "
+            + f"({exc.__class__.__name__}). Return exactly one complete JSON object and every required segment."
+        )
+        retry_result = _call_translation_provider(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            prompt=retry_prompt,
+            response_schema=response_schema,
+            run_parameters=_batch_run_parameters(
+                run_parameters,
+                batch_index=batch_index,
+                batch_segments=batch_segments,
+                retry=True,
+            ),
+        )
+        attempt_results.append(retry_result)
+        return _validated_translation(retry_result, response_schema)
+
+
+def _call_translation_provider(
+    *,
+    provider: Provider,
+    model: str,
+    api_key: str | None,
+    base_url: str | None,
+    prompt: str,
+    response_schema: dict[str, Any],
+    run_parameters: dict[str, Any],
+) -> AnalysisProviderResult:
+    provider_parameters = provider_safe_run_parameters(run_parameters)
+    return get_provider_adapter(provider, provider_parameters).run(
+        ProviderRunRequest(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            prompt=prompt,
+            response_schema=response_schema,
+            run_parameters=provider_parameters,
+        )
+    )
+
+
+def _batch_run_parameters(
+    run_parameters: dict[str, Any],
+    *,
+    batch_index: int,
+    batch_segments: dict[str, str],
+    retry: bool,
+) -> dict[str, Any]:
+    parameters = dict(run_parameters)
+    parameters["summary_localization_batch"] = batch_index + 1
+    parameters["summary_localization_json_retry"] = retry
+    mock_key = (
+        "summary_localization_json_retry_mock_provider_results"
+        if retry
+        else "summary_localization_mock_provider_results"
+    )
+    mock_results = parameters.get(mock_key)
+    language = parameters.get("summary_localization_language")
+    if isinstance(mock_results, dict) and isinstance(mock_results.get(language), dict):
+        parameters["mock_provider_result"] = _bounded_mock_result(
+            mock_results[language],
+            segment_ids=list(batch_segments),
+        )
+    return parameters
+
+
+def _bounded_mock_result(result: dict[str, Any], *, segment_ids: list[str]) -> dict[str, Any]:
+    bounded = dict(result)
+    try:
+        payload = parse_json_output(str(result.get("structured_text") or ""))
+    except json.JSONDecodeError:
+        return bounded
+    translations = payload.get("translations")
+    if not isinstance(translations, dict):
+        return bounded
+    payload["translations"] = {
+        segment_id: translations[segment_id]
+        for segment_id in segment_ids
+        if segment_id in translations
+    }
+    bounded["structured_text"] = json.dumps(payload, ensure_ascii=False)
+    return bounded
+
+
+def _validated_translation(result: AnalysisProviderResult, response_schema: dict[str, Any]) -> dict[str, Any]:
+    translated = parse_json_output(result.structured_text)
+    validate(instance=translated, schema=response_schema)
+    return translated
+
+
 def _translation_schema(*, language: str, segment_ids: list[str]) -> dict[str, Any]:
     return {
         "type": "object",
@@ -325,13 +566,21 @@ def _translation_schema(*, language: str, segment_ids: list[str]) -> dict[str, A
 
 
 def _translation_prompt(
-    *, source_language: str, target_language: str, segments: dict, segment_contexts: dict, response_schema: dict
+    *,
+    source_language: str,
+    target_language: str,
+    segments: dict,
+    segment_contexts: dict,
+    response_schema: dict,
+    batch_index: int,
+    batch_count: int,
 ) -> str:
     target_name = "Russian" if target_language == "ru" else "English"
     source_name = {"ru": "Russian", "en": "English", "mixed": "mixed Russian and English"}[source_language]
     return "\n\n".join(
         [
             f"Translate the provided {source_name} Summary text segments into {target_name}.",
+            f"This is batch {batch_index + 1} of {batch_count}. Translate only the segments in this batch.",
             "Translate faithfully. Do not summarize, add conclusions, alter numbers, formulas, Markdown structure, placeholders, or evidence meaning. Preserve product names and proper nouns. Return every segment exactly once.",
             "Return one JSON object matching this schema, without Markdown fences:",
             json.dumps(response_schema, ensure_ascii=False, sort_keys=True),
@@ -373,6 +622,20 @@ def _summary_schema() -> dict[str, Any]:
 
 def summary_payload_fingerprint(payload: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _combined_raw_output(results: list[AnalysisProviderResult]) -> str | None:
+    if not results:
+        return None
+    return json.dumps(
+        [result.raw_output or result.structured_text for result in results],
+        ensure_ascii=False,
+    )
+
+
+def _sum_optional(results: list[AnalysisProviderResult], attribute: str) -> Any:
+    values = [getattr(result, attribute) for result in results if getattr(result, attribute) is not None]
+    return sum(values) if values else None
 
 
 def _get_path(value: Any, path: tuple[str | int, ...]) -> Any:
