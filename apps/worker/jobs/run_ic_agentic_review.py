@@ -27,7 +27,10 @@ from app.schemas.enums import Provider, RunStatus
 from app.security.secrets import decrypt_secret
 from app.services.provider_keys import get_shared_provider_key
 from app.services.analysis_jobs import enqueue_run_summary_localizations
-from app.services.summary_localizations import mark_summary_localizations_enqueue_failed, request_summary_localizations
+from app.services.summary_localizations import (
+    mark_summary_localizations_enqueue_failed,
+    prepare_summary_localizations_for_check_run,
+)
 from app.storage.local import LocalDocumentStorage
 from ic_review.context import build_ic_review_context
 from ic_review.context_pack import build_ic_review_context_pack
@@ -346,6 +349,13 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
             check_run.current_stage = "completed"
             check_run.error_message = None
         check_run.completed_at = utc_now()
+        should_enqueue_localizations = False
+        if check_run.status == RunStatus.COMPLETED.value:
+            _, should_enqueue_localizations = prepare_summary_localizations_for_check_run(
+                analysis=analysis,
+                check_run=check_run,
+                create_if_missing=True,
+            )
         session.commit()
 
         if check_run.status == RunStatus.COMPLETED.value:
@@ -373,33 +383,27 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
                 )
             except Exception as exc:
                 _record_result_rationale_failure(session=session, analysis=analysis, check_run=check_run, exc=exc)
-            try:
-                _, should_enqueue_localizations = request_summary_localizations(
-                    db=session,
-                    analysis=analysis,
-                    create_if_missing=True,
-                )
-                if should_enqueue_localizations and owns_session:
-                    enqueue_run_summary_localizations(analysis.id)
-            except Exception as exc:
+            if should_enqueue_localizations and owns_session:
                 try:
-                    session.rollback()
-                    mark_summary_localizations_enqueue_failed(
-                        db=session,
-                        analysis=analysis,
-                        error_message="summary_generation_queue_unavailable",
+                    enqueue_run_summary_localizations(analysis.id)
+                except Exception as exc:
+                    try:
+                        mark_summary_localizations_enqueue_failed(
+                            db=session,
+                            analysis=analysis,
+                            error_message="summary_generation_queue_unavailable",
+                        )
+                    except Exception:
+                        session.rollback()
+                    worker_logger.info(
+                        "summary_localization_enqueue_failed",
+                        extra={
+                            "job_type": "run_ic_agentic_review",
+                            "entity_id": str(run_uuid),
+                            "status": "completed",
+                            "error_class": exc.__class__.__name__,
+                        },
                     )
-                except Exception:
-                    session.rollback()
-                worker_logger.info(
-                    "summary_localization_enqueue_failed",
-                    extra={
-                        "job_type": "run_ic_agentic_review",
-                        "entity_id": str(run_uuid),
-                        "status": "completed",
-                        "error_class": exc.__class__.__name__,
-                    },
-                )
 
         worker_logger.info(
             "worker_job_completed",

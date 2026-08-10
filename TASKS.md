@@ -21,6 +21,17 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Make bilingual Summary readiness eager and switching truly instant for
+  new analyses. IC Review now persists the version-2 Russian/English queued
+  state in the same transaction that marks the review completed, so an already
+  open analysis page starts polling without a reload. Generation is enqueued
+  only after the remaining IC result postprocessing to avoid concurrent JSON
+  updates. The `РУС` / `ENG` switch appears only after both independent
+  payloads are completed and remains a local state change with no request on
+  click; until then the original report stays visible with one combined
+  preparation notice. Verified focused IC/Summary worker tests (`39 passed`),
+  legacy API coverage, full web tests (`149 passed`), production Next.js build,
+  Python compile, and `git diff --check`.
 - [x] Replace historical Summary translation with independently generated
   bilingual output for new review packages only. Legacy analyses and existing
   version-1 translations remain stored for traceability but are read as

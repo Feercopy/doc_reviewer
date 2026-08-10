@@ -403,8 +403,13 @@ describe("analysis result page", () => {
     expect(pageSource).toContain('useState<OutputLanguage>("ru")');
     expect(resultPanelSource).toContain('localizations?.available === true');
     expect(resultPanelSource).toContain('localizations.generation_mode === "independent"');
-    expect(resultPanelSource).toContain('bilingualAvailable ? <div className="analysis-summary-language-switch"');
-    expect(resultPanelSource).toContain('const displayLanguage = bilingualAvailable ? language : nativeLanguage');
+    expect(resultPanelSource).toContain('localizations.ru.status === "completed"');
+    expect(resultPanelSource).toContain('localizations.en.status === "completed"');
+    expect(resultPanelSource).toContain('localizations.ru.payload !== null');
+    expect(resultPanelSource).toContain('localizations.en.payload !== null');
+    expect(resultPanelSource).toContain('bilingualReady ? <div className="analysis-summary-language-switch"');
+    expect(resultPanelSource).toContain('const displayLanguage = bilingualReady ? language : nativeLanguage');
+    expect(resultPanelSource).toContain("labels.preparingBoth");
     expect(resultPanelSource).toContain("onLanguageChange(\"ru\")");
     expect(resultPanelSource).toContain("onLanguageChange(\"en\")");
     expect(resultPanelSource).toContain("РУС");

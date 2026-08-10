@@ -34,6 +34,14 @@ def test_completed_run_without_workbook_skips_spreadsheet_audit_and_persists_art
     try:
         records = _seed_run(db, tmp_path, monkeypatch=monkeypatch, workbook=False)
         _patch_script_pipeline(monkeypatch, calls, validation_text="validation ok\n")
+        original_update_result_short_summary = job.update_result_short_summary
+
+        def update_result_short_summary_after_bilingual_request(**kwargs):
+            state = kwargs["analysis"].structured_output["result"]["summary_localizations"]
+            calls["bilingual_state_before_result_postprocessing"] = state
+            return original_update_result_short_summary(**kwargs)
+
+        monkeypatch.setattr(job, "update_result_short_summary", update_result_short_summary_after_bilingual_request)
 
         run_ic_agentic_review(str(records["check_run"].id), db=db)
 
@@ -50,6 +58,11 @@ def test_completed_run_without_workbook_skips_spreadsheet_audit_and_persists_art
             "failures_count": 0,
         }
         assert calls["workbook_path"] is None
+        bilingual_state = calls["bilingual_state_before_result_postprocessing"]
+        assert bilingual_state["version"] == 2
+        assert bilingual_state["generation_mode"] == "independent"
+        assert bilingual_state["ru"]["status"] == "queued"
+        assert bilingual_state["en"]["status"] == "queued"
         assert [step.step_name for step in steps] == [*list(ROLE_ORDER), "result_short_summary", "result_rationale"]
         role_steps = [step for step in steps if step.step_type == "role"]
         result_steps = [step for step in steps if step.step_type == "result_synthesis"]
