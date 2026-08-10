@@ -31,7 +31,7 @@ from app.services.skill_sources import SkillSourceValidationError, refresh_skill
 from app.services.skills import skill_source_snapshot
 from app.storage.local import LocalDocumentStorage
 from jobs.run_predicted_comments import run_predicted_comments
-from providers.base import ProviderResponseRequest, ProviderRunRequest
+from providers.base import AnalysisProviderResult, ProviderResponseRequest, ProviderRunRequest
 from providers.registry import get_provider_adapter
 from privacy.model_anonymization import (
     RUN_PARAMETER_KEY,
@@ -45,6 +45,7 @@ from skills.prompt_renderer import render_prompt
 
 
 DEFAULT_PREDICTED_COMMENTS_MAX_OUTPUT_TOKENS = 20000
+DEFAULT_ANALYSIS_JSON_RETRY_MAX_OUTPUT_TOKENS = 20000
 SUMMARY_SCHEMA_PATH = "contracts/schemas/main-analysis-summary-result.schema.json"
 
 
@@ -114,30 +115,17 @@ def run_analysis(
 
         schema = json.loads(_resolve_schema_path(schema_path).read_text(encoding="utf-8"))
         prompt = _render_and_persist_prompt(session=session, analysis=analysis, document=document, skill=skill, schema=schema)
-        if use_responses_api:
-            provider_parameters = provider_safe_run_parameters(analysis.run_parameters)
-            request = ProviderResponseRequest(
-                provider=provider,
-                model=analysis.model,
-                api_key=api_key,
-                base_url=provider_key.base_url if provider_key else None,
-                input=prompt,
-                response_schema=schema,
-                run_parameters=provider_parameters,
-            )
-            result = get_provider_adapter(provider, provider_parameters).run_response(request)
-        else:
-            provider_parameters = provider_safe_run_parameters(analysis.run_parameters)
-            request = ProviderRunRequest(
-                provider=provider,
-                model=analysis.model,
-                api_key=api_key,
-                base_url=provider_key.base_url if provider_key else None,
-                prompt=prompt,
-                response_schema=schema,
-                run_parameters=provider_parameters,
-            )
-            result = get_provider_adapter(provider, provider_parameters).run(request)
+        result = _call_analysis_provider(
+            provider=provider,
+            model=analysis.model,
+            api_key=api_key,
+            base_url=provider_key.base_url if provider_key else None,
+            prompt=prompt,
+            response_schema=schema,
+            run_parameters=analysis.run_parameters,
+            use_responses_api=use_responses_api,
+        )
+        provider_attempts = [result]
         provider_raw_output = result.raw_output
         provider_structured_text = result.structured_text
         if _analysis_cancelled(session=session, analysis=analysis):
@@ -146,12 +134,68 @@ def run_analysis(
                 extra={"job_type": "run_analysis", "entity_id": str(analysis_uuid), "status": "cancelled"},
             )
             return
-        structured = parse_and_validate_json_output(
-            structured_text=result.structured_text,
-            schema_path=schema_path,
-            document_type=(analysis.run_parameters or {}).get("document_type"),
-            enforce_stage_checklist=skill.name == "gate2_challenger_main_analysis",
-        )
+        try:
+            structured = _parse_analysis_result(
+                result=result,
+                schema_path=schema_path,
+                document_type=(analysis.run_parameters or {}).get("document_type"),
+                enforce_stage_checklist=skill.name == "gate2_challenger_main_analysis",
+            )
+        except json.JSONDecodeError as exc:
+            retry_parameters = _analysis_json_retry_run_parameters(
+                run_parameters=analysis.run_parameters,
+                use_responses_api=use_responses_api,
+            )
+            previous_response_id = result.provider_metadata.get("response_id") if use_responses_api else None
+            first_attempt_path = LocalDocumentStorage(get_settings().storage_root).save_provider_attempt_output(
+                analysis_id=analysis.id,
+                attempt=1,
+                raw_output=result.raw_output or result.structured_text,
+            )
+            retry_trace = {
+                "attempts": 1,
+                "reason": exc.msg,
+                "retry_step": "gate_challenger:json_retry",
+                "first_attempt_raw_output_path": str(first_attempt_path),
+                "provider_attempts": [_provider_attempt_metadata(result=result, attempt=1)],
+            }
+            _persist_analysis_json_retry_trace(session=session, analysis=analysis, trace=retry_trace)
+
+            result = _call_analysis_provider(
+                provider=provider,
+                model=analysis.model,
+                api_key=api_key,
+                base_url=provider_key.base_url if provider_key else None,
+                prompt=_analysis_json_retry_prompt(
+                    prompt="" if previous_response_id else prompt,
+                    error=exc,
+                ),
+                response_schema=schema,
+                run_parameters=retry_parameters,
+                use_responses_api=use_responses_api,
+                previous_response_id=str(previous_response_id) if previous_response_id else None,
+            )
+            provider_attempts.append(result)
+            provider_raw_output = result.raw_output
+            provider_structured_text = result.structured_text
+            retry_trace["attempts"] = 2
+            retry_trace["provider_attempts"].append(_provider_attempt_metadata(result=result, attempt=2))
+            _persist_analysis_json_retry_trace(session=session, analysis=analysis, trace=retry_trace)
+            if _analysis_cancelled(session=session, analysis=analysis):
+                worker_logger.info(
+                    "worker_job_cancelled",
+                    extra={"job_type": "run_analysis", "entity_id": str(analysis_uuid), "status": "cancelled"},
+                )
+                return
+            try:
+                structured = _parse_analysis_result(
+                    result=result,
+                    schema_path=schema_path,
+                    document_type=(analysis.run_parameters or {}).get("document_type"),
+                    enforce_stage_checklist=skill.name == "gate2_challenger_main_analysis",
+                )
+            except json.JSONDecodeError as retry_exc:
+                raise RuntimeError(f"invalid_json_after_retry:{retry_exc.msg}") from retry_exc
         structured = deanonymize_model_value(
             structured,
             metadata=(analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
@@ -165,15 +209,20 @@ def run_analysis(
                 run_parameters["gate_challenger_response_id"] = response_id
             run_parameters["provider_api"] = "responses"
             completed_run_parameters = run_parameters
+        completed_run_parameters = dict(completed_run_parameters or {})
+        completed_run_parameters["gate_challenger_provider_metadata"] = _provider_attempt_metadata(
+            result=result,
+            attempt=len(provider_attempts),
+        )
         if not _complete_analysis_if_running(
             session=session,
             analysis=analysis,
             structured=structured,
             raw_output=result.raw_output,
-            input_tokens=result.input_tokens,
-            output_tokens=result.output_tokens,
-            latency_ms=result.latency_ms,
-            estimated_cost=result.estimated_cost,
+            input_tokens=_sum_provider_attempt_metric(provider_attempts, "input_tokens"),
+            output_tokens=_sum_provider_attempt_metric(provider_attempts, "output_tokens"),
+            latency_ms=_sum_provider_attempt_metric(provider_attempts, "latency_ms"),
+            estimated_cost=_sum_provider_attempt_metric(provider_attempts, "estimated_cost"),
             run_parameters=completed_run_parameters,
         ):
             worker_logger.info(
@@ -224,6 +273,117 @@ def run_analysis(
     finally:
         if owns_session:
             session.close()
+
+
+def _call_analysis_provider(
+    *,
+    provider: Provider,
+    model: str,
+    api_key: str | None,
+    base_url: str | None,
+    prompt: str,
+    response_schema: dict,
+    run_parameters: dict,
+    use_responses_api: bool,
+    previous_response_id: str | None = None,
+) -> AnalysisProviderResult:
+    provider_parameters = provider_safe_run_parameters(run_parameters)
+    adapter = get_provider_adapter(provider, provider_parameters)
+    if use_responses_api:
+        return adapter.run_response(
+            ProviderResponseRequest(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                input=prompt,
+                response_schema=response_schema,
+                run_parameters=provider_parameters,
+                previous_response_id=previous_response_id,
+            )
+        )
+    return adapter.run(
+        ProviderRunRequest(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            prompt=prompt,
+            response_schema=response_schema,
+            run_parameters=provider_parameters,
+        )
+    )
+
+
+def _parse_analysis_result(
+    *,
+    result: AnalysisProviderResult,
+    schema_path: str,
+    document_type: str | None,
+    enforce_stage_checklist: bool,
+) -> dict:
+    return parse_and_validate_json_output(
+        structured_text=result.structured_text,
+        schema_path=schema_path,
+        document_type=document_type,
+        enforce_stage_checklist=enforce_stage_checklist,
+    )
+
+
+def _analysis_json_retry_run_parameters(*, run_parameters: dict, use_responses_api: bool) -> dict:
+    parameters = dict(run_parameters or {})
+    if use_responses_api:
+        retry_mock = parameters.get("analysis_json_retry_mock_provider_response_result")
+        if retry_mock is not None:
+            parameters["mock_provider_response_result"] = retry_mock
+    else:
+        retry_mock = parameters.get("analysis_json_retry_mock_provider_result")
+        if retry_mock is not None:
+            parameters["mock_provider_result"] = retry_mock
+    parameters["max_output_tokens"] = max(
+        int(parameters.get("max_output_tokens") or 0),
+        DEFAULT_ANALYSIS_JSON_RETRY_MAX_OUTPUT_TOKENS,
+    )
+    return parameters
+
+
+def _analysis_json_retry_prompt(*, prompt: str, error: json.JSONDecodeError) -> str:
+    original_prompt = f"{prompt.rstrip()}\n\n" if prompt.strip() else ""
+    return (
+        original_prompt
+        + "## JSON Retry Instruction\n"
+        + f"The previous Gate Challenger response was not valid JSON: {error.msg}.\n"
+        + "Regenerate the complete result as exactly one valid JSON object matching the supplied schema. "
+        + "Prioritize a complete, closed JSON object over breadth, keep text concise, and do not include "
+        + "Markdown fences, commentary, or prose outside the JSON object. Preserve the requested output language."
+    )
+
+
+def _provider_attempt_metadata(*, result: AnalysisProviderResult, attempt: int) -> dict:
+    metadata = {"attempt": attempt}
+    for key in ("provider", "response_id", "finish_reason", "stop_reason", "response_status", "incomplete_reason"):
+        value = result.provider_metadata.get(key)
+        if value is not None:
+            metadata[key] = value
+    if result.input_tokens is not None:
+        metadata["input_tokens"] = result.input_tokens
+    if result.output_tokens is not None:
+        metadata["output_tokens"] = result.output_tokens
+    metadata["latency_ms"] = result.latency_ms
+    return metadata
+
+
+def _persist_analysis_json_retry_trace(*, session: Session, analysis: Analysis, trace: dict) -> None:
+    run_parameters = dict(analysis.run_parameters or {})
+    run_parameters["analysis_json_retry"] = trace
+    analysis.run_parameters = run_parameters
+    flag_modified(analysis, "run_parameters")
+    session.commit()
+
+
+def _sum_provider_attempt_metric(attempts: list[AnalysisProviderResult], field_name: str):
+    values = [getattr(attempt, field_name) for attempt in attempts if getattr(attempt, field_name) is not None]
+    return sum(values) if values else None
 
 
 def _get_provider_key(session: Session, analysis: Analysis, provider: Provider) -> ProviderKey | None:

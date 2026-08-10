@@ -33,7 +33,10 @@ class AnthropicCompatibleAdapter(ProviderAdapter):
             input_tokens=getattr(usage, "input_tokens", None),
             output_tokens=getattr(usage, "output_tokens", None),
             latency_ms=latency_ms,
-            provider_metadata={"provider": request.provider.value},
+            provider_metadata={
+                "provider": request.provider.value,
+                "stop_reason": getattr(response, "stop_reason", None),
+            },
         )
 
     @staticmethod

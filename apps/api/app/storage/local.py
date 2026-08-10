@@ -211,6 +211,14 @@ class LocalDocumentStorage:
         prompt_path.write_text(prompt, encoding="utf-8")
         return prompt_path
 
+    def save_provider_attempt_output(self, *, analysis_id: UUID, attempt: int, raw_output: str) -> Path:
+        output_path = self._ensure_under_root(
+            self.storage_root / "rendered-prompts" / str(analysis_id) / f"provider-attempt-{attempt}.txt"
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(raw_output, encoding="utf-8")
+        return output_path
+
     def save_skill_source_snapshot(self, *, snapshot_id: UUID, manifest: dict) -> Path:
         snapshot_dir = self._ensure_under_root(self.storage_root / "skill-snapshots" / str(snapshot_id))
         files_dir = self._ensure_under_root(snapshot_dir / "files")

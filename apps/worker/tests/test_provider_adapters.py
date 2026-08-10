@@ -17,7 +17,7 @@ def test_openai_compatible_adapter_normalizes_chat_completion():
         def create(self, **kwargs):
             captured.update(kwargs)
             return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content='{"summary":"ok"}'))],
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"summary":"ok"}'), finish_reason="length")],
                 usage=SimpleNamespace(prompt_tokens=11, completion_tokens=22),
                 model_dump_json=lambda: '{"raw":true}',
             )
@@ -36,6 +36,7 @@ def test_openai_compatible_adapter_normalizes_chat_completion():
     assert result.raw_output == '{"raw":true}'
     assert result.input_tokens == 11
     assert result.output_tokens == 22
+    assert result.provider_metadata["finish_reason"] == "length"
 
 
 def test_openai_compatible_adapter_passes_timeout_options_to_client_factory():
@@ -207,6 +208,8 @@ def test_openai_compatible_adapter_normalizes_responses_api_result():
             return SimpleNamespace(
                 id="resp-details",
                 output_text='{"summary":"ok"}',
+                status="incomplete",
+                incomplete_details=SimpleNamespace(reason="max_output_tokens"),
                 usage=SimpleNamespace(input_tokens=11, output_tokens=22),
                 model_dump_json=lambda: '{"id":"resp-details","raw":true}',
             )
@@ -239,6 +242,8 @@ def test_openai_compatible_adapter_normalizes_responses_api_result():
     assert result.input_tokens == 11
     assert result.output_tokens == 22
     assert result.provider_metadata["response_id"] == "resp-details"
+    assert result.provider_metadata["response_status"] == "incomplete"
+    assert result.provider_metadata["incomplete_reason"] == "max_output_tokens"
 
 
 def test_openai_compatible_adapter_builds_proxy_http_client(monkeypatch):
@@ -285,6 +290,7 @@ def test_anthropic_compatible_adapter_normalizes_message_response():
             captured.update(kwargs)
             return SimpleNamespace(
                 content=[SimpleNamespace(text='{"summary":"claude"}')],
+                stop_reason="max_tokens",
                 usage=SimpleNamespace(input_tokens=33, output_tokens=44),
                 model_dump_json=lambda: '{"raw":"claude"}',
             )
@@ -301,6 +307,7 @@ def test_anthropic_compatible_adapter_normalizes_message_response():
     assert result.structured_text == '{"summary":"claude"}'
     assert result.input_tokens == 33
     assert result.output_tokens == 44
+    assert result.provider_metadata["stop_reason"] == "max_tokens"
 
 
 def test_anthropic_compatible_adapter_builds_proxy_http_client(monkeypatch):

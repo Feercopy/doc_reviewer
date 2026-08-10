@@ -13,11 +13,18 @@ describe("document detail analysis controls", () => {
       source.indexOf('className="gc-document-hero"'),
       source.indexOf('<div className="gc-stepper"'),
     );
+    const subtitleSource = source.slice(
+      source.indexOf('<p className="gc-muted">'),
+      source.indexOf('<div className="gc-stepper"'),
+    );
 
     expect(titleToolbarSource).toContain('aria-label="Document actions"');
-    expect(titleToolbarSource).toContain("Download raw");
+    expect(titleToolbarSource).not.toContain("Download raw");
     expect(titleToolbarSource).toContain("Reparse");
     expect(titleToolbarSource).toContain("Delete");
+    expect(subtitleSource).toContain("Скачать оригинальный документ");
+    expect(subtitleSource).toContain("/documents/${document.id}/raw");
+    expect(subtitleSource).toContain("download={document.original_filename}");
     expect(documentHeroSource).not.toContain("gc-analysis-toolbar");
   });
 
