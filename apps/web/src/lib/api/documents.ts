@@ -47,6 +47,8 @@ export type SummaryLocalizationVariant = {
 export type SummaryLocalizationsRecord = {
   analysis_id: string;
   source_revision: string | null;
+  generation_mode: "independent" | null;
+  available: boolean;
   ru: SummaryLocalizationVariant;
   en: SummaryLocalizationVariant;
 };

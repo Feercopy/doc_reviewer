@@ -95,6 +95,8 @@ class SummaryLocalizationVariantRead(BaseModel):
 class SummaryLocalizationsRead(BaseModel):
     analysis_id: UUID
     source_revision: str | None = None
+    generation_mode: str | None = None
+    available: bool = False
     ru: SummaryLocalizationVariantRead
     en: SummaryLocalizationVariantRead
 

@@ -21,6 +21,19 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Replace historical Summary translation with independently generated
+  bilingual output for new review packages only. Legacy analyses and existing
+  version-1 translations remain stored for traceability but are read as
+  unavailable, never requeued from the page, and render in their original
+  language without `РУС` / `ENG` controls. New completed IC reviews explicitly
+  create a version-2 `independent` state and generate Russian and English from
+  the same Gate Challenger recommendations and IC Review executive brief;
+  neither language consumes the other generated variant. Verdicts, checklist
+  statuses, severities, confidence, numbers, and validation counters remain
+  deterministic copies. Stale legacy queue jobs are skipped, malformed JSON is
+  retried, and one failed language no longer blocks the other. Verified full
+  worker tests (`197 passed`), full web tests (`149 passed`), production Next.js
+  build, focused legacy API coverage, Python compile, and `git diff --check`.
 - [x] Recover Gate Challenger from malformed or truncated provider JSON and
   expose the original case document where users expect it. Main analysis now
   retries one invalid JSON response once with the same schema and anonymized

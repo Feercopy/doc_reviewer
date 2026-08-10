@@ -374,7 +374,11 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
             except Exception as exc:
                 _record_result_rationale_failure(session=session, analysis=analysis, check_run=check_run, exc=exc)
             try:
-                _, should_enqueue_localizations = request_summary_localizations(db=session, analysis=analysis)
+                _, should_enqueue_localizations = request_summary_localizations(
+                    db=session,
+                    analysis=analysis,
+                    create_if_missing=True,
+                )
                 if should_enqueue_localizations and owns_session:
                     enqueue_run_summary_localizations(analysis.id)
             except Exception as exc:
@@ -383,7 +387,7 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
                     mark_summary_localizations_enqueue_failed(
                         db=session,
                         analysis=analysis,
-                        error_message="summary_translation_queue_unavailable",
+                        error_message="summary_generation_queue_unavailable",
                     )
                 except Exception:
                     session.rollback()

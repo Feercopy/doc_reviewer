@@ -968,7 +968,7 @@ def test_document_owner_cannot_delete_analysis_created_by_admin(client, db_sessi
     assert analysis.deleted_at is None
 
 
-def test_summary_localizations_are_queued_once_and_persisted_for_old_analysis(client, db_session):
+def test_old_analysis_does_not_enqueue_or_expose_language_variants(client, db_session):
     from app.main import app
     from app.routers import analyses as analyses_router
 
@@ -1004,6 +1004,18 @@ def test_summary_localizations_are_queued_once_and_persisted_for_old_analysis(cl
         uploaded_workbook_metadata={},
     )
     db_session.add(check_run)
+    db_session.flush()
+    analysis.structured_output = {
+        "result": {
+            "short_summary": "Нужны подтверждения",
+            "summary_localizations": {
+                "version": 1,
+                "source_revision": str(check_run.id),
+                "ru": {"status": "completed", "payload": {"language": "ru"}},
+                "en": {"status": "completed", "payload": {"language": "en"}},
+            },
+        }
+    }
     db_session.commit()
     login(client, "author", "secret")
     enqueued: list[str] = []
@@ -1020,11 +1032,26 @@ def test_summary_localizations_are_queued_once_and_persisted_for_old_analysis(cl
     assert first.status_code == 200
     assert second.status_code == 200
     assert read.status_code == 200
-    assert enqueued == [str(analysis.id)]
+    assert enqueued == []
     assert first.json()["source_revision"] == str(check_run.id)
-    assert first.json()["ru"]["status"] == "queued"
-    assert first.json()["en"]["status"] == "queued"
+    assert first.json()["generation_mode"] is None
+    assert first.json()["available"] is False
+    assert first.json()["ru"]["status"] == "missing"
+    assert first.json()["en"]["status"] == "missing"
     assert read.json() == second.json()
+
+    from app.services.summary_localizations import request_summary_localizations
+
+    created, should_enqueue = request_summary_localizations(
+        db=db_session,
+        analysis=analysis,
+        create_if_missing=True,
+    )
+    assert should_enqueue is True
+    assert created.available is True
+    assert created.generation_mode == "independent"
+    assert created.ru.status == "queued"
+    assert created.en.status == "queued"
 
 
 def test_cancel_analysis_preserves_completed_gate_result_and_cancels_downstream_runs(client, db_session):
