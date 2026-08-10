@@ -14,6 +14,7 @@ from app.schemas.analyses import (
     AnalysisRead,
     AnalysisStatusesListResponse,
     AnalysisStatusRead,
+    SummaryLocalizationsRead,
 )
 from app.services.analyses import (
     AnalysisNotFoundError,
@@ -34,10 +35,17 @@ from app.services.analyses import (
 from app.services.analysis_jobs import (
     RunAnalysisDetailsEnqueue,
     RunAnalysisEnqueue,
+    RunSummaryLocalizationsEnqueue,
     enqueue_run_analysis,
     enqueue_run_analysis_details,
+    enqueue_run_summary_localizations,
 )
 from app.services.documents import DocumentNotFoundError
+from app.services.summary_localizations import (
+    mark_summary_localizations_enqueue_failed,
+    read_summary_localizations,
+    request_summary_localizations,
+)
 
 router = APIRouter(tags=["analyses"])
 
@@ -48,6 +56,10 @@ def get_run_analysis_enqueue() -> RunAnalysisEnqueue:
 
 def get_run_analysis_details_enqueue() -> RunAnalysisDetailsEnqueue:
     return enqueue_run_analysis_details
+
+
+def get_run_summary_localizations_enqueue() -> RunSummaryLocalizationsEnqueue:
+    return enqueue_run_summary_localizations
 
 
 @router.post("/documents/{document_id}/analyses", response_model=AnalysisRead, status_code=status.HTTP_201_CREATED)
@@ -131,6 +143,44 @@ def get_analysis_status(
         return get_analysis_status_for_actor(db=db, actor=current_user, analysis_id=analysis_id)
     except AnalysisNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+
+
+@router.get("/analyses/{analysis_id}/summary-localizations", response_model=SummaryLocalizationsRead)
+def get_analysis_summary_localizations(
+    analysis_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> SummaryLocalizationsRead:
+    try:
+        analysis = get_analysis_for_actor(db=db, actor=current_user, analysis_id=analysis_id)
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+    return read_summary_localizations(analysis)
+
+
+@router.post("/analyses/{analysis_id}/summary-localizations", response_model=SummaryLocalizationsRead)
+def ensure_analysis_summary_localizations(
+    analysis_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+    enqueue: RunSummaryLocalizationsEnqueue = Depends(get_run_summary_localizations_enqueue),
+) -> SummaryLocalizationsRead:
+    try:
+        analysis = get_analysis_for_actor(db=db, actor=current_user, analysis_id=analysis_id)
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+    response, should_enqueue = request_summary_localizations(db=db, analysis=analysis)
+    if should_enqueue:
+        try:
+            enqueue(analysis.id)
+        except Exception as exc:
+            mark_summary_localizations_enqueue_failed(
+                db=db,
+                analysis=analysis,
+                error_message="summary_translation_queue_unavailable",
+            )
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Summary translation queue is unavailable") from exc
+    return response
 
 
 @router.delete("/analyses/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -20,6 +20,37 @@ export type Provider = "openai_compatible" | "anthropic_compatible" | "hermes";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type OutputLanguage = "ru" | "en";
 
+export type SummaryStageChecklistItem = {
+  id: string;
+  label: string;
+  status: "green" | "red";
+  evidence: string;
+};
+
+export type SummaryLocalizationPayload = {
+  run_mode: "summary_localization";
+  language: OutputLanguage;
+  short_summary: string | null;
+  product_analysis_markdown: string | null;
+  stage_checklist: SummaryStageChecklistItem[];
+  financial_analysis: IcReviewCompactResult | null;
+};
+
+export type SummaryLocalizationVariant = {
+  status: string;
+  payload: SummaryLocalizationPayload | null;
+  error_message: string | null;
+  source_language: OutputLanguage | "mixed" | null;
+  source_fingerprint: string | null;
+};
+
+export type SummaryLocalizationsRecord = {
+  analysis_id: string;
+  source_revision: string | null;
+  ru: SummaryLocalizationVariant;
+  en: SummaryLocalizationVariant;
+};
+
 export type DocumentRecord = {
   id: string;
   owner_id: string;
@@ -472,4 +503,12 @@ export async function getAnalysis(analysisId: string): Promise<AnalysisRecord> {
 
 export async function getAnalysisStatus(analysisId: string): Promise<AnalysisStatusRecord> {
   return apiFetch<AnalysisStatusRecord>(`/analyses/${analysisId}/status`);
+}
+
+export async function ensureSummaryLocalizations(analysisId: string): Promise<SummaryLocalizationsRecord> {
+  return apiFetch<SummaryLocalizationsRecord>(`/analyses/${analysisId}/summary-localizations`, { method: "POST" });
+}
+
+export async function getSummaryLocalizations(analysisId: string): Promise<SummaryLocalizationsRecord> {
+  return apiFetch<SummaryLocalizationsRecord>(`/analyses/${analysisId}/summary-localizations`);
 }
