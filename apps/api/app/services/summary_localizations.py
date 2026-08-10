@@ -41,6 +41,26 @@ def request_summary_localizations(
     if analysis.status != RunStatus.COMPLETED.value or check_run is None:
         return read_summary_localizations(analysis), False
 
+    response, should_enqueue = prepare_summary_localizations_for_check_run(
+        analysis=analysis,
+        check_run=check_run,
+        create_if_missing=create_if_missing,
+    )
+    if should_enqueue:
+        db.commit()
+    return response, should_enqueue
+
+
+def prepare_summary_localizations_for_check_run(
+    *,
+    analysis: Analysis,
+    check_run: AnalysisCheckRun,
+    create_if_missing: bool,
+) -> tuple[SummaryLocalizationsRead, bool]:
+    """Prepare persisted language state without committing the caller's transaction."""
+    if analysis.status != RunStatus.COMPLETED.value or check_run.status != RunStatus.COMPLETED.value:
+        return read_summary_localizations(analysis), False
+
     revision = str(check_run.id)
     state = _state(analysis)
     should_enqueue = False
@@ -65,7 +85,6 @@ def request_summary_localizations(
                 should_enqueue = True
     if should_enqueue:
         _persist_state(analysis, state)
-        db.commit()
     return _read_state(analysis.id, state), should_enqueue
 
 

@@ -864,6 +864,7 @@ function RunDetailsDialog({ analysis, onClose }: { analysis: AnalysisRecord; onC
 const summaryLabels = {
   ru: {
     languageSelector: "Язык Summary",
+    preparingBoth: "Готовим русскую и английскую версии Summary. Переключатель появится, когда обе версии будут готовы.",
     preparing: "Готовим русскую версию Summary. Она появится здесь автоматически.",
     translationError: "Не удалось подготовить языковую версию Summary. Повторная попытка начнётся при следующем открытии страницы.",
     systemVerdict: "Системный вердикт",
@@ -878,6 +879,7 @@ const summaryLabels = {
   },
   en: {
     languageSelector: "Summary language",
+    preparingBoth: "Preparing Russian and English Summary versions. The switch will appear when both are ready.",
     preparing: "Preparing the English Summary. It will appear here automatically.",
     translationError: "The Summary language version could not be prepared. It will retry when the page is opened again.",
     systemVerdict: "System verdict",
@@ -919,11 +921,18 @@ function ResultPanel({
   const verdict = buildFinalVerdict(analysis);
   const agentVerdicts = buildAgentVerdicts(analysis);
   const nativeLanguage: OutputLanguage = analysis.run_parameters?.output_language === "en" ? "en" : "ru";
-  const bilingualAvailable = localizations?.available === true && localizations.generation_mode === "independent";
-  const displayLanguage = bilingualAvailable ? language : nativeLanguage;
-  const variant = bilingualAvailable ? localizations?.[displayLanguage] : null;
+  const bilingualRequested = localizations?.available === true && localizations.generation_mode === "independent";
+  const bilingualReady = bilingualRequested
+    && localizations.ru.status === "completed"
+    && localizations.en.status === "completed"
+    && localizations.ru.payload !== null
+    && localizations.en.payload !== null;
+  const bilingualFailed = bilingualRequested
+    && [localizations.ru.status, localizations.en.status].some((status) => status === "failed");
+  const displayLanguage = bilingualReady ? language : nativeLanguage;
+  const variant = bilingualReady ? localizations?.[displayLanguage] : null;
   const localizedPayload = variant?.status === "completed" ? variant.payload : null;
-  const fallbackToNative = !bilingualAvailable || (!localizedPayload && displayLanguage === nativeLanguage);
+  const fallbackToNative = !bilingualReady || (!localizedPayload && displayLanguage === nativeLanguage);
   const shortSummary = localizedPayload?.short_summary ?? (fallbackToNative ? analysisShortSummary(analysis) : null);
   const productMarkdown = localizedPayload?.product_analysis_markdown ?? (fallbackToNative ? resultProductAnalysisMarkdown(analysis) : null);
   const stageChecklist = localizedPayload?.stage_checklist ?? (fallbackToNative ? analysisStageChecklist(analysis) : []);
@@ -937,11 +946,11 @@ function ResultPanel({
       ? buildIcReviewCompactDisplay(financialResult, displayLanguage)
       : null;
   const labels = summaryLabels[displayLanguage];
-  const isPreparing = bilingualAvailable && !localizedPayload && !fallbackToNative && (!variant || variant.status === "queued" || variant.status === "running" || variant.status === "missing");
+  const isPreparingBoth = bilingualRequested && !bilingualReady && !bilingualFailed;
 
   return (
     <section className="analysis-result-surface" aria-label={labels.summaryReport}>
-      {bilingualAvailable ? <div className="analysis-summary-language-switch" aria-label={labels.languageSelector}>
+      {bilingualReady ? <div className="analysis-summary-language-switch" aria-label={labels.languageSelector}>
         <button
           aria-pressed={language === "ru"}
           className={language === "ru" ? "analysis-summary-language-button analysis-summary-language-button--active" : "analysis-summary-language-button"}
@@ -959,10 +968,10 @@ function ResultPanel({
           ENG
         </button>
       </div> : null}
-      {bilingualAvailable && (localizationError || variant?.status === "failed") ? <div className="analysis-alert">{labels.translationError}</div> : null}
-      {isPreparing ? <div className="analysis-summary-language-loading" aria-live="polite">{labels.preparing}</div> : null}
+      {bilingualRequested && (localizationError || bilingualFailed) ? <div className="analysis-alert">{labels.translationError}</div> : null}
+      {isPreparingBoth ? <div className="analysis-summary-language-loading" aria-live="polite">{labels.preparingBoth}</div> : null}
       <div className="analysis-result-stack">
-        {!isPreparing ? <>
+        <>
         <section className={`analysis-result-verdict analysis-result-verdict--${verdict.tone}`} aria-label={labels.systemVerdict}>
           <span>{labels.systemVerdict}</span>
           <strong>{localizedVerdictLabel(verdict.label, displayLanguage)}</strong>
@@ -1001,7 +1010,7 @@ function ResultPanel({
             )}
           </ResultReportSection>
         </section>
-        </> : null}
+        </>
       </div>
     </section>
   );
