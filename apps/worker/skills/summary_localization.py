@@ -14,6 +14,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.analysis import Analysis, AnalysisCheckRun
 from app.schemas.enums import Provider
+from app.services.summary_localizations import SUMMARY_GENERATION_MODE, SUMMARY_LOCALIZATION_VERSION
 from ic_review.role_runner import apply_ic_review_provider_defaults
 from privacy.model_anonymization import (
     RUN_PARAMETER_KEY,
@@ -29,6 +30,10 @@ from skills.result_synthesis_trace import (
     fail_result_synthesis_step,
     start_result_synthesis_step,
 )
+from skills.result_summary_synthesis import (
+    extract_gate_challenger_recommendations,
+    extract_ic_review_executive_summary,
+)
 
 
 SCHEMA_PATH = "contracts/schemas/summary-localization.schema.json"
@@ -37,6 +42,7 @@ MAX_SEGMENT_CHARS = 4000
 MAX_BATCH_CHARS = 12000
 MAX_BATCH_SEGMENTS = 20
 LANGUAGES = ("ru", "en")
+SHORT_SUMMARY_EVIDENCE_CHARS = 1800
 
 
 def build_summary_payload(*, analysis: Analysis, check_run: AnalysisCheckRun, language: str) -> dict[str, Any]:
@@ -59,40 +65,30 @@ def build_summary_payload(*, analysis: Analysis, check_run: AnalysisCheckRun, la
     }
 
 
-def persist_native_summary(
+def build_summary_generation_source(*, analysis: Analysis, check_run: AnalysisCheckRun) -> dict[str, Any]:
+    payload = build_summary_payload(analysis=analysis, check_run=check_run, language="ru")
+    gate_recommendations = extract_gate_challenger_recommendations(analysis.structured_output) or payload.get(
+        "product_analysis_markdown"
+    )
+    ic_executive_summary = extract_ic_review_executive_summary(check_run.structured_output)
+    evidence_parts = []
+    if gate_recommendations:
+        evidence_parts.append(
+            "Gate Challenger recommendations:\n" + _evidence_excerpt(gate_recommendations)
+        )
+    if ic_executive_summary:
+        evidence_parts.append(
+            "IC Review executive brief:\n" + _evidence_excerpt(ic_executive_summary)
+        )
+    payload["short_summary"] = "\n\n".join(evidence_parts) if evidence_parts else None
+    return payload
+
+
+def generate_and_persist_summary_variant(
     *,
     session: Session,
     analysis: Analysis,
     check_run: AnalysisCheckRun,
-) -> tuple[str, dict[str, Any], str]:
-    gate_language = "en" if (analysis.run_parameters or {}).get("output_language") == "en" else "ru"
-    ic_output_language = (check_run.run_parameters or {}).get("output_language")
-    ic_language = ic_output_language if ic_output_language in LANGUAGES else gate_language
-    source_language = gate_language if gate_language == ic_language else "mixed"
-    payload = build_summary_payload(analysis=analysis, check_run=check_run, language=gate_language)
-    validate(instance=payload, schema=_summary_schema())
-    fingerprint = summary_payload_fingerprint(payload)
-    if source_language == "mixed":
-        return source_language, payload, fingerprint
-    state = _state_for_revision(analysis=analysis, revision=str(check_run.id))
-    state[source_language] = {
-        "status": "completed",
-        "payload": payload,
-        "error_message": None,
-        "source_language": source_language,
-        "source_fingerprint": fingerprint,
-    }
-    _persist_state(analysis, state)
-    session.commit()
-    return source_language, payload, fingerprint
-
-
-def translate_and_persist_summary(
-    *,
-    session: Session,
-    analysis: Analysis,
-    check_run: AnalysisCheckRun,
-    source_language: str,
     source_payload: dict[str, Any],
     target_language: str,
     provider: Provider,
@@ -101,20 +97,19 @@ def translate_and_persist_summary(
     base_url: str | None,
 ) -> dict[str, Any]:
     paths = _translatable_paths(source_payload)
-    source_segments, segment_contexts, path_plans = _translation_plan(source_payload, paths)
+    source_segments, segment_contexts, path_plans = _generation_plan(source_payload, paths)
     anonymization = anonymize_value_for_model(
         source_segments,
         existing_metadata=(check_run.run_parameters or {}).get(RUN_PARAMETER_KEY)
         or (analysis.run_parameters or {}).get(RUN_PARAMETER_KEY),
     )
     segments = anonymization.value if isinstance(anonymization.value, dict) else source_segments
-    batches = _translation_batches(segments)
+    batches = _generation_batches(segments)
     batch_prompts = []
     for batch_index, batch in enumerate(batches):
-        response_schema = _translation_schema(language=target_language, segment_ids=list(batch))
+        response_schema = _generation_schema(language=target_language, segment_ids=list(batch))
         batch_prompts.append(
-            _translation_prompt(
-                source_language=source_language,
+            _generation_prompt(
                 target_language=target_language,
                 segments=batch,
                 segment_contexts={segment_id: segment_contexts[segment_id] for segment_id in batch},
@@ -123,29 +118,29 @@ def translate_and_persist_summary(
                 batch_count=len(batches),
             )
         )
-    prompt = "\n\n--- TRANSLATION BATCH ---\n\n".join(batch_prompts)
+    prompt = "\n\n--- SUMMARY GENERATION BATCH ---\n\n".join(batch_prompts)
     run_parameters = dict(check_run.run_parameters or {})
-    mock_results = run_parameters.get("summary_localization_mock_provider_results")
+    mock_results = run_parameters.get("summary_generation_mock_provider_results")
     if isinstance(mock_results, dict) and isinstance(mock_results.get(target_language), dict):
         run_parameters["mock_provider_result"] = mock_results[target_language]
     apply_ic_review_provider_defaults(run_parameters)
     run_parameters["max_output_tokens"] = MAX_OUTPUT_TOKENS
     run_parameters["max_retries"] = max(1, int(run_parameters.get("max_retries") or 0))
-    run_parameters["summary_localization_language"] = target_language
-    run_parameters["summary_localization_batch_count"] = len(batches)
-    run_parameters["summary_localization_provider"] = provider.value
-    run_parameters["summary_localization_model"] = model
+    run_parameters["summary_generation_language"] = target_language
+    run_parameters["summary_generation_batch_count"] = len(batches)
+    run_parameters["summary_generation_provider"] = provider.value
+    run_parameters["summary_generation_model"] = model
     run_parameters[RUN_PARAMETER_KEY] = anonymization.metadata
     step = start_result_synthesis_step(
         session=session,
         check_run=check_run,
-        step_name=f"summary_localization_{target_language}",
+        step_name=f"summary_generation_{target_language}",
         prompt=prompt,
         run_parameters=run_parameters,
         skill=None,
         fallback_skill_metadata={
-            "name": "summary_localization",
-            "version": "2",
+            "name": "independent_bilingual_summary",
+            "version": "1",
             "source_type": "inline_prompt",
             "result_schema_path": SCHEMA_PATH,
         },
@@ -158,10 +153,10 @@ def translate_and_persist_summary(
     )
     provider_results: list[AnalysisProviderResult] = []
     try:
-        translated_segments: dict[str, str] = {}
+        generated_segments: dict[str, str] = {}
         for batch_index, (batch, batch_prompt) in enumerate(zip(batches, batch_prompts, strict=True)):
-            response_schema = _translation_schema(language=target_language, segment_ids=list(batch))
-            translated = _run_translation_batch_with_json_retry(
+            response_schema = _generation_schema(language=target_language, segment_ids=list(batch))
+            generated = _run_generation_batch_with_json_retry(
                 provider=provider,
                 model=model,
                 api_key=api_key,
@@ -173,19 +168,19 @@ def translate_and_persist_summary(
                 batch_segments=batch,
                 attempt_results=provider_results,
             )
-            translated_segments.update(translated["translations"])
-        translated_segments = deanonymize_model_value(
-            translated_segments,
+            generated_segments.update(generated["content"])
+        generated_segments = deanonymize_model_value(
+            generated_segments,
             metadata=run_parameters.get(RUN_PARAMETER_KEY),
         )
         payload = deepcopy(source_payload)
         payload["language"] = target_language
         for path, parts in path_plans.items():
-            translated_text = "".join(
-                translated_segments[value] if kind == "segment" else value
+            generated_text = "".join(
+                generated_segments[value] if kind == "segment" else value
                 for kind, value in parts
             )
-            _set_path(payload, path, translated_text)
+            _set_path(payload, path, generated_text)
         validate(instance=payload, schema=_summary_schema())
     except Exception as exc:
         session.rollback()
@@ -202,7 +197,7 @@ def translate_and_persist_summary(
         "status": "completed",
         "payload": payload,
         "error_message": None,
-        "source_language": source_language,
+        "source_language": None,
         "source_fingerprint": summary_payload_fingerprint(source_payload),
         "trace_step_id": str(step.id),
     }
@@ -327,7 +322,7 @@ def _translatable_paths(payload: dict[str, Any]) -> list[tuple[str | int, ...]]:
     return [path for path in paths if isinstance(_get_path(payload, path), str)]
 
 
-def _translation_plan(
+def _generation_plan(
     payload: dict[str, Any],
     paths: list[tuple[str | int, ...]],
 ) -> tuple[dict[str, str], dict[str, str], dict[tuple[str | int, ...], list[tuple[str, str]]]]:
@@ -399,7 +394,7 @@ def _last_whitespace_boundary(value: str, limit: int) -> tuple[int, int] | None:
     return match.start(), match.end()
 
 
-def _translation_batches(segments: dict[str, str]) -> list[dict[str, str]]:
+def _generation_batches(segments: dict[str, str]) -> list[dict[str, str]]:
     if not segments:
         return [{}]
     batches: list[dict[str, str]] = []
@@ -420,7 +415,7 @@ def _translation_batches(segments: dict[str, str]) -> list[dict[str, str]]:
     return batches
 
 
-def _run_translation_batch_with_json_retry(
+def _run_generation_batch_with_json_retry(
     *,
     provider: Provider,
     model: str,
@@ -433,7 +428,7 @@ def _run_translation_batch_with_json_retry(
     batch_segments: dict[str, str],
     attempt_results: list[AnalysisProviderResult],
 ) -> dict[str, Any]:
-    result = _call_translation_provider(
+    result = _call_generation_provider(
         provider=provider,
         model=model,
         api_key=api_key,
@@ -449,14 +444,14 @@ def _run_translation_batch_with_json_retry(
     )
     attempt_results.append(result)
     try:
-        return _validated_translation(result, response_schema)
+        return _validated_generation(result, response_schema)
     except (json.JSONDecodeError, ValidationError) as exc:
         retry_prompt = (
             prompt.rstrip()
             + "\n\nJSON RETRY: The previous response was incomplete or did not match the schema "
             + f"({exc.__class__.__name__}). Return exactly one complete JSON object and every required segment."
         )
-        retry_result = _call_translation_provider(
+        retry_result = _call_generation_provider(
             provider=provider,
             model=model,
             api_key=api_key,
@@ -471,10 +466,10 @@ def _run_translation_batch_with_json_retry(
             ),
         )
         attempt_results.append(retry_result)
-        return _validated_translation(retry_result, response_schema)
+        return _validated_generation(retry_result, response_schema)
 
 
-def _call_translation_provider(
+def _call_generation_provider(
     *,
     provider: Provider,
     model: str,
@@ -506,15 +501,15 @@ def _batch_run_parameters(
     retry: bool,
 ) -> dict[str, Any]:
     parameters = dict(run_parameters)
-    parameters["summary_localization_batch"] = batch_index + 1
-    parameters["summary_localization_json_retry"] = retry
+    parameters["summary_generation_batch"] = batch_index + 1
+    parameters["summary_generation_json_retry"] = retry
     mock_key = (
-        "summary_localization_json_retry_mock_provider_results"
+        "summary_generation_json_retry_mock_provider_results"
         if retry
-        else "summary_localization_mock_provider_results"
+        else "summary_generation_mock_provider_results"
     )
     mock_results = parameters.get(mock_key)
-    language = parameters.get("summary_localization_language")
+    language = parameters.get("summary_generation_language")
     if isinstance(mock_results, dict) and isinstance(mock_results.get(language), dict):
         parameters["mock_provider_result"] = _bounded_mock_result(
             mock_results[language],
@@ -529,33 +524,33 @@ def _bounded_mock_result(result: dict[str, Any], *, segment_ids: list[str]) -> d
         payload = parse_json_output(str(result.get("structured_text") or ""))
     except json.JSONDecodeError:
         return bounded
-    translations = payload.get("translations")
-    if not isinstance(translations, dict):
+    content = payload.get("content")
+    if not isinstance(content, dict):
         return bounded
-    payload["translations"] = {
-        segment_id: translations[segment_id]
+    payload["content"] = {
+        segment_id: content[segment_id]
         for segment_id in segment_ids
-        if segment_id in translations
+        if segment_id in content
     }
     bounded["structured_text"] = json.dumps(payload, ensure_ascii=False)
     return bounded
 
 
-def _validated_translation(result: AnalysisProviderResult, response_schema: dict[str, Any]) -> dict[str, Any]:
-    translated = parse_json_output(result.structured_text)
-    validate(instance=translated, schema=response_schema)
-    return translated
+def _validated_generation(result: AnalysisProviderResult, response_schema: dict[str, Any]) -> dict[str, Any]:
+    generated = parse_json_output(result.structured_text)
+    validate(instance=generated, schema=response_schema)
+    return generated
 
 
-def _translation_schema(*, language: str, segment_ids: list[str]) -> dict[str, Any]:
+def _generation_schema(*, language: str, segment_ids: list[str]) -> dict[str, Any]:
     return {
         "type": "object",
-        "required": ["run_mode", "language", "translations"],
+        "required": ["run_mode", "language", "content"],
         "additionalProperties": False,
         "properties": {
-            "run_mode": {"type": "string", "const": "summary_localization_translation"},
+            "run_mode": {"type": "string", "const": "independent_summary_generation"},
             "language": {"type": "string", "const": language},
-            "translations": {
+            "content": {
                 "type": "object",
                 "required": segment_ids,
                 "additionalProperties": False,
@@ -565,9 +560,8 @@ def _translation_schema(*, language: str, segment_ids: list[str]) -> dict[str, A
     }
 
 
-def _translation_prompt(
+def _generation_prompt(
     *,
-    source_language: str,
     target_language: str,
     segments: dict,
     segment_contexts: dict,
@@ -576,17 +570,17 @@ def _translation_prompt(
     batch_count: int,
 ) -> str:
     target_name = "Russian" if target_language == "ru" else "English"
-    source_name = {"ru": "Russian", "en": "English", "mixed": "mixed Russian and English"}[source_language]
     return "\n\n".join(
         [
-            f"Translate the provided {source_name} Summary text segments into {target_name}.",
-            f"This is batch {batch_index + 1} of {batch_count}. Translate only the segments in this batch.",
-            "Translate faithfully. Do not summarize, add conclusions, alter numbers, formulas, Markdown structure, placeholders, or evidence meaning. Preserve product names and proper nouns. Return every segment exactly once.",
+            f"Create fresh Summary content in natural {target_name} from the evidence segments below.",
+            "This is an independent synthesis task, not a translation task. Read the evidence for meaning and write each target field as a native business reviewer would formulate it. Do not mirror sentence structure or translate word for word.",
+            f"This is batch {batch_index + 1} of {batch_count}. Generate only the target fields represented by segments in this batch.",
+            "Do not add facts, conclusions, scores, or evidence. Preserve all numbers, formulas, Markdown structure, placeholders, product names, and proper nouns. For short_summary, combine the Gate Challenger recommendation and IC Review brief into a concise decision-oriented summary. Return every segment exactly once.",
             "Return one JSON object matching this schema, without Markdown fences:",
             json.dumps(response_schema, ensure_ascii=False, sort_keys=True),
-            "Segment contexts (do not return these):",
+            "Target field contexts (do not return these):",
             json.dumps(segment_contexts, ensure_ascii=False, sort_keys=True),
-            "Segments:",
+            "Evidence segments:",
             json.dumps(segments, ensure_ascii=False, sort_keys=True),
         ]
     )
@@ -596,9 +590,14 @@ def _state_for_revision(*, analysis: Analysis, revision: str) -> dict[str, Any]:
     output = analysis.structured_output or {}
     result = output.get("result") if isinstance(output.get("result"), dict) else {}
     state = result.get("summary_localizations") if isinstance(result.get("summary_localizations"), dict) else {}
-    if state.get("source_revision") != revision or state.get("version") != 1:
+    if (
+        state.get("source_revision") != revision
+        or state.get("version") != SUMMARY_LOCALIZATION_VERSION
+        or state.get("generation_mode") != SUMMARY_GENERATION_MODE
+    ):
         return {
-            "version": 1,
+            "version": SUMMARY_LOCALIZATION_VERSION,
+            "generation_mode": SUMMARY_GENERATION_MODE,
             "source_revision": revision,
             "ru": {"status": "queued", "payload": None, "error_message": None},
             "en": {"status": "queued", "payload": None, "error_message": None},
@@ -657,3 +656,14 @@ def _first_text(*values: Any) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def _evidence_excerpt(value: str) -> str:
+    text = value.strip()
+    if len(text) <= SHORT_SUMMARY_EVIDENCE_CHARS:
+        return text
+    excerpt = text[:SHORT_SUMMARY_EVIDENCE_CHARS]
+    boundary = excerpt.rfind(" ")
+    if boundary > SHORT_SUMMARY_EVIDENCE_CHARS // 2:
+        excerpt = excerpt[:boundary]
+    return excerpt.rstrip() + "..."

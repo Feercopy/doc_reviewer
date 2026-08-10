@@ -177,9 +177,9 @@ def ensure_analysis_summary_localizations(
             mark_summary_localizations_enqueue_failed(
                 db=db,
                 analysis=analysis,
-                error_message="summary_translation_queue_unavailable",
+                error_message="summary_generation_queue_unavailable",
             )
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Summary translation queue is unavailable") from exc
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Summary generation queue is unavailable") from exc
     return response
 
 

@@ -379,19 +379,19 @@ describe("analysis result page", () => {
     );
 
     expect(resultPanelSource).toContain("<ResultReportSection title={labels.productAnalysis}>");
-    expect(resultPanelSource).toContain("<StageChecklist items={stageChecklist} language={language} />");
+    expect(resultPanelSource).toContain("<StageChecklist items={stageChecklist} language={displayLanguage} />");
     expect(resultPanelSource).toContain("<ResultReportSection title={labels.financialAnalysis}>");
     expect(resultPanelSource).toContain("<details className=\"analysis-result-report-section\" open>");
     expect(resultPanelSource).toContain("productAnalysisMarkdownForSummary(sections.main)");
     expect(resultPanelSource).toContain("removeProductAnalysisSummaryExcludedSections");
     expect(resultPanelSource).toContain("Рекомендация инвестиционного комитета");
     expect(resultPanelSource).toContain("Что (?:можно|нужно) улучшить в документе");
-    expect(resultPanelSource).toContain("<IcReviewTextOutput display={financialDisplay} language={language} />");
+    expect(resultPanelSource).toContain("<IcReviewTextOutput display={financialDisplay} language={displayLanguage} />");
     expect(resultPanelSource).not.toContain("IcReviewFullReportDownloads");
     expect(pageSource).toContain(".analysis-result-report-section__body > .gc-markdown-preview");
   });
 
-  it("preloads persisted RU and EN Summary variants and switches without reloading", () => {
+  it("shows instant RU and EN switching only for independently generated new Summary variants", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const resultPanelSource = pageSource.slice(
       pageSource.indexOf("function ResultPanel"),
@@ -401,6 +401,10 @@ describe("analysis result page", () => {
     expect(pageSource).toContain("ensureSummaryLocalizations(params.analysisId)");
     expect(pageSource).toContain("getSummaryLocalizations(params.analysisId)");
     expect(pageSource).toContain('useState<OutputLanguage>("ru")');
+    expect(resultPanelSource).toContain('localizations?.available === true');
+    expect(resultPanelSource).toContain('localizations.generation_mode === "independent"');
+    expect(resultPanelSource).toContain('bilingualAvailable ? <div className="analysis-summary-language-switch"');
+    expect(resultPanelSource).toContain('const displayLanguage = bilingualAvailable ? language : nativeLanguage');
     expect(resultPanelSource).toContain("onLanguageChange(\"ru\")");
     expect(resultPanelSource).toContain("onLanguageChange(\"en\")");
     expect(resultPanelSource).toContain("РУС");
@@ -419,7 +423,7 @@ describe("analysis result page", () => {
       pageSource.indexOf("function IcReviewTextOutput"),
     );
 
-    expect(resultPanelSource.indexOf("<StageChecklist items={stageChecklist} />")).toBeLessThan(
+    expect(resultPanelSource.indexOf("<StageChecklist items={stageChecklist} language={displayLanguage} />")).toBeLessThan(
       resultPanelSource.indexOf("<MarkdownPreview markdown={productMarkdown}"),
     );
     expect(stageChecklistSource).toContain('aria-label={language === "ru" ? "Обязательные элементы" : "Required elements"}');

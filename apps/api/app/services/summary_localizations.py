@@ -14,7 +14,8 @@ from app.schemas.enums import RunStatus
 
 
 SUMMARY_LOCALIZATIONS_KEY = "summary_localizations"
-SUMMARY_LOCALIZATION_VERSION = 1
+SUMMARY_LOCALIZATION_VERSION = 2
+SUMMARY_GENERATION_MODE = "independent"
 STALE_LOCALIZATION_AFTER = timedelta(minutes=30)
 
 
@@ -29,7 +30,12 @@ def latest_completed_ic_review(*, db: Session, analysis_id: UUID) -> AnalysisChe
     ).scalars().first()
 
 
-def request_summary_localizations(*, db: Session, analysis: Analysis) -> tuple[SummaryLocalizationsRead, bool]:
+def request_summary_localizations(
+    *,
+    db: Session,
+    analysis: Analysis,
+    create_if_missing: bool = False,
+) -> tuple[SummaryLocalizationsRead, bool]:
     analysis = db.execute(select(Analysis).where(Analysis.id == analysis.id).with_for_update()).scalar_one()
     check_run = latest_completed_ic_review(db=db, analysis_id=analysis.id)
     if analysis.status != RunStatus.COMPLETED.value or check_run is None:
@@ -38,7 +44,14 @@ def request_summary_localizations(*, db: Session, analysis: Analysis) -> tuple[S
     revision = str(check_run.id)
     state = _state(analysis)
     should_enqueue = False
-    if state.get("source_revision") != revision or state.get("version") != SUMMARY_LOCALIZATION_VERSION:
+    is_independent_generation = (
+        state.get("source_revision") == revision
+        and state.get("version") == SUMMARY_LOCALIZATION_VERSION
+        and state.get("generation_mode") == SUMMARY_GENERATION_MODE
+    )
+    if not is_independent_generation:
+        if not create_if_missing:
+            return _read_state(analysis.id, state), False
         state = _empty_state(revision)
         should_enqueue = True
     else:
@@ -74,13 +87,14 @@ def _state(analysis: Analysis) -> dict[str, Any]:
     output = analysis.structured_output or {}
     result = output.get("result") if isinstance(output, dict) else None
     state = result.get(SUMMARY_LOCALIZATIONS_KEY) if isinstance(result, dict) else None
-    return dict(state) if isinstance(state, dict) else _empty_state(None, status="missing")
+    return dict(state) if isinstance(state, dict) else {}
 
 
 def _empty_state(revision: str | None, *, status: str = "queued") -> dict[str, Any]:
     variant = _queued_variant() if status == "queued" else {"status": status, "payload": None, "error_message": None}
     return {
         "version": SUMMARY_LOCALIZATION_VERSION,
+        "generation_mode": SUMMARY_GENERATION_MODE,
         "source_revision": revision,
         "ru": dict(variant),
         "en": dict(variant),
@@ -119,11 +133,17 @@ def _persist_state(analysis: Analysis, state: dict[str, Any]) -> None:
 
 
 def _read_state(analysis_id: UUID, state: dict[str, Any]) -> SummaryLocalizationsRead:
+    available = (
+        state.get("version") == SUMMARY_LOCALIZATION_VERSION
+        and state.get("generation_mode") == SUMMARY_GENERATION_MODE
+    )
     return SummaryLocalizationsRead(
         analysis_id=analysis_id,
         source_revision=state.get("source_revision"),
-        ru=_variant(state.get("ru")),
-        en=_variant(state.get("en")),
+        generation_mode=state.get("generation_mode") if available else None,
+        available=available,
+        ru=_variant(state.get("ru") if available else None),
+        en=_variant(state.get("en") if available else None),
     )
 
 

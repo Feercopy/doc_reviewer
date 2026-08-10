@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import create_engine
@@ -21,34 +22,78 @@ from providers.base import AnalysisProviderResult
 from skills import summary_localization
 
 
-def test_summary_localization_translates_text_without_changing_decision_data(tmp_path, monkeypatch):
+def test_legacy_translation_job_is_skipped_without_enabling_language_variants(tmp_path, monkeypatch):
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
     get_settings.cache_clear()
     db = _session()
     try:
         analysis, check_run = _seed(db)
-        source = summary_localization.build_summary_payload(analysis=analysis, check_run=check_run, language="ru")
+        output = dict(analysis.structured_output)
+        result = dict(output["result"])
+        result["summary_localizations"] = {
+            "version": 1,
+            "source_revision": str(check_run.id),
+            "ru": {"status": "completed", "payload": {"language": "ru"}},
+            "en": {"status": "queued", "payload": None},
+        }
+        output["result"] = result
+        analysis.structured_output = output
+        db.commit()
+
+        monkeypatch.setattr(
+            summary_localization,
+            "get_provider_adapter",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("provider must not be called")),
+        )
+
+        run_summary_localizations(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        state = analysis.structured_output["result"]["summary_localizations"]
+        assert state["version"] == 1
+        assert state["en"]["status"] == "queued"
+        assert db.query(AnalysisCheckStep).count() == 0
+    finally:
+        db.close()
+        get_settings.cache_clear()
+
+
+def test_summary_variants_are_generated_independently_without_changing_decision_data(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
+    db = _session()
+    try:
+        analysis, check_run = _seed(db)
+        source = summary_localization.build_summary_generation_source(analysis=analysis, check_run=check_run)
+        assert source["short_summary"] != analysis.structured_output["result"]["short_summary"]
+        assert "Gate Challenger recommendations" in source["short_summary"]
+        assert "IC Review executive brief" in source["short_summary"]
         paths = summary_localization._translatable_paths(source)
-        translations = {
-            f"s{index:04d}": f"English {index}: {summary_localization._get_path(source, path)}"
-            for index, path in enumerate(paths)
+        segment_ids = summary_localization._generation_plan(source, paths)[0]
+        generated = {
+            language: {
+                segment_id: f"{language.upper()} generated {index}: {value}"
+                for index, (segment_id, value) in enumerate(segment_ids.items())
+            }
+            for language in ("ru", "en")
         }
         check_run.run_parameters = {
             "output_language": "ru",
-            "summary_localization_mock_provider_results": {
-                "en": {
+            "summary_generation_mock_provider_results": {
+                language: {
                     "structured_text": json.dumps(
                         {
-                            "run_mode": "summary_localization_translation",
-                            "language": "en",
-                            "translations": translations,
+                            "run_mode": "independent_summary_generation",
+                            "language": language,
+                            "content": generated[language],
                         }
                     ),
-                    "raw_output": "raw translation",
+                    "raw_output": f"raw {language} generation",
                     "input_tokens": 10,
                     "output_tokens": 20,
                     "latency_ms": 30,
                 }
+                for language in ("ru", "en")
             },
         }
         db.commit()
@@ -61,8 +106,9 @@ def test_summary_localization_translates_text_without_changing_decision_data(tmp
         assert variants["en"]["status"] == "completed"
         ru = variants["ru"]["payload"]
         en = variants["en"]["payload"]
-        assert en["short_summary"].startswith("English")
-        assert en["stage_checklist"][0]["label"].startswith("English")
+        assert ru["short_summary"].startswith("RU generated")
+        assert en["short_summary"].startswith("EN generated")
+        assert en["stage_checklist"][0]["label"].startswith("EN generated")
         assert en["stage_checklist"][0]["id"] == ru["stage_checklist"][0]["id"]
         assert en["stage_checklist"][0]["status"] == ru["stage_checklist"][0]["status"]
         assert en["financial_analysis"]["verdict"] == ru["financial_analysis"]["verdict"]
@@ -74,29 +120,29 @@ def test_summary_localization_translates_text_without_changing_decision_data(tmp
         get_settings.cache_clear()
 
 
-def test_mixed_historical_output_builds_russian_before_english(tmp_path, monkeypatch):
+def test_english_generation_uses_original_evidence_not_russian_variant(tmp_path, monkeypatch):
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
     get_settings.cache_clear()
     db = _session()
     try:
         analysis, check_run = _seed(db)
-        check_run.run_parameters = {"output_language": "en"}
-        source = summary_localization.build_summary_payload(analysis=analysis, check_run=check_run, language="ru")
-        segment_count = len(summary_localization._translatable_paths(source))
-        check_run.run_parameters["summary_localization_mock_provider_results"] = {
+        source = summary_localization.build_summary_generation_source(analysis=analysis, check_run=check_run)
+        paths = summary_localization._translatable_paths(source)
+        segment_ids = list(summary_localization._generation_plan(source, paths)[0])
+        check_run.run_parameters = {"summary_generation_mock_provider_results": {
             language: {
                 "structured_text": json.dumps(
                     {
-                        "run_mode": "summary_localization_translation",
+                        "run_mode": "independent_summary_generation",
                         "language": language,
-                        "translations": {f"s{index:04d}": f"{language.upper()} translation {index}" for index in range(segment_count)},
+                        "content": {segment_id: f"{language.upper()} generated {index}" for index, segment_id in enumerate(segment_ids)},
                     }
                 ),
                 "raw_output": f"raw {language}",
                 "latency_ms": 1,
             }
             for language in ("ru", "en")
-        }
+        }}
         db.commit()
 
         run_summary_localizations(str(analysis.id), db=db)
@@ -104,39 +150,48 @@ def test_mixed_historical_output_builds_russian_before_english(tmp_path, monkeyp
         db.refresh(analysis)
         variants = analysis.structured_output["result"]["summary_localizations"]
         assert variants["ru"]["status"] == "completed"
-        assert variants["ru"]["source_language"] == "mixed"
+        assert variants["ru"]["source_language"] is None
         assert variants["en"]["status"] == "completed"
-        assert variants["en"]["source_language"] == "ru"
-        assert variants["ru"]["payload"]["short_summary"].startswith("RU translation")
-        assert variants["en"]["payload"]["short_summary"].startswith("EN translation")
+        assert variants["en"]["source_language"] is None
+        assert variants["ru"]["payload"]["short_summary"].startswith("RU generated")
+        assert variants["en"]["payload"]["short_summary"].startswith("EN generated")
+        en_step = db.query(AnalysisCheckStep).filter_by(
+            check_run_id=check_run.id,
+            step_name="summary_generation_en",
+        ).one()
+        en_prompt = Path(en_step.prompt_artifact_path).read_text(encoding="utf-8")
+        assert "RU generated" not in en_prompt
+        assert "Нужны данные" in en_prompt
+        assert "This is an independent synthesis task, not a translation task" in en_prompt
     finally:
         db.close()
         get_settings.cache_clear()
 
 
-def test_long_historical_summary_is_translated_in_bounded_batches(tmp_path, monkeypatch):
+def test_long_summary_is_generated_in_bounded_independent_batches(tmp_path, monkeypatch):
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
     get_settings.cache_clear()
     db = _session()
     calls: list[tuple[int, int]] = []
 
-    class BoundedTranslationAdapter:
+    class BoundedGenerationAdapter:
         def run(self, request):
-            segment_ids = request.response_schema["properties"]["translations"]["required"]
+            segment_ids = request.response_schema["properties"]["content"]["required"]
+            language = request.response_schema["properties"]["language"]["const"]
             calls.append((len(segment_ids), len(request.prompt)))
             return AnalysisProviderResult(
                 structured_text=json.dumps(
                     {
-                        "run_mode": "summary_localization_translation",
-                        "language": "en",
-                        "translations": {segment_id: f"Translated {segment_id}" for segment_id in segment_ids},
+                        "run_mode": "independent_summary_generation",
+                        "language": language,
+                        "content": {segment_id: f"Generated {language} {segment_id}" for segment_id in segment_ids},
                     }
                 ),
                 raw_output=f"batch {len(calls)}",
                 latency_ms=1,
             )
 
-    monkeypatch.setattr(summary_localization, "get_provider_adapter", lambda *_args, **_kwargs: BoundedTranslationAdapter())
+    monkeypatch.setattr(summary_localization, "get_provider_adapter", lambda *_args, **_kwargs: BoundedGenerationAdapter())
     try:
         analysis, _ = _seed(db)
         output = dict(analysis.structured_output)
@@ -160,32 +215,33 @@ def test_long_historical_summary_is_translated_in_bounded_batches(tmp_path, monk
         get_settings.cache_clear()
 
 
-def test_invalid_translation_json_is_retried_and_both_attempts_are_traced(tmp_path, monkeypatch):
+def test_invalid_generation_json_is_retried_and_both_attempts_are_traced(tmp_path, monkeypatch):
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
     get_settings.cache_clear()
     db = _session()
     calls = 0
 
-    class RetryTranslationAdapter:
+    class RetryGenerationAdapter:
         def run(self, request):
             nonlocal calls
             calls += 1
             if calls == 1:
                 return AnalysisProviderResult(structured_text="{", raw_output="truncated", latency_ms=1)
-            segment_ids = request.response_schema["properties"]["translations"]["required"]
+            segment_ids = request.response_schema["properties"]["content"]["required"]
+            language = request.response_schema["properties"]["language"]["const"]
             return AnalysisProviderResult(
                 structured_text=json.dumps(
                     {
-                        "run_mode": "summary_localization_translation",
-                        "language": "en",
-                        "translations": {segment_id: f"Translated {segment_id}" for segment_id in segment_ids},
+                        "run_mode": "independent_summary_generation",
+                        "language": language,
+                        "content": {segment_id: f"Generated {language} {segment_id}" for segment_id in segment_ids},
                     }
                 ),
                 raw_output="valid retry",
                 latency_ms=1,
             )
 
-    monkeypatch.setattr(summary_localization, "get_provider_adapter", lambda *_args, **_kwargs: RetryTranslationAdapter())
+    monkeypatch.setattr(summary_localization, "get_provider_adapter", lambda *_args, **_kwargs: RetryGenerationAdapter())
     try:
         analysis, check_run = _seed(db)
 
@@ -194,10 +250,10 @@ def test_invalid_translation_json_is_retried_and_both_attempts_are_traced(tmp_pa
         db.refresh(analysis)
         variant = analysis.structured_output["result"]["summary_localizations"]["en"]
         assert variant["status"] == "completed"
-        assert calls == 2
+        assert calls == 3
         step = db.query(AnalysisCheckStep).filter_by(
             check_run_id=check_run.id,
-            step_name="summary_localization_en",
+            step_name="summary_generation_ru",
         ).one()
         assert "truncated" in step.raw_output
         assert "valid retry" in step.raw_output
@@ -206,7 +262,55 @@ def test_invalid_translation_json_is_retried_and_both_attempts_are_traced(tmp_pa
         get_settings.cache_clear()
 
 
-def test_historical_run_uses_current_provider_when_old_provider_is_unavailable(tmp_path, monkeypatch):
+def test_failed_russian_generation_does_not_block_english_variant(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
+    db = _session()
+
+    class PartialGenerationAdapter:
+        def run(self, request):
+            language = request.response_schema["properties"]["language"]["const"]
+            if language == "ru":
+                return AnalysisProviderResult(structured_text="{", raw_output="invalid ru", latency_ms=1)
+            segment_ids = request.response_schema["properties"]["content"]["required"]
+            return AnalysisProviderResult(
+                structured_text=json.dumps(
+                    {
+                        "run_mode": "independent_summary_generation",
+                        "language": "en",
+                        "content": {segment_id: f"Generated en {segment_id}" for segment_id in segment_ids},
+                    }
+                ),
+                raw_output="valid en",
+                latency_ms=1,
+            )
+
+    monkeypatch.setattr(summary_localization, "get_provider_adapter", lambda *_args, **_kwargs: PartialGenerationAdapter())
+    try:
+        analysis, check_run = _seed(db)
+
+        run_summary_localizations(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        variants = analysis.structured_output["result"]["summary_localizations"]
+        assert variants["ru"]["status"] == "failed"
+        assert variants["en"]["status"] == "completed"
+        assert db.query(AnalysisCheckStep).filter_by(
+            check_run_id=check_run.id,
+            step_name="summary_generation_ru",
+            status=RunStatus.FAILED.value,
+        ).count() == 1
+        assert db.query(AnalysisCheckStep).filter_by(
+            check_run_id=check_run.id,
+            step_name="summary_generation_en",
+            status=RunStatus.COMPLETED.value,
+        ).count() == 1
+    finally:
+        db.close()
+        get_settings.cache_clear()
+
+
+def test_new_run_uses_current_provider_when_original_provider_is_unavailable(tmp_path, monkeypatch):
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
     get_settings.cache_clear()
     db = _session()
@@ -214,25 +318,27 @@ def test_historical_run_uses_current_provider_when_old_provider_is_unavailable(t
         analysis, check_run = _seed(db)
         check_run.provider = Provider.ANTHROPIC_COMPATIBLE.value
         check_run.model = "claude-retired"
-        source = summary_localization.build_summary_payload(analysis=analysis, check_run=check_run, language="ru")
+        source = summary_localization.build_summary_generation_source(analysis=analysis, check_run=check_run)
         paths = summary_localization._translatable_paths(source)
+        segment_ids = list(summary_localization._generation_plan(source, paths)[0])
         check_run.run_parameters = {
             "output_language": "ru",
-            "summary_localization_mock_provider_results": {
-                "en": {
+            "summary_generation_mock_provider_results": {
+                language: {
                     "structured_text": json.dumps(
                         {
-                            "run_mode": "summary_localization_translation",
-                            "language": "en",
-                            "translations": {
-                                f"s{index:04d}": f"Translated {index}"
-                                for index in range(len(paths))
+                            "run_mode": "independent_summary_generation",
+                            "language": language,
+                            "content": {
+                                segment_id: f"Generated {language} {index}"
+                                for index, segment_id in enumerate(segment_ids)
                             },
                         }
                     ),
-                    "raw_output": "fallback provider translation",
+                    "raw_output": f"fallback provider {language} generation",
                     "latency_ms": 1,
                 }
+                for language in ("ru", "en")
             },
         }
         db.commit()
@@ -243,11 +349,11 @@ def test_historical_run_uses_current_provider_when_old_provider_is_unavailable(t
         assert analysis.structured_output["result"]["summary_localizations"]["en"]["status"] == "completed"
         step = db.query(AnalysisCheckStep).filter_by(
             check_run_id=check_run.id,
-            step_name="summary_localization_en",
+            step_name="summary_generation_en",
         ).one()
         effective = next(item for item in step.artifacts if item["key"] == "effective_run_parameters")
-        assert effective["run_parameters"]["summary_localization_provider"] == Provider.OPENAI_COMPATIBLE.value
-        assert effective["run_parameters"]["summary_localization_model"] == "gpt-test"
+        assert effective["run_parameters"]["summary_generation_provider"] == Provider.OPENAI_COMPATIBLE.value
+        assert effective["run_parameters"]["summary_generation_model"] == "gpt-test"
     finally:
         db.close()
         get_settings.cache_clear()
@@ -302,6 +408,17 @@ def _seed(db):
         },
         run_parameters={}, artifacts=[], uploaded_workbook_metadata={},
     )
+    output = dict(analysis.structured_output)
+    result = dict(output["result"])
+    result["summary_localizations"] = {
+        "version": summary_localization.SUMMARY_LOCALIZATION_VERSION,
+        "generation_mode": summary_localization.SUMMARY_GENERATION_MODE,
+        "source_revision": str(check_run.id),
+        "ru": {"status": "queued", "payload": None, "error_message": None},
+        "en": {"status": "queued", "payload": None, "error_message": None},
+    }
+    output["result"] = result
+    analysis.structured_output = output
     key = ProviderKey(
         owner_id=user.id, provider=Provider.OPENAI_COMPATIBLE.value, default_model="gpt-test", available_models=["gpt-test"],
         encrypted_api_key=encrypt_secret("sk-test"), api_key_fingerprint="test",

@@ -170,7 +170,7 @@ export default function AnalysisDetailPage() {
     let cancelled = false;
     let timer: number | undefined;
     const hasPendingVariant = (value: SummaryLocalizationsRecord) =>
-      [value.ru.status, value.en.status].some((status) => status === "queued" || status === "running");
+      value.available && [value.ru.status, value.en.status].some((status) => status === "queued" || status === "running");
 
     async function refreshLocalizations(initial: boolean) {
       try {
@@ -187,7 +187,7 @@ export default function AnalysisDetailPage() {
         }
       } catch (err) {
         if (!cancelled) {
-          setSummaryLocalizationError(err instanceof Error ? err.message : "Failed to prepare Summary translations");
+          setSummaryLocalizationError(err instanceof Error ? err.message : "Failed to prepare Summary language versions");
         }
       }
     }
@@ -865,7 +865,7 @@ const summaryLabels = {
   ru: {
     languageSelector: "Язык Summary",
     preparing: "Готовим русскую версию Summary. Она появится здесь автоматически.",
-    translationError: "Не удалось подготовить перевод Summary. Повторная попытка начнётся при следующем открытии страницы.",
+    translationError: "Не удалось подготовить языковую версию Summary. Повторная попытка начнётся при следующем открытии страницы.",
     systemVerdict: "Системный вердикт",
     agentVerdicts: "Вердикты агентов",
     shortSummary: "Краткое саммари",
@@ -879,7 +879,7 @@ const summaryLabels = {
   en: {
     languageSelector: "Summary language",
     preparing: "Preparing the English Summary. It will appear here automatically.",
-    translationError: "The Summary translation could not be prepared. It will retry when the page is opened again.",
+    translationError: "The Summary language version could not be prepared. It will retry when the page is opened again.",
     systemVerdict: "System verdict",
     agentVerdicts: "Agent verdicts",
     shortSummary: "Short Summary",
@@ -918,10 +918,12 @@ function ResultPanel({
 }) {
   const verdict = buildFinalVerdict(analysis);
   const agentVerdicts = buildAgentVerdicts(analysis);
-  const variant = localizations?.[language];
-  const localizedPayload = variant?.status === "completed" ? variant.payload : null;
   const nativeLanguage: OutputLanguage = analysis.run_parameters?.output_language === "en" ? "en" : "ru";
-  const fallbackToNative = !localizedPayload && language === nativeLanguage;
+  const bilingualAvailable = localizations?.available === true && localizations.generation_mode === "independent";
+  const displayLanguage = bilingualAvailable ? language : nativeLanguage;
+  const variant = bilingualAvailable ? localizations?.[displayLanguage] : null;
+  const localizedPayload = variant?.status === "completed" ? variant.payload : null;
+  const fallbackToNative = !bilingualAvailable || (!localizedPayload && displayLanguage === nativeLanguage);
   const shortSummary = localizedPayload?.short_summary ?? (fallbackToNative ? analysisShortSummary(analysis) : null);
   const productMarkdown = localizedPayload?.product_analysis_markdown ?? (fallbackToNative ? resultProductAnalysisMarkdown(analysis) : null);
   const stageChecklist = localizedPayload?.stage_checklist ?? (fallbackToNative ? analysisStageChecklist(analysis) : []);
@@ -932,14 +934,14 @@ function ResultPanel({
   );
   const financialDisplay =
     financialResult && isIcReviewCompactResult(financialResult)
-      ? buildIcReviewCompactDisplay(financialResult, language)
+      ? buildIcReviewCompactDisplay(financialResult, displayLanguage)
       : null;
-  const labels = summaryLabels[language];
-  const isPreparing = !localizedPayload && !fallbackToNative && (!variant || variant.status === "queued" || variant.status === "running" || variant.status === "missing");
+  const labels = summaryLabels[displayLanguage];
+  const isPreparing = bilingualAvailable && !localizedPayload && !fallbackToNative && (!variant || variant.status === "queued" || variant.status === "running" || variant.status === "missing");
 
   return (
     <section className="analysis-result-surface" aria-label={labels.summaryReport}>
-      <div className="analysis-summary-language-switch" aria-label={labels.languageSelector}>
+      {bilingualAvailable ? <div className="analysis-summary-language-switch" aria-label={labels.languageSelector}>
         <button
           aria-pressed={language === "ru"}
           className={language === "ru" ? "analysis-summary-language-button analysis-summary-language-button--active" : "analysis-summary-language-button"}
@@ -956,14 +958,14 @@ function ResultPanel({
         >
           ENG
         </button>
-      </div>
-      {localizationError || variant?.status === "failed" ? <div className="analysis-alert">{labels.translationError}</div> : null}
+      </div> : null}
+      {bilingualAvailable && (localizationError || variant?.status === "failed") ? <div className="analysis-alert">{labels.translationError}</div> : null}
       {isPreparing ? <div className="analysis-summary-language-loading" aria-live="polite">{labels.preparing}</div> : null}
       <div className="analysis-result-stack">
         {!isPreparing ? <>
         <section className={`analysis-result-verdict analysis-result-verdict--${verdict.tone}`} aria-label={labels.systemVerdict}>
           <span>{labels.systemVerdict}</span>
-          <strong>{localizedVerdictLabel(verdict.label, language)}</strong>
+          <strong>{localizedVerdictLabel(verdict.label, displayLanguage)}</strong>
           <div className="analysis-result-agent-verdicts" aria-label={labels.agentVerdicts}>
             {agentVerdicts.map((agentVerdict, index) => (
               <div className="analysis-result-agent-verdict" key={agentVerdict.label}>
@@ -973,7 +975,7 @@ function ResultPanel({
                     className={`analysis-result-agent-verdict__marker analysis-result-agent-verdict__marker--${agentVerdict.verdict.tone}`}
                     aria-hidden="true"
                   />
-                  {localizedVerdictLabel(agentVerdict.verdict.label, language)}
+                  {localizedVerdictLabel(agentVerdict.verdict.label, displayLanguage)}
                 </span>
               </div>
             ))}
@@ -985,7 +987,7 @@ function ResultPanel({
         </section>
         <section className="analysis-result-report" aria-label={labels.summaryReport}>
           <ResultReportSection title={labels.productAnalysis}>
-            {stageChecklist.length ? <StageChecklist items={stageChecklist} language={language} /> : null}
+            {stageChecklist.length ? <StageChecklist items={stageChecklist} language={displayLanguage} /> : null}
             {productMarkdown ? <MarkdownPreview markdown={productMarkdown} className="gc-markdown-preview--narrative" unboxed /> : null}
             {!productMarkdown && !stageChecklist.length ? (
               <p className="analysis-muted">{labels.noProductOutput}</p>
@@ -993,7 +995,7 @@ function ResultPanel({
           </ResultReportSection>
           <ResultReportSection title={labels.financialAnalysis}>
             {financialDisplay ? (
-              <IcReviewTextOutput display={financialDisplay} language={language} />
+              <IcReviewTextOutput display={financialDisplay} language={displayLanguage} />
             ) : (
               <p className="analysis-muted">{labels.noFinancialOutput}</p>
             )}
