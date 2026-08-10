@@ -21,6 +21,18 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Recover Gate Challenger from malformed or truncated provider JSON and
+  expose the original case document where users expect it. Main analysis now
+  retries one invalid JSON response once with the same schema and anonymized
+  context, continues through the Responses API response id when available,
+  raises the retry output budget, preserves first-attempt raw output and
+  provider completion metadata, and accounts for usage across both attempts.
+  The case subtitle now offers `Скачать оригинальный документ`; the existing
+  owner-authorized raw endpoint additionally rejects missing files and stored
+  paths outside `STORAGE_ROOT`. Verified full worker tests (`190 passed`), API
+  tests (`208 passed`, two environment-only git executable checks deselected),
+  frontend tests (`148 passed`), a production Next.js build, local visual QA,
+  and rebuilt/restarted local API, web, and worker services.
 - [x] Bound IC Review role execution and recover cleanly from provider stalls.
   A role previously inherited a 600-second provider timeout with three SDK
   retries and could repeat the full call once more for malformed JSON, allowing

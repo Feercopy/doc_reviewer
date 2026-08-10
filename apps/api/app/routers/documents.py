@@ -273,13 +273,21 @@ def get_raw_document(
     document_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_current_user),
+    storage: LocalDocumentStorage = Depends(get_document_storage),
 ) -> FileResponse:
     try:
         document = get_document_for_actor(db=db, actor=current_user, document_id=document_id)
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found") from exc
 
-    return FileResponse(document.storage_path, filename=document.original_filename, media_type=document.mime_type)
+    try:
+        stored_path = storage.stored_path(document.storage_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document file not found") from exc
+    if not stored_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document file not found")
+
+    return FileResponse(stored_path, filename=document.original_filename, media_type=document.mime_type)
 
 
 @router.post("/{document_id}/reparse", response_model=DocumentRead)

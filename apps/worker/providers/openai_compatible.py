@@ -55,7 +55,10 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             input_tokens=getattr(usage, "prompt_tokens", None),
             output_tokens=getattr(usage, "completion_tokens", None),
             latency_ms=latency_ms,
-            provider_metadata={"provider": request.provider.value},
+            provider_metadata={
+                "provider": request.provider.value,
+                "finish_reason": getattr(choice, "finish_reason", None),
+            },
         )
 
     def run_response(self, request: ProviderResponseRequest) -> AnalysisProviderResult:
@@ -97,13 +100,22 @@ class OpenAICompatibleAdapter(ProviderAdapter):
 
         usage = getattr(response, "usage", None)
         response_id = getattr(response, "id", None)
+        incomplete_details = getattr(response, "incomplete_details", None)
+        incomplete_reason = getattr(incomplete_details, "reason", None)
+        if incomplete_reason is None and isinstance(incomplete_details, dict):
+            incomplete_reason = incomplete_details.get("reason")
         return AnalysisProviderResult(
             structured_text=_responses_text(response),
             raw_output=_dump_response(response),
             input_tokens=_usage_value(usage, "input_tokens", "prompt_tokens"),
             output_tokens=_usage_value(usage, "output_tokens", "completion_tokens"),
             latency_ms=latency_ms,
-            provider_metadata={"provider": request.provider.value, "response_id": response_id},
+            provider_metadata={
+                "provider": request.provider.value,
+                "response_id": response_id,
+                "response_status": getattr(response, "status", None),
+                "incomplete_reason": incomplete_reason,
+            },
         )
 
     @staticmethod
