@@ -4,12 +4,14 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.logging import worker_logger
-from app.models.analysis import Analysis
+from app.models.analysis import Analysis, AnalysisCheckRun
+from app.models.provider_key import ProviderKey
 from app.schemas.enums import Provider
 from app.security.secrets import decrypt_secret
-from app.services.provider_keys import get_shared_provider_key
+from app.services.provider_keys import get_shared_provider_key, list_shared_provider_keys
 from app.services.summary_localizations import latest_completed_ic_review
 from skills.summary_localization import (
     LANGUAGES,
@@ -38,10 +40,7 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
             analysis=analysis,
             check_run=check_run,
         )
-        provider = Provider(check_run.provider)
-        provider_key = None
-        api_key = None
-        base_url = None
+        translation_provider: tuple[Provider, str, str | None, str | None] | None = None
         targets = ["ru", "en"] if source_language == "mixed" else [next(language for language in LANGUAGES if language != source_language)]
         for target_language in targets:
             state = ((analysis.structured_output or {}).get("result") or {}).get("summary_localizations") or {}
@@ -51,12 +50,9 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
                 source_payload = target["payload"]
                 source_fingerprint = summary_payload_fingerprint(source_payload)
                 continue
-            if provider_key is None and provider != Provider.HERMES:
-                provider_key = get_shared_provider_key(db=session, provider=provider)
-                if provider_key is None:
-                    raise RuntimeError("provider_key_missing")
-                api_key = decrypt_secret(provider_key.encrypted_api_key)
-                base_url = provider_key.base_url
+            if translation_provider is None:
+                translation_provider = _resolve_translation_provider(session=session, check_run=check_run)
+            provider, model, api_key, base_url = translation_provider
             translated_payload = translate_and_persist_summary(
                 session=session,
                 analysis=analysis,
@@ -65,7 +61,7 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
                 source_payload=source_payload,
                 target_language=target_language,
                 provider=provider,
-                model=check_run.model,
+                model=model,
                 api_key=api_key,
                 base_url=base_url,
             )
@@ -102,3 +98,46 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
     finally:
         if owns_session:
             session.close()
+
+
+def _resolve_translation_provider(
+    *,
+    session: Session,
+    check_run: AnalysisCheckRun,
+) -> tuple[Provider, str, str | None, str | None]:
+    historical_provider = Provider(check_run.provider)
+    if historical_provider == Provider.HERMES and get_settings().hermes_enabled:
+        return historical_provider, check_run.model, None, None
+
+    provider_key = get_shared_provider_key(db=session, provider=historical_provider)
+    if provider_key is None:
+        provider_key = _fallback_provider_key(session)
+    if provider_key is None:
+        raise RuntimeError("provider_key_missing")
+
+    provider = Provider(provider_key.provider)
+    model = _available_translation_model(
+        provider_key=provider_key,
+        historical_model=check_run.model if provider == historical_provider else None,
+    )
+    return (
+        provider,
+        model,
+        decrypt_secret(provider_key.encrypted_api_key),
+        provider_key.base_url,
+    )
+
+
+def _fallback_provider_key(session: Session) -> ProviderKey | None:
+    provider_keys = list_shared_provider_keys(db=session)
+    return next(
+        (key for key in provider_keys if key.provider == Provider.OPENAI_COMPATIBLE.value),
+        provider_keys[0] if provider_keys else None,
+    )
+
+
+def _available_translation_model(*, provider_key: ProviderKey, historical_model: str | None) -> str:
+    available_models = provider_key.available_models or []
+    if historical_model and historical_model in available_models:
+        return historical_model
+    return provider_key.default_model

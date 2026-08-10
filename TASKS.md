@@ -2269,3 +2269,20 @@ Exit criteria:
   config, and diff checks; the Next production build compiles and type-checks
   successfully before reaching the repository's pre-existing `/404` `<Html>`
   prerender failure.
+- 2026-08-10: Hardened historical Summary translation after both RU and EN
+  backfills failed on existing analyses. The original implementation sent the
+  entire product and financial Summary through one large strict-JSON provider
+  request with no malformed-JSON recovery. Translation now splits long text at
+  stable whitespace boundaries, preserves Markdown separators in code, sends
+  bounded batches of at most 20 segments / 12k source characters with an 8k
+  output budget, retries one incomplete or schema-invalid JSON response, and
+  records every provider attempt in the synthesis trace. Historical runs now
+  reuse their original provider/model only while that configuration remains
+  active; otherwise translation falls back to the current shared OpenAI-
+  compatible provider and its default model, with the effective provider/model
+  recorded in trace metadata. A localized payload is
+  still persisted only after every batch validates, so Gate Challenger, DA, IC
+  Review, verdicts, numbers, and existing completed summaries are unaffected.
+  Added long historical output and truncated JSON regressions; localization and
+  IC Review suites pass together (`37 passed`); the full worker suite passes
+  (`195 passed`).
