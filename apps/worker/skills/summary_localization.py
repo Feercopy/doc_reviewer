@@ -43,6 +43,7 @@ MAX_BATCH_CHARS = 12000
 MAX_BATCH_SEGMENTS = 20
 LANGUAGES = ("ru", "en")
 SHORT_SUMMARY_EVIDENCE_CHARS = 1800
+CYRILLIC_PATTERN = re.compile(r"[\u0400-\u052f]")
 
 
 def build_summary_payload(*, analysis: Analysis, check_run: AnalysisCheckRun, language: str) -> dict[str, Any]:
@@ -168,7 +169,48 @@ def generate_and_persist_summary_variant(
                 batch_segments=batch,
                 attempt_results=provider_results,
             )
-            generated_segments.update(generated["content"])
+            generated_content = generated["content"]
+            if target_language == "en":
+                affected_segment_ids = _cyrillic_segment_ids(generated_content)
+                if affected_segment_ids:
+                    affected_segments = {
+                        segment_id: batch[segment_id]
+                        for segment_id in affected_segment_ids
+                    }
+                    correction_schema = _generation_schema(
+                        language=target_language,
+                        segment_ids=affected_segment_ids,
+                    )
+                    corrected = _run_generation_batch_with_json_retry(
+                        provider=provider,
+                        model=model,
+                        api_key=api_key,
+                        base_url=base_url,
+                        prompt=_english_cyrillic_retry_prompt(
+                            segments=affected_segments,
+                            segment_contexts={
+                                segment_id: segment_contexts[segment_id]
+                                for segment_id in affected_segment_ids
+                            },
+                            response_schema=correction_schema,
+                            batch_index=batch_index,
+                            batch_count=len(batches),
+                        ),
+                        response_schema=correction_schema,
+                        run_parameters=run_parameters,
+                        batch_index=batch_index,
+                        batch_segments=affected_segments,
+                        attempt_results=provider_results,
+                        language_retry=True,
+                    )
+                    generated_content.update(corrected["content"])
+                    remaining_segment_ids = _cyrillic_segment_ids(generated_content)
+                    if remaining_segment_ids:
+                        raise ValueError(
+                            "english_summary_contains_cyrillic:"
+                            + ",".join(remaining_segment_ids)
+                        )
+            generated_segments.update(generated_content)
         generated_segments = deanonymize_model_value(
             generated_segments,
             metadata=run_parameters.get(RUN_PARAMETER_KEY),
@@ -427,6 +469,7 @@ def _run_generation_batch_with_json_retry(
     batch_index: int,
     batch_segments: dict[str, str],
     attempt_results: list[AnalysisProviderResult],
+    language_retry: bool = False,
 ) -> dict[str, Any]:
     result = _call_generation_provider(
         provider=provider,
@@ -440,6 +483,7 @@ def _run_generation_batch_with_json_retry(
             batch_index=batch_index,
             batch_segments=batch_segments,
             retry=False,
+            language_retry=language_retry,
         ),
     )
     attempt_results.append(result)
@@ -463,6 +507,7 @@ def _run_generation_batch_with_json_retry(
                 batch_index=batch_index,
                 batch_segments=batch_segments,
                 retry=True,
+                language_retry=language_retry,
             ),
         )
         attempt_results.append(retry_result)
@@ -499,15 +544,24 @@ def _batch_run_parameters(
     batch_index: int,
     batch_segments: dict[str, str],
     retry: bool,
+    language_retry: bool,
 ) -> dict[str, Any]:
     parameters = dict(run_parameters)
     parameters["summary_generation_batch"] = batch_index + 1
     parameters["summary_generation_json_retry"] = retry
-    mock_key = (
-        "summary_generation_json_retry_mock_provider_results"
-        if retry
-        else "summary_generation_mock_provider_results"
-    )
+    parameters["summary_generation_language_retry"] = language_retry
+    if language_retry:
+        mock_key = (
+            "summary_generation_language_retry_json_retry_mock_provider_results"
+            if retry
+            else "summary_generation_language_retry_mock_provider_results"
+        )
+    else:
+        mock_key = (
+            "summary_generation_json_retry_mock_provider_results"
+            if retry
+            else "summary_generation_mock_provider_results"
+        )
     mock_results = parameters.get(mock_key)
     language = parameters.get("summary_generation_language")
     if isinstance(mock_results, dict) and isinstance(mock_results.get(language), dict):
@@ -570,12 +624,21 @@ def _generation_prompt(
     batch_count: int,
 ) -> str:
     target_name = "Russian" if target_language == "ru" else "English"
+    language_quality_instruction = (
+        "Write the entire response in English and do not use Cyrillic characters. "
+        "Translate ordinary Russian business and product terms by meaning. Preserve only confirmed "
+        "brand, project, and proper names: use their established official Latin spelling when known, "
+        "otherwise transliterate them into Latin characters. Preserve anonymization placeholders exactly."
+        if target_language == "en"
+        else "Write the entire response in natural Russian. Preserve anonymization placeholders exactly."
+    )
     return "\n\n".join(
         [
             f"Create fresh Summary content in natural {target_name} from the evidence segments below.",
             "This is an independent synthesis task, not a translation task. Read the evidence for meaning and write each target field as a native business reviewer would formulate it. Do not mirror sentence structure or translate word for word.",
+            language_quality_instruction,
             f"This is batch {batch_index + 1} of {batch_count}. Generate only the target fields represented by segments in this batch.",
-            "Do not add facts, conclusions, scores, or evidence. Preserve all numbers, formulas, Markdown structure, placeholders, product names, and proper nouns. For short_summary, combine the Gate Challenger recommendation and IC Review brief into a concise decision-oriented summary. Return every segment exactly once.",
+            "Do not add facts, conclusions, scores, or evidence. Preserve all numbers, formulas, Markdown structure, and placeholders. Handle confirmed product names and proper nouns according to the language-specific instruction above. For short_summary, combine the Gate Challenger recommendation and IC Review brief into a concise decision-oriented summary. Return every segment exactly once.",
             "Return one JSON object matching this schema, without Markdown fences:",
             json.dumps(response_schema, ensure_ascii=False, sort_keys=True),
             "Target field contexts (do not return these):",
@@ -584,6 +647,38 @@ def _generation_prompt(
             json.dumps(segments, ensure_ascii=False, sort_keys=True),
         ]
     )
+
+
+def _english_cyrillic_retry_prompt(
+    *,
+    segments: dict[str, str],
+    segment_contexts: dict[str, str],
+    response_schema: dict[str, Any],
+    batch_index: int,
+    batch_count: int,
+) -> str:
+    return "\n\n".join(
+        [
+            "LANGUAGE QUALITY RETRY: Rewrite only the affected target fields in natural English.",
+            "The previous English output contained Cyrillic characters. Do not return any Cyrillic characters. Translate ordinary Russian business and product terms by meaning. For confirmed brand, project, and proper names, use the established official Latin spelling when known; otherwise transliterate them into Latin characters.",
+            "Preserve all facts, numbers, formulas, Markdown structure, and anonymization placeholders exactly. Do not add conclusions or evidence.",
+            f"This correction belongs to batch {batch_index + 1} of {batch_count}. Return every affected segment exactly once and no other segments.",
+            "Return one JSON object matching this schema, without Markdown fences:",
+            json.dumps(response_schema, ensure_ascii=False, sort_keys=True),
+            "Target field contexts (do not return these):",
+            json.dumps(segment_contexts, ensure_ascii=False, sort_keys=True),
+            "Original evidence segments:",
+            json.dumps(segments, ensure_ascii=False, sort_keys=True),
+        ]
+    )
+
+
+def _cyrillic_segment_ids(content: dict[str, str]) -> list[str]:
+    return [
+        segment_id
+        for segment_id, value in content.items()
+        if CYRILLIC_PATTERN.search(value)
+    ]
 
 
 def _state_for_revision(*, analysis: Analysis, revision: str) -> dict[str, Any]:

@@ -72,8 +72,8 @@ def test_summary_variants_are_generated_independently_without_changing_decision_
         segment_ids = summary_localization._generation_plan(source, paths)[0]
         generated = {
             language: {
-                segment_id: f"{language.upper()} generated {index}: {value}"
-                for index, (segment_id, value) in enumerate(segment_ids.items())
+                segment_id: f"{language.upper()} generated {index}"
+                for index, segment_id in enumerate(segment_ids)
             }
             for language in ("ru", "en")
         }
@@ -163,9 +163,179 @@ def test_english_generation_uses_original_evidence_not_russian_variant(tmp_path,
         assert "RU generated" not in en_prompt
         assert "Нужны данные" in en_prompt
         assert "This is an independent synthesis task, not a translation task" in en_prompt
+        assert "do not use Cyrillic characters" in en_prompt
+        assert "Translate ordinary Russian business and product terms by meaning" in en_prompt
+        assert "otherwise transliterate them into Latin characters" in en_prompt
     finally:
         db.close()
         get_settings.cache_clear()
+
+
+def test_english_generation_rewrites_only_segments_with_cyrillic(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
+    db = _session()
+    injected_segment_id: str | None = None
+    correction_segment_ids: list[str] = []
+
+    class LanguageQualityAdapter:
+        def run(self, request):
+            nonlocal injected_segment_id
+            segment_ids = request.response_schema["properties"]["content"]["required"]
+            language = request.response_schema["properties"]["language"]["const"]
+            if "LANGUAGE QUALITY RETRY" in request.prompt:
+                correction_segment_ids.extend(segment_ids)
+                content = {
+                    segment_id: "A five-year vertical business case with confirmed demand"
+                    for segment_id in segment_ids
+                }
+            else:
+                content = {
+                    segment_id: f"Generated {language} {segment_id}"
+                    for segment_id in segment_ids
+                }
+                if language == "en" and injected_segment_id is None:
+                    injected_segment_id = segment_ids[0]
+                    content[injected_segment_id] = "A five-year Вертикальный кейс with confirmed demand"
+            return AnalysisProviderResult(
+                structured_text=json.dumps(
+                    {
+                        "run_mode": "independent_summary_generation",
+                        "language": language,
+                        "content": content,
+                    }
+                ),
+                raw_output="language quality generation",
+                latency_ms=1,
+            )
+
+    monkeypatch.setattr(summary_localization, "get_provider_adapter", lambda *_args, **_kwargs: LanguageQualityAdapter())
+    try:
+        analysis, check_run = _seed(db)
+
+        run_summary_localizations(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        variant = analysis.structured_output["result"]["summary_localizations"]["en"]
+        assert variant["status"] == "completed"
+        assert injected_segment_id is not None
+        assert correction_segment_ids == [injected_segment_id]
+        assert not summary_localization.CYRILLIC_PATTERN.search(
+            json.dumps(variant["payload"], ensure_ascii=False)
+        )
+        step = db.query(AnalysisCheckStep).filter_by(
+            check_run_id=check_run.id,
+            step_name="summary_generation_en",
+        ).one()
+        assert len(json.loads(step.raw_output)) == 2
+    finally:
+        db.close()
+        get_settings.cache_clear()
+
+
+def test_english_generation_fails_when_quality_retry_still_contains_cyrillic(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
+    db = _session()
+
+    class PersistentlyMixedLanguageAdapter:
+        def run(self, request):
+            segment_ids = request.response_schema["properties"]["content"]["required"]
+            language = request.response_schema["properties"]["language"]["const"]
+            content = {
+                segment_id: (
+                    "Generated Russian summary"
+                    if language == "ru"
+                    else "The result still contains кейс"
+                )
+                for segment_id in segment_ids
+            }
+            return AnalysisProviderResult(
+                structured_text=json.dumps(
+                    {
+                        "run_mode": "independent_summary_generation",
+                        "language": language,
+                        "content": content,
+                    }
+                ),
+                raw_output="persistent mixed language",
+                latency_ms=1,
+            )
+
+    monkeypatch.setattr(
+        summary_localization,
+        "get_provider_adapter",
+        lambda *_args, **_kwargs: PersistentlyMixedLanguageAdapter(),
+    )
+    try:
+        analysis, check_run = _seed(db)
+
+        run_summary_localizations(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        variants = analysis.structured_output["result"]["summary_localizations"]
+        assert variants["ru"]["status"] == "completed"
+        assert variants["en"]["status"] == "failed"
+        assert variants["en"]["error_message"].startswith("english_summary_contains_cyrillic:")
+        assert db.query(AnalysisCheckStep).filter_by(
+            check_run_id=check_run.id,
+            step_name="summary_generation_en",
+            status=RunStatus.FAILED.value,
+        ).count() == 1
+    finally:
+        db.close()
+        get_settings.cache_clear()
+
+
+def test_english_language_check_runs_before_person_names_are_deanonymized(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    monkeypatch.setenv("DOCUMENT_ANONYMIZATION_ENABLED", "true")
+    get_settings.cache_clear()
+    db = _session()
+
+    class PlaceholderGenerationAdapter:
+        def run(self, request):
+            assert "Иван Петров" not in request.prompt
+            segment_ids = request.response_schema["properties"]["content"]["required"]
+            language = request.response_schema["properties"]["language"]["const"]
+            return AnalysisProviderResult(
+                structured_text=json.dumps(
+                    {
+                        "run_mode": "independent_summary_generation",
+                        "language": language,
+                        "content": {
+                            segment_id: "Approved by [PERSON_001]"
+                            for segment_id in segment_ids
+                        },
+                    }
+                ),
+                raw_output="anonymized person placeholder",
+                latency_ms=1,
+            )
+
+    monkeypatch.setattr(
+        summary_localization,
+        "get_provider_adapter",
+        lambda *_args, **_kwargs: PlaceholderGenerationAdapter(),
+    )
+    try:
+        analysis, _ = _seed(db)
+        output = dict(analysis.structured_output)
+        output["assessment_markdown"] = "Оценка документа\n\nИван Петров owns the launch."
+        analysis.structured_output = output
+        db.commit()
+
+        run_summary_localizations(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        variant = analysis.structured_output["result"]["summary_localizations"]["en"]
+        assert variant["status"] == "completed"
+        assert "Иван Петров" in json.dumps(variant["payload"], ensure_ascii=False)
+        assert "[PERSON_001]" not in json.dumps(variant["payload"], ensure_ascii=False)
+    finally:
+        db.close()
+        get_settings.cache_clear()
+        monkeypatch.delenv("DOCUMENT_ANONYMIZATION_ENABLED", raising=False)
 
 
 def test_long_summary_is_generated_in_bounded_independent_batches(tmp_path, monkeypatch):
