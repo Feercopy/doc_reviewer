@@ -15,6 +15,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.models.analysis import Analysis, AnalysisCheckRun
 from app.schemas.enums import Provider
 from app.services.summary_localizations import SUMMARY_GENERATION_MODE, SUMMARY_LOCALIZATION_VERSION
+from app.services.stage_checklists import canonicalize_stage_checklist_labels
 from ic_review.role_runner import apply_ic_review_provider_defaults
 from privacy.model_anonymization import (
     RUN_PARAMETER_KEY,
@@ -223,6 +224,10 @@ def generate_and_persist_summary_variant(
                 for kind, value in parts
             )
             _set_path(payload, path, generated_text)
+        payload = canonicalize_stage_checklist_labels(
+            payload,
+            output_language=target_language,
+        )
         validate(instance=payload, schema=_summary_schema())
     except Exception as exc:
         session.rollback()

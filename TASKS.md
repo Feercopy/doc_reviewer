@@ -21,6 +21,20 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Make Required elements labels deterministic in bilingual Summary output.
+  A Stream Review label (`Подтвержденная проблематика`) was falsely classified
+  as a person name, restored after the English language check, and displayed in
+  Russian. The canonical Gate/Stream checklist now lives in one shared contract;
+  workers persist its exact Russian or English labels and the API applies the
+  same labels when reading already stored version-2 summaries, so existing
+  reports are corrected without rerunning analysis. The known business phrase
+  is also excluded from person-name anonymization. Verified focused analysis,
+  contract, and localization API tests (`52 passed`), focused worker tests
+  (`16 passed`), the full worker suite (`200 passed`), production-style
+  API contract lookup, Python/JSON compilation, and `git diff --check`. The full
+  API suite reached `205 passed`; eight unrelated container-environment tests
+  could not run because the worker image intentionally lacks repository deploy
+  files, Git, and the host-only IC source default.
 - [x] Prevent mixed Russian text in independently generated English Summary
   output. The English prompt now requires semantic translation of ordinary
   Russian business terms and Latin spelling or transliteration only for

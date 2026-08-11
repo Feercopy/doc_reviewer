@@ -11,6 +11,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.models.analysis import Analysis, AnalysisCheckRun
 from app.schemas.analyses import SummaryLocalizationsRead, SummaryLocalizationVariantRead
 from app.schemas.enums import RunStatus
+from app.services.stage_checklists import canonicalize_stage_checklist_labels
 
 
 SUMMARY_LOCALIZATIONS_KEY = "summary_localizations"
@@ -161,16 +162,22 @@ def _read_state(analysis_id: UUID, state: dict[str, Any]) -> SummaryLocalization
         source_revision=state.get("source_revision"),
         generation_mode=state.get("generation_mode") if available else None,
         available=available,
-        ru=_variant(state.get("ru") if available else None),
-        en=_variant(state.get("en") if available else None),
+        ru=_variant(state.get("ru") if available else None, language="ru"),
+        en=_variant(state.get("en") if available else None, language="en"),
     )
 
 
-def _variant(value: Any) -> SummaryLocalizationVariantRead:
+def _variant(value: Any, *, language: str) -> SummaryLocalizationVariantRead:
     item = value if isinstance(value, dict) else {}
+    raw_payload = item.get("payload")
+    payload = (
+        canonicalize_stage_checklist_labels(raw_payload, output_language=language)
+        if isinstance(raw_payload, dict)
+        else None
+    )
     return SummaryLocalizationVariantRead(
         status=str(item.get("status") or "missing"),
-        payload=item.get("payload") if isinstance(item.get("payload"), dict) else None,
+        payload=payload,
         error_message=item.get("error_message") if isinstance(item.get("error_message"), str) else None,
         source_language=item.get("source_language") if isinstance(item.get("source_language"), str) else None,
         source_fingerprint=item.get("source_fingerprint") if isinstance(item.get("source_fingerprint"), str) else None,
