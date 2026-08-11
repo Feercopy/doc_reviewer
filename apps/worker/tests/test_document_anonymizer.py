@@ -104,6 +104,7 @@ def test_anonymizer_does_not_scrub_gate_challenger_terms_as_person_names():
         "Gate Challenger produces Progress Review evidence. "
         "Contact Rate, North Star Metric, Unit Economics, Product Market Fit, "
         "Customer Experience, and Avito Sales must stay readable."
+        " Подтвержденная проблематика is a required Stream Review element."
     )
     parsed = ParsedDocument(
         plain_text=text,
@@ -123,6 +124,7 @@ def test_anonymizer_does_not_scrub_gate_challenger_terms_as_person_names():
     assert "Product Market Fit" in anonymized.plain_text
     assert "Customer Experience" in anonymized.plain_text
     assert "Avito Sales" in anonymized.plain_text
+    assert "Подтвержденная проблематика" in anonymized.plain_text
     assert "[PERSON_" not in anonymized.plain_text
 
 

@@ -125,6 +125,7 @@ _NON_PERSON_PHRASES = {
     "north star metric",
     "product market fit",
     "unit economics",
+    "подтвержденная проблематика",
 }
 _NAME_METADATA_KEYS = {
     "author",

@@ -108,7 +108,8 @@ def test_summary_variants_are_generated_independently_without_changing_decision_
         en = variants["en"]["payload"]
         assert ru["short_summary"].startswith("RU generated")
         assert en["short_summary"].startswith("EN generated")
-        assert en["stage_checklist"][0]["label"].startswith("EN generated")
+        assert ru["stage_checklist"][0]["label"] == "Результаты проверки гипотез из Gate 1"
+        assert en["stage_checklist"][0]["label"] == "Gate 1 hypothesis validation results"
         assert en["stage_checklist"][0]["id"] == ru["stage_checklist"][0]["id"]
         assert en["stage_checklist"][0]["status"] == ru["stage_checklist"][0]["status"]
         assert en["financial_analysis"]["verdict"] == ru["financial_analysis"]["verdict"]
@@ -558,7 +559,7 @@ def _seed(db):
         verdict="need_evidence", summary="Нужны подтверждения",
         structured_output={
             "assessment_markdown": "Оценка документа\n\n## Вывод\nНужно подтвердить спрос.",
-            "stage_checklist": [{"id": "G2-1", "label": "Результаты гипотез", "status": "red", "evidence": "Нет данных"}],
+            "stage_checklist": [{"id": "gate2_hypothesis_results", "label": "Результаты гипотез", "status": "red", "evidence": "Нет данных"}],
             "result": {"short_summary": "Нужны подтверждения"},
         },
         run_parameters={"output_language": "ru"},
