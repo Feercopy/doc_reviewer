@@ -21,6 +21,16 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Prevent mixed Russian text in independently generated English Summary
+  output. The English prompt now requires semantic translation of ordinary
+  Russian business terms and Latin spelling or transliteration only for
+  confirmed names. Each generated batch is scanned for Cyrillic before
+  de-anonymization; only affected segments receive one strict language-quality
+  retry, and a still-mixed response is rejected instead of being persisted.
+  The original and corrective provider responses remain in the synthesis trace,
+  while Russian personal names restored after the model call are not treated as
+  generation errors. Verified focused Summary tests (`10 passed`), the full
+  worker suite (`200 passed`), Python compilation, and `git diff --check`.
 - [x] Make bilingual Summary readiness eager and switching truly instant for
   new analyses. IC Review now persists the version-2 Russian/English queued
   state in the same transaction that marks the review completed, so an already
