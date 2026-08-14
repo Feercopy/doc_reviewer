@@ -2334,3 +2334,30 @@ Exit criteria:
   Added long historical output and truncated JSON regressions; localization and
   IC Review suites pass together (`37 passed`); the full worker suite passes
   (`195 passed`).
+- 2026-08-14: Isolated completed IC Review persistence from optional Summary
+  postprocessing after production analysis
+  `6b39f9c1-637c-4c5c-8a6b-fe455d37ac91` surfaced `programming_error`. The
+  worker now commits the validated IC result before preparing bilingual
+  localizations, short Summary, or rationale. Each optional step rolls back and
+  records only a sanitized error code when it fails; even failure while saving
+  that diagnostic cannot downgrade the completed financial review. Missing
+  bilingual state remains retryable through the existing Summary API/page
+  flow. On 2026-08-17 the recovery path was tightened after another production
+  `programming_error`: each new completed IC run persists a capability marker,
+  so the Summary endpoint can recreate missing version-2 language state after
+  a preparation failure or commit/page race without enabling language controls
+  for historical reports. The validated IC result and a non-runnable
+  localization `waiting` state are persisted together before optional short
+  Summary and rationale calls, so a worker restart cannot downgrade the core
+  result. The language jobs become runnable only after those JSON writes finish;
+  the page polls the waiting state, and stale waiting work is recoverable. This
+  also prevents a second worker or delayed queue delivery from losing either
+  result. Failure to persist the final readiness marker is isolated from the
+  completed IC result and leaves the waiting state recoverable. A final
+  commit-boundary guard prevents every unexpected post-completion exception,
+  including a failed database reload, from entering the legacy `Failed` path.
+  Added regressions for localization preparation,
+  nested Summary failure-recording `ProgrammingError`, and marker-gated API
+  recovery. Verified the full worker suite (`205 passed`), the full API suite
+  (`213 passed`), the full web suite (`149 passed`), focused recovery coverage,
+  and `git diff --check`.

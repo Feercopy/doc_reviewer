@@ -58,6 +58,40 @@ def test_legacy_translation_job_is_skipped_without_enabling_language_variants(tm
         get_settings.cache_clear()
 
 
+def test_waiting_localizations_are_not_started_by_a_delayed_job(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
+    db = _session()
+    try:
+        analysis, _check_run = _seed(db)
+        output = dict(analysis.structured_output)
+        result = dict(output["result"])
+        state = dict(result["summary_localizations"])
+        state["ru"] = {"status": "waiting", "payload": None, "error_message": None}
+        state["en"] = {"status": "waiting", "payload": None, "error_message": None}
+        result["summary_localizations"] = state
+        output["result"] = result
+        analysis.structured_output = output
+        db.commit()
+
+        monkeypatch.setattr(
+            summary_localization,
+            "get_provider_adapter",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("provider must not be called")),
+        )
+
+        run_summary_localizations(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        state = analysis.structured_output["result"]["summary_localizations"]
+        assert state["ru"]["status"] == "waiting"
+        assert state["en"]["status"] == "waiting"
+        assert db.query(AnalysisCheckStep).count() == 0
+    finally:
+        db.close()
+        get_settings.cache_clear()
+
+
 def test_summary_variants_are_generated_independently_without_changing_decision_data(tmp_path, monkeypatch):
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
     get_settings.cache_clear()

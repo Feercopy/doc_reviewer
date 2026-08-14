@@ -55,6 +55,19 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
             )
             return
 
+        runnable_statuses = {"queued", "running"}
+        if not any((state.get(language) or {}).get("status") in runnable_statuses for language in LANGUAGES):
+            worker_logger.info(
+                "summary_generation_skipped",
+                extra={
+                    "job_type": "run_summary_localizations",
+                    "entity_id": str(analysis_uuid),
+                    "status": "skipped",
+                    "reason": "localizations_not_queued",
+                },
+            )
+            return
+
         source_payload = build_summary_generation_source(
             analysis=analysis,
             check_run=check_run,
@@ -66,6 +79,8 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
             state = ((analysis.structured_output or {}).get("result") or {}).get("summary_localizations") or {}
             target = state.get(target_language) or {}
             if target.get("status") == "completed" and target.get("source_fingerprint") == source_fingerprint:
+                continue
+            if target.get("status") not in runnable_statuses:
                 continue
             if generation_provider is None:
                 generation_provider = _resolve_summary_provider(session=session, check_run=check_run)
