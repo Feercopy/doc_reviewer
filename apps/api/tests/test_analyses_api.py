@@ -38,7 +38,7 @@ def test_create_analysis_requires_completed_parse(client, db_session):
     assert response.status_code == 409
 
 
-def test_create_analysis_allows_stored_activated_progress_review(client, db_session):
+def test_create_analysis_rejects_stored_dormant_progress_review(client, db_session):
     app, documents_router = _disable_parse_enqueue()
     create_user(db_session, "author", "secret")
     seed_baseline_skills(db_session)
@@ -59,7 +59,7 @@ def test_create_analysis_allows_stored_activated_progress_review(client, db_sess
         app.dependency_overrides.pop(documents_router.get_parse_document_enqueue, None)
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "Hermes provider is disabled"
+    assert response.json()["detail"] == "Progress Review analysis is not enabled yet"
 
 
 def test_create_analysis_queues_default_gate2_skill_with_snapshot(client, db_session, monkeypatch, tmp_path):

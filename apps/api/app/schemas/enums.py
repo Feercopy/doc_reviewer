@@ -17,6 +17,7 @@ class DocumentType(StrEnum):
     GATE_2 = "gate_2"
     STREAM_REVIEW_1 = "stream_review_1"
     STREAM_REVIEW_2_PLUS = "stream_review_2_plus"
+    # Compatibility-only until the follow-up release enables detection and UI selection.
     PROGRESS_REVIEW = "progress_review"
     GATE_3 = "gate_3"
     UNKNOWN = "unknown"
@@ -26,7 +27,6 @@ class SelectableDocumentType(StrEnum):
     GATE_2 = "gate_2"
     STREAM_REVIEW_1 = "stream_review_1"
     STREAM_REVIEW_2_PLUS = "stream_review_2_plus"
-    PROGRESS_REVIEW = "progress_review"
     GATE_3 = "gate_3"
     UNKNOWN = "unknown"
 
@@ -40,7 +40,6 @@ GATE_CHALLENGER_DOCUMENT_TYPES = (
     DocumentType.GATE_2,
     DocumentType.STREAM_REVIEW_1,
     DocumentType.STREAM_REVIEW_2_PLUS,
-    DocumentType.PROGRESS_REVIEW,
     DocumentType.GATE_3,
 )
 

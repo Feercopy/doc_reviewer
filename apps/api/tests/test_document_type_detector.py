@@ -13,11 +13,11 @@ def test_document_type_enum_matches_gate_challenger_stages():
     ]
 
 
-def test_progress_review_enum_is_active_after_feature_activation():
+def test_progress_review_enum_is_dormant_until_feature_activation():
     from app.schemas.enums import GATE_CHALLENGER_DOCUMENT_TYPES
 
-    assert DocumentType.PROGRESS_REVIEW in GATE_CHALLENGER_DOCUMENT_TYPES
-    assert "progress_review" in {item.value for item in SelectableDocumentType}
+    assert DocumentType.PROGRESS_REVIEW not in GATE_CHALLENGER_DOCUMENT_TYPES
+    assert "progress_review" not in {item.value for item in SelectableDocumentType}
 
 
 def test_detects_gate_2_from_realistic_defense_text():
@@ -99,40 +99,6 @@ def test_detects_unqualified_stream_review_as_later_review_from_supporting_signa
     assert result.document_type == DocumentType.STREAM_REVIEW_2_PLUS
     assert result.confidence >= 0.45
     assert "Stream review" in result.explanation
-
-
-def test_detects_progress_review_from_stage_signals():
-    text = """
-    Progress Review package
-
-    The team compares plan / fact results since the previous SR, backlog
-    updates, traction model changes, resource assumptions, and next review
-    commitments.
-    """
-
-    result = detect_document_type(text)
-
-    assert result.document_type == DocumentType.PROGRESS_REVIEW
-    assert result.confidence >= 0.45
-    assert "Progress Review" in result.explanation
-
-
-def test_detects_progress_review_without_literal_stage_heading():
-    text = """
-    Quarterly delivery update
-
-    This pack summarizes product progress, current status, and milestones for
-    the next six months. It also compares plan / fact results and lists the
-    next review commitments.
-    """
-
-    result = detect_document_type(text)
-
-    assert result.document_type == DocumentType.PROGRESS_REVIEW
-    assert result.confidence >= 0.45
-    assert "progress" in result.explanation
-    assert "status" in result.explanation
-    assert "milestones" in result.explanation
 
 
 def test_gate_1_is_not_a_supported_gate_challenger_document_type():

@@ -147,7 +147,7 @@ def test_documents_api_reads_future_progress_review_rows(api_client, db_session)
     assert response.json()["manual_document_type"] == "progress_review"
 
 
-def test_documents_api_accepts_activated_progress_review_writes(api_client, db_session):
+def test_documents_api_rejects_dormant_progress_review_writes(api_client, db_session):
     create_user(db_session, "author", "secret")
     login(api_client, "author", "secret")
 
@@ -157,15 +157,13 @@ def test_documents_api_accepts_activated_progress_review_writes(api_client, db_s
         files={"file": ("progress.txt", b"Progress review", "text/plain")},
     )
 
-    assert upload.status_code == 201
-    assert upload.json()["manual_document_type"] == "progress_review"
+    assert upload.status_code == 422
     regular_upload = upload_document(api_client, "regular.txt", b"Stream review")
     patch = api_client.patch(
         f"/documents/{regular_upload.json()['id']}/document-type",
         json={"manual_document_type": "progress_review"},
     )
-    assert patch.status_code == 200
-    assert patch.json()["manual_document_type"] == "progress_review"
+    assert patch.status_code == 422
 
 
 def test_upload_persists_deferred_analysis_before_parser_runs(api_client, db_session, enqueued_parse_jobs):
