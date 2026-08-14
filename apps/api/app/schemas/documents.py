@@ -5,11 +5,11 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.analyses import AnalysisStatusRead
-from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus
+from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus, SelectableDocumentType
 
 
 class DocumentTypePatch(BaseModel):
-    manual_document_type: DocumentType | None
+    manual_document_type: SelectableDocumentType | None
 
 
 class DocumentTitlePatch(BaseModel):

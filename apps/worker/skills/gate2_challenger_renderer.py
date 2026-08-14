@@ -17,6 +17,8 @@ _STAGE_REFERENCE_FILES = {
     "gate_2": "gate-2-rubric.md",
     "stream_review_1": "stream-review-1-rubric.md",
     "stream_review_2_plus": "stream-review-2-plus-rubric.md",
+    # Dormant rollback fallback; the feature release switches this to its own file.
+    "progress_review": "stream-review-2-plus-rubric.md",
     "gate_3": "gate-3-rubric.md",
 }
 _KNOWN_STAGE_REFERENCE_FILES = set(_STAGE_REFERENCE_FILES.values())

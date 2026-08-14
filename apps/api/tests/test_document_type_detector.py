@@ -1,4 +1,4 @@
-from app.schemas.enums import DocumentType
+from app.schemas.enums import DocumentType, SelectableDocumentType
 from app.services.document_type_detector import detect_document_type
 
 
@@ -7,9 +7,17 @@ def test_document_type_enum_matches_gate_challenger_stages():
         "gate_2",
         "stream_review_1",
         "stream_review_2_plus",
+        "progress_review",
         "gate_3",
         "unknown",
     ]
+
+
+def test_progress_review_enum_is_dormant_until_feature_activation():
+    from app.schemas.enums import GATE_CHALLENGER_DOCUMENT_TYPES
+
+    assert DocumentType.PROGRESS_REVIEW not in GATE_CHALLENGER_DOCUMENT_TYPES
+    assert "progress_review" not in {item.value for item in SelectableDocumentType}
 
 
 def test_detects_gate_2_from_realistic_defense_text():

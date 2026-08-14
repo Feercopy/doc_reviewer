@@ -4,14 +4,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.schemas.enums import DocumentType, Provider, RunStatus
+from app.schemas.enums import Provider, RunStatus, SelectableDocumentType
 
 
 class AnalysisCreate(BaseModel):
     provider: Provider
     model: str
     skill_id: UUID | None = None
-    document_type_override: DocumentType | None = None
+    document_type_override: SelectableDocumentType | None = None
     run_parameters: dict = Field(default_factory=dict)
 
 

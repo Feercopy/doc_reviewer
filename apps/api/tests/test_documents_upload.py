@@ -131,6 +131,41 @@ def test_upload_enqueues_parse_job(api_client, db_session, enqueued_parse_jobs):
     assert enqueued_parse_jobs == [response.json()["id"]]
 
 
+def test_documents_api_reads_future_progress_review_rows(api_client, db_session):
+    create_user(db_session, "author", "secret")
+    login(api_client, "author", "secret")
+    upload = upload_document(api_client, "progress.txt", b"Progress review")
+    document = db_session.get(Document, UUID(upload.json()["id"]))
+    document.detected_document_type = "progress_review"
+    document.manual_document_type = "progress_review"
+    db_session.commit()
+
+    response = api_client.get(f"/documents/{document.id}")
+
+    assert response.status_code == 200
+    assert response.json()["detected_document_type"] == "progress_review"
+    assert response.json()["manual_document_type"] == "progress_review"
+
+
+def test_documents_api_rejects_dormant_progress_review_writes(api_client, db_session):
+    create_user(db_session, "author", "secret")
+    login(api_client, "author", "secret")
+
+    upload = api_client.post(
+        "/documents",
+        data={"title": "Progress", "manual_document_type": "progress_review"},
+        files={"file": ("progress.txt", b"Progress review", "text/plain")},
+    )
+
+    assert upload.status_code == 422
+    regular_upload = upload_document(api_client, "regular.txt", b"Stream review")
+    patch = api_client.patch(
+        f"/documents/{regular_upload.json()['id']}/document-type",
+        json={"manual_document_type": "progress_review"},
+    )
+    assert patch.status_code == 422
+
+
 def test_upload_persists_deferred_analysis_before_parser_runs(api_client, db_session, enqueued_parse_jobs):
     admin = create_user(db_session, "admin", "secret", Role.ADMIN)
     author = create_user(db_session, "author", "secret")

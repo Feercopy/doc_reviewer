@@ -38,6 +38,24 @@ def test_authenticated_user_can_list_active_skills(client, db_session):
     assert gate2["result_schema_path"] == "contracts/schemas/main-analysis-result.schema.json"
 
 
+def test_skills_api_reads_future_progress_review_rows(client, db_session):
+    create_user(db_session, "author", "secret")
+    gate_skill = next(
+        skill
+        for skill in seed_baseline_skills(db_session)
+        if skill.name == "gate2_challenger_main_analysis"
+    )
+    gate_skill.supported_document_types = [*gate_skill.supported_document_types, "progress_review"]
+    db_session.commit()
+    login(client, "author", "secret")
+
+    response = client.get("/skills")
+
+    assert response.status_code == 200
+    payload = next(item for item in response.json()["skills"] if item["id"] == str(gate_skill.id))
+    assert "progress_review" in payload["supported_document_types"]
+
+
 def test_non_admin_cannot_create_skill_version(client, db_session, tmp_path):
     create_user(db_session, "author", "secret")
     login(client, "author", "secret")

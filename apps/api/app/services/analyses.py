@@ -108,6 +108,11 @@ def create_analysis_for_document(
         if document_type_override
         else document.manual_document_type or document.detected_document_type
     )
+    if (
+        document_type == DocumentType.PROGRESS_REVIEW.value
+        and DocumentType.PROGRESS_REVIEW not in GATE_CHALLENGER_DOCUMENT_TYPES
+    ):
+        raise AnalysisPreconditionError("Progress Review analysis is not enabled yet")
     skill = _resolve_skill(db=db, skill_id=skill_id, document_type=document_type)
     if provider != Provider.HERMES:
         provider_key = get_shared_provider_key(db=db, provider=provider)

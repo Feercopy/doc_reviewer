@@ -2334,3 +2334,18 @@ Exit criteria:
   Added long historical output and truncated JSON regressions; localization and
   IC Review suites pass together (`37 passed`); the full worker suite passes
   (`195 passed`).
+- 2026-08-14: Prepared the rollback-compatible first phase for Progress Review.
+  The API and worker data model can deserialize future `progress_review`
+  document and skill rows, and the shared checklist contract knows the future
+  identifiers, while detection, selectable document types, seed support, and
+  UI exposure remain intentionally disabled. Baseline seeding now archives any
+  superseded Gate Challenger version in either direction, allowing this release
+  to restore v1 if a later v2 feature release is rolled back. A dormant worker
+  fallback routes already-queued future Progress Review jobs through the
+  currently equivalent Stream Review 2+ rubric during rollback. Verified the
+  full API suite (`219 passed`), full worker suite (`201 passed`), JSON validity,
+  and diff checks. Read schemas accept the future value, while a separate
+  selectable enum rejects it from upload, patch, analysis, skill, and etalon
+  write APIs until the feature release activates it. Analysis creation also
+  rejects the dormant value when it comes from a future stored document, while
+  already-created worker jobs remain runnable during rollback.

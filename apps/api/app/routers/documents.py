@@ -18,7 +18,7 @@ from app.schemas.documents import (
     DocumentTypePatch,
     DocumentsListResponse,
 )
-from app.schemas.enums import DocumentParseStatus, DocumentType, Provider, RunStatus
+from app.schemas.enums import DocumentParseStatus, Provider, RunStatus, SelectableDocumentType
 from app.services.analyses import (
     AnalysisPreconditionError,
     create_analysis_for_document,
@@ -58,7 +58,7 @@ def create_document(
     file: Annotated[UploadFile, File()],
     fin_summary_file: Annotated[UploadFile | None, File()] = None,
     title: Annotated[str | None, Form()] = None,
-    manual_document_type: Annotated[DocumentType | None, Form()] = None,
+    manual_document_type: Annotated[SelectableDocumentType | None, Form()] = None,
     analysis_provider: Annotated[Provider | None, Form()] = None,
     analysis_model: Annotated[str | None, Form()] = None,
     analysis_output_language: Annotated[Literal["ru", "en"], Form()] = "ru",

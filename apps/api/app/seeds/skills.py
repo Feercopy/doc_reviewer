@@ -383,6 +383,18 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
     ]
 
     seeded = [_upsert_skill(db, values) for values in skills]
+    active_gate_skill = next(skill for skill in seeded if skill.name == "gate2_challenger_main_analysis")
+    db.flush()
+    superseded_gate_skills = db.scalars(
+        select(Skill).where(
+            Skill.name == active_gate_skill.name,
+            Skill.skill_type == active_gate_skill.skill_type,
+            Skill.id != active_gate_skill.id,
+            Skill.status == EntityStatus.ACTIVE.value,
+        )
+    ).all()
+    for skill in superseded_gate_skills:
+        skill.status = EntityStatus.ARCHIVED.value
     db.commit()
     return seeded
 

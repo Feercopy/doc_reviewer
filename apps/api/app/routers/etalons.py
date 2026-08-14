@@ -10,7 +10,7 @@ from app.db.session import get_db
 from app.dependencies.auth import require_current_user
 from app.models.etalon import Etalon
 from app.models.user import User
-from app.schemas.enums import DocumentType, Verdict
+from app.schemas.enums import SelectableDocumentType, Verdict
 from app.schemas.etalons import (
     EtalonDraftCreate,
     EtalonRead,
@@ -168,7 +168,7 @@ def get_annotation_queue(
 def create_past_defense(
     file: Annotated[UploadFile, File()],
     title: Annotated[str | None, Form()] = None,
-    document_type: Annotated[DocumentType, Form()] = DocumentType.UNKNOWN,
+    document_type: Annotated[SelectableDocumentType, Form()] = SelectableDocumentType.UNKNOWN,
     expected_verdict: Annotated[Verdict, Form()] = Verdict.UNKNOWN,
     real_defense_status: Annotated[str, Form()] = "",
     defense_date: Annotated[str | None, Form()] = None,

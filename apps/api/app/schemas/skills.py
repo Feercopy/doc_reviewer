@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.schemas.enums import DocumentType, EntityStatus, SkillSourceType, SkillType
+from app.schemas.enums import DocumentType, EntityStatus, SelectableDocumentType, SkillSourceType, SkillType
 
 
 class SkillSourceSnapshot(BaseModel):
@@ -38,7 +38,7 @@ class SkillCreate(BaseModel):
     description: str
     version: str
     skill_type: SkillType
-    supported_document_types: list[DocumentType] = Field(default_factory=list)
+    supported_document_types: list[SelectableDocumentType] = Field(default_factory=list)
     source_type: SkillSourceType
     source_uri: str | None = None
     source_entrypoint: str | None = None
@@ -49,7 +49,7 @@ class SkillCreate(BaseModel):
 
 class SkillPatch(BaseModel):
     description: str | None = None
-    supported_document_types: list[DocumentType] | None = None
+    supported_document_types: list[SelectableDocumentType] | None = None
     source_uri: str | None = None
     source_entrypoint: str | None = None
     source_metadata: dict | None = None

@@ -66,5 +66,22 @@
       "label_ru": "План на следующие полгода по запускам и метрикам",
       "label_en": "Plan for the next six months of launches and metrics"
     }
+  ],
+  "progress_review": [
+    {
+      "id": "progress_review_plan_fact_last_half_year",
+      "label_ru": "План-факт за прошедшие полгода по запускам и метрикам",
+      "label_en": "Plan versus actuals for the past six months of launches and metrics"
+    },
+    {
+      "id": "progress_review_next_half_year_plan",
+      "label_ru": "План на следующие полгода по запускам и метрикам",
+      "label_en": "Plan for the next six months of launches and metrics"
+    },
+    {
+      "id": "progress_review_stop_criteria",
+      "label_ru": "Stop-критерии - в каких случаях мы останавливаем работу над стримом",
+      "label_en": "Stop criteria: when the stream must be stopped"
+    }
   ]
 }

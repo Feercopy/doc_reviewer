@@ -38,6 +38,30 @@ def test_create_analysis_requires_completed_parse(client, db_session):
     assert response.status_code == 409
 
 
+def test_create_analysis_rejects_stored_dormant_progress_review(client, db_session):
+    app, documents_router = _disable_parse_enqueue()
+    create_user(db_session, "author", "secret")
+    seed_baseline_skills(db_session)
+    login(client, "author", "secret")
+    try:
+        upload = upload_document(client, "progress.txt", b"Progress review")
+        document = db_session.get(Document, UUID(upload.json()["id"]))
+        document.parse_status = DocumentParseStatus.COMPLETED.value
+        document.parsed_text = "Progress review plan versus actuals"
+        document.detected_document_type = DocumentType.PROGRESS_REVIEW.value
+        db_session.commit()
+
+        response = client.post(
+            f"/documents/{document.id}/analyses",
+            json={"provider": "hermes", "model": "hermes"},
+        )
+    finally:
+        app.dependency_overrides.pop(documents_router.get_parse_document_enqueue, None)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Progress Review analysis is not enabled yet"
+
+
 def test_create_analysis_queues_default_gate2_skill_with_snapshot(client, db_session, monkeypatch, tmp_path):
     enqueued: list[str] = []
 
