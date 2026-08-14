@@ -2388,3 +2388,14 @@ Exit criteria:
   containers before restoring v1, and managed source tags use detached checkout.
   Final verification: `228` API tests and `203` worker tests passed; production
   Compose configuration and the deploy shell syntax also validate successfully.
+- 2026-08-14: Isolated completed IC Review persistence from optional Summary
+  postprocessing after production analysis
+  `6b39f9c1-637c-4c5c-8a6b-fe455d37ac91` surfaced `programming_error`. The
+  worker now commits the validated IC result before preparing bilingual
+  localizations, short Summary, or rationale. Each optional step rolls back and
+  records only a sanitized error code when it fails; even failure while saving
+  that diagnostic cannot downgrade the completed financial review. Missing
+  bilingual state remains retryable through the existing Summary API/page
+  flow. Added regressions for localization preparation and nested Summary
+  failure-recording `ProgrammingError` paths. Verified focused IC/Summary tests
+  (`47 passed`), the full worker suite (`205 passed`), and `git diff --check`.
