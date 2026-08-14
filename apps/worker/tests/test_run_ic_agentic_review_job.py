@@ -6,7 +6,6 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
-from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -108,71 +107,6 @@ def test_completed_run_without_workbook_skips_spreadsheet_audit_and_persists_art
             == "result_rationale_synthesis"
         )
         assert records["analysis"].structured_output["result"]["rationale_metadata"]["trace_step_id"]
-    finally:
-        db.close()
-
-
-def test_summary_localization_prepare_failure_does_not_downgrade_completed_ic_review(tmp_path, monkeypatch):
-    db = _create_session()
-    calls: dict[str, object] = {}
-    logged_events: list[tuple[str, dict]] = []
-    try:
-        records = _seed_run(db, tmp_path, monkeypatch=monkeypatch, workbook=False)
-        _patch_script_pipeline(monkeypatch, calls, validation_text="validation ok\n")
-
-        def fail_localization_prepare(**_kwargs):
-            raise ProgrammingError("UPDATE analyses", {}, RuntimeError("database write failed"))
-
-        monkeypatch.setattr(job, "prepare_summary_localizations_for_check_run", fail_localization_prepare)
-        monkeypatch.setattr(
-            job.worker_logger,
-            "info",
-            lambda event, extra=None: logged_events.append((event, extra or {})),
-        )
-
-        run_ic_agentic_review(str(records["check_run"].id), db=db)
-
-        db.refresh(records["check_run"])
-        db.refresh(records["analysis"])
-        result = records["analysis"].structured_output["result"]
-        assert records["check_run"].status == RunStatus.COMPLETED.value
-        assert records["check_run"].current_stage == "completed"
-        assert "summary_localizations" not in result
-        assert result["short_summary_status"] == "completed"
-        assert result["rationale_status"] == "completed"
-        assert any(
-            event == "summary_localization_prepare_failed"
-            and extra["error_code"] == "programming_error"
-            and extra["status"] == "completed"
-            for event, extra in logged_events
-        )
-    finally:
-        db.close()
-
-
-def test_summary_failure_record_failure_does_not_downgrade_completed_ic_review(tmp_path, monkeypatch):
-    db = _create_session()
-    calls: dict[str, object] = {}
-    try:
-        records = _seed_run(db, tmp_path, monkeypatch=monkeypatch, workbook=False)
-        _patch_script_pipeline(monkeypatch, calls, validation_text="validation ok\n")
-
-        def fail_summary(**_kwargs):
-            raise RuntimeError("summary postprocessing failed")
-
-        def fail_summary_failure_record(**_kwargs):
-            raise ProgrammingError("UPDATE analyses", {}, RuntimeError("database write failed"))
-
-        monkeypatch.setattr(job, "update_result_short_summary", fail_summary)
-        monkeypatch.setattr(job, "_record_result_summary_failure", fail_summary_failure_record)
-
-        run_ic_agentic_review(str(records["check_run"].id), db=db)
-
-        db.refresh(records["check_run"])
-        db.refresh(records["analysis"])
-        assert records["check_run"].status == RunStatus.COMPLETED.value
-        assert records["check_run"].current_stage == "completed"
-        assert records["analysis"].structured_output["result"]["rationale_status"] == "completed"
     finally:
         db.close()
 

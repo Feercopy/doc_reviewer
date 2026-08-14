@@ -14,12 +14,7 @@ from app.schemas.enums import GATE_CHALLENGER_DOCUMENT_TYPES, DocumentType, Enti
 GATE_CHALLENGER_SOURCE_PATH = Path(
     os.getenv("GATE_CHALLENGER_SOURCE_PATH", "/Users/iseremenko/Projects/Gate2-challenger")
 )
-DEFAULT_GATE_CHALLENGER_MANAGED_REF = "3447f867987d8727cbbd16e8874c60f2b1ed07d0"
-GATE_CHALLENGER_SKILL_VERSION = os.getenv("GATE_CHALLENGER_SKILL_VERSION", "stage-checklist-v2")
-GATE_CHALLENGER_MANAGED_REPO_URL = os.getenv("GATE_CHALLENGER_MANAGED_REPO_URL")
-GATE_CHALLENGER_MANAGED_REF = os.getenv(
-    "GATE_CHALLENGER_MANAGED_REF", DEFAULT_GATE_CHALLENGER_MANAGED_REF
-)
+GATE_CHALLENGER_SKILL_VERSION = os.getenv("GATE_CHALLENGER_SKILL_VERSION", "stage-checklist-v1")
 GATE2_BENCHMARK_DIR = Path(
     os.getenv("GATE2_BENCHMARK_DIR", str(GATE_CHALLENGER_SOURCE_PATH / "benchmark"))
 )
@@ -62,7 +57,6 @@ DEVILS_ADVOCATE_WIKI_PATH = DEVILS_ADVOCATE_SOURCE_PATH / "wiki-ic"
 GATE_CHALLENGER_REQUIRED_PATHS = [
     GATE_CHALLENGER_ENTRYPOINT,
     "skills/gate-challenger/references",
-    "skills/gate-challenger/references/progress-review-rubric.md",
 ]
 DEVILS_ADVOCATE_REQUIRED_PATHS = [
     DEVILS_ADVOCATE_ENTRYPOINT,
@@ -133,98 +127,6 @@ def _git_revision(path: Path) -> str | None:
     return result.stdout.strip()
 
 
-def _git(path: Path, *args: str, timeout: int = 60) -> str:
-    try:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=path,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
-        stderr = getattr(exc, "stderr", "") or ""
-        raise RuntimeError(
-            f"managed Gate Challenger git command failed: {' '.join(args)}: {stderr.strip()}"
-        ) from exc
-    return result.stdout
-
-
-def _ensure_git_checkout(path: Path, repo_url: str, ref: str) -> None:
-    path = path.expanduser()
-    if path.exists() and not path.is_dir():
-        raise RuntimeError(f"managed Gate Challenger source path is not a directory: {path}")
-    if path.exists() and any(path.iterdir()) and not (path / ".git").exists():
-        raise RuntimeError(f"managed Gate Challenger source path is not a git checkout: {path}")
-
-    if not (path / ".git").exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            subprocess.run(
-                ["git", "clone", repo_url, str(path)],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=180,
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
-            stderr = getattr(exc, "stderr", "") or ""
-            raise RuntimeError(f"managed Gate Challenger clone failed: {stderr.strip()}") from exc
-
-    status = _git(path, "status", "--porcelain").strip()
-    if status:
-        raise RuntimeError(f"managed Gate Challenger source has local modifications: {path}")
-
-    _git(path, "remote", "set-url", "origin", repo_url)
-    _git(path, "fetch", "--prune", "--tags", "origin", timeout=180)
-    if _is_commit_sha(ref):
-        _git(path, "checkout", "--detach", ref)
-    else:
-        try:
-            remote_branch = _git(
-                path,
-                "rev-parse",
-                "--verify",
-                f"refs/remotes/origin/{ref}^{{commit}}",
-            ).strip()
-        except RuntimeError:
-            tagged_commit = _git(
-                path,
-                "rev-parse",
-                "--verify",
-                f"refs/tags/{ref}^{{commit}}",
-            ).strip()
-            _git(path, "checkout", "--detach", tagged_commit)
-        else:
-            _git(path, "checkout", "-B", ref, remote_branch)
-
-
-def _is_commit_sha(value: str) -> bool:
-    return len(value) == 40 and all(char in "0123456789abcdefABCDEF" for char in value)
-
-
-def _validate_required_source_paths(root: Path, required_paths: list[str]) -> None:
-    root = root.resolve()
-    for relative_path in required_paths:
-        candidate = (root / relative_path).resolve()
-        if not candidate.is_relative_to(root):
-            raise RuntimeError(f"managed Gate Challenger required path escapes source root: {relative_path}")
-        if not candidate.exists():
-            raise RuntimeError(f"managed Gate Challenger required path is missing: {relative_path}")
-
-
-def _refresh_managed_gate_challenger_source() -> None:
-    if not GATE_CHALLENGER_MANAGED_REPO_URL:
-        return
-    _ensure_git_checkout(
-        GATE_CHALLENGER_SOURCE_PATH,
-        GATE_CHALLENGER_MANAGED_REPO_URL,
-        GATE_CHALLENGER_MANAGED_REF,
-    )
-    _validate_required_source_paths(GATE_CHALLENGER_SOURCE_PATH, GATE_CHALLENGER_REQUIRED_PATHS)
-
-
 def _read_prompt(path: Path, fallback: str) -> str:
     return path.read_text() if path.exists() and path.is_file() else fallback
 
@@ -279,8 +181,6 @@ def _upsert_skill_source(db: Session, values: dict) -> SkillSource:
 
 
 def seed_baseline_skills(db: Session) -> list[Skill]:
-    _refresh_managed_gate_challenger_source()
-
     gate_challenger_fingerprint = _fingerprint_path(GATE_CHALLENGER_SKILL_PATH)
     devils_fingerprint = _fingerprint_path(DEVILS_ADVOCATE_PATH)
     ic_agentic_review_fingerprint = _fingerprint_path(IC_AGENTIC_REVIEW_PATH)
@@ -295,8 +195,8 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
             "display_name": "Gate Challenger",
             "source_kind": "local_git_repo",
             "local_path": str(GATE_CHALLENGER_SOURCE_PATH),
-            "repo_url": GATE_CHALLENGER_MANAGED_REPO_URL,
-            "default_ref": GATE_CHALLENGER_MANAGED_REF if GATE_CHALLENGER_MANAGED_REPO_URL else "main",
+            "repo_url": None,
+            "default_ref": "main",
             "entrypoint": GATE_CHALLENGER_ENTRYPOINT,
             "required_paths": GATE_CHALLENGER_REQUIRED_PATHS,
             "update_policy": "require_latest",
@@ -483,18 +383,6 @@ def seed_baseline_skills(db: Session) -> list[Skill]:
     ]
 
     seeded = [_upsert_skill(db, values) for values in skills]
-    active_gate_skill = next(skill for skill in seeded if skill.name == "gate2_challenger_main_analysis")
-    db.flush()
-    superseded_gate_skills = db.scalars(
-        select(Skill).where(
-            Skill.name == active_gate_skill.name,
-            Skill.skill_type == active_gate_skill.skill_type,
-            Skill.id != active_gate_skill.id,
-            Skill.status == EntityStatus.ACTIVE.value,
-        )
-    ).all()
-    for skill in superseded_gate_skills:
-        skill.status = EntityStatus.ARCHIVED.value
     db.commit()
     return seeded
 

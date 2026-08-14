@@ -45,10 +45,7 @@ services:
       HERMES_ENABLED: ${HERMES_ENABLED:-false}
       HERMES_MODE: ${HERMES_MODE:-http}
       HERMES_HTTP_URL: ${HERMES_HTTP_URL:-http://127.0.0.1:8787}
-      GATE_CHALLENGER_SOURCE_PATH: ${GATE_CHALLENGER_MANAGED_PATH:-/var/lib/gate-challenger/storage/external/gate-challenger-${GATE_CHALLENGER_MANAGED_REF:-3447f867987d8727cbbd16e8874c60f2b1ed07d0}}
-      GATE_CHALLENGER_MANAGED_REPO_URL: ${GATE_CHALLENGER_MANAGED_REPO_URL:-https://github.com/Ilya-eremenko/Gate2-challenger-skill.git}
-      GATE_CHALLENGER_MANAGED_REF: ${GATE_CHALLENGER_MANAGED_REF:-3447f867987d8727cbbd16e8874c60f2b1ed07d0}
-      GATE2_BENCHMARK_DIR: ${GATE2_BENCHMARK_DIR:-${GATE_CHALLENGER_MANAGED_PATH:-/var/lib/gate-challenger/storage/external/gate-challenger-${GATE_CHALLENGER_MANAGED_REF:-3447f867987d8727cbbd16e8874c60f2b1ed07d0}}/benchmark}
+      GATE_CHALLENGER_SOURCE_PATH: /external/gate-challenger
       DEVILS_ADVOCATE_SOURCE_PATH: /external/devils-advocate
       IC_AGENTIC_REVIEW_SOURCE_PATH: /external/ic-agentic-review
       SKILL_SOURCE_SNAPSHOT_MODE: ${SKILL_SOURCE_SNAPSHOT_MODE:-production_export}
@@ -95,10 +92,7 @@ services:
       HERMES_ENABLED: ${HERMES_ENABLED:-false}
       HERMES_MODE: ${HERMES_MODE:-http}
       HERMES_HTTP_URL: ${HERMES_HTTP_URL:-http://127.0.0.1:8787}
-      GATE_CHALLENGER_SOURCE_PATH: ${GATE_CHALLENGER_MANAGED_PATH:-/var/lib/gate-challenger/storage/external/gate-challenger-${GATE_CHALLENGER_MANAGED_REF:-3447f867987d8727cbbd16e8874c60f2b1ed07d0}}
-      GATE_CHALLENGER_MANAGED_REPO_URL: ${GATE_CHALLENGER_MANAGED_REPO_URL:-https://github.com/Ilya-eremenko/Gate2-challenger-skill.git}
-      GATE_CHALLENGER_MANAGED_REF: ${GATE_CHALLENGER_MANAGED_REF:-3447f867987d8727cbbd16e8874c60f2b1ed07d0}
-      GATE2_BENCHMARK_DIR: ${GATE2_BENCHMARK_DIR:-${GATE_CHALLENGER_MANAGED_PATH:-/var/lib/gate-challenger/storage/external/gate-challenger-${GATE_CHALLENGER_MANAGED_REF:-3447f867987d8727cbbd16e8874c60f2b1ed07d0}}/benchmark}
+      GATE_CHALLENGER_SOURCE_PATH: /external/gate-challenger
       DEVILS_ADVOCATE_SOURCE_PATH: /external/devils-advocate
       IC_AGENTIC_REVIEW_SOURCE_PATH: /external/ic-agentic-review
       SKILL_SOURCE_SNAPSHOT_MODE: ${SKILL_SOURCE_SNAPSHOT_MODE:-production_export}

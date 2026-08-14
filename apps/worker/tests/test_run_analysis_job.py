@@ -1295,12 +1295,6 @@ def _main_analysis_json(summary: str = "Needs evidence.") -> str:
             "assessment_markdown": f"Оценка документа\nРекомендация: {summary}",
             "stage_checklist": [
                 {
-                    "id": "gate2_unique_value_proposition",
-                    "label": "Уникальное товарное предложение (УТП)",
-                    "status": "red",
-                    "evidence": "The mock document does not establish a unique value proposition.",
-                },
-                {
                     "id": "gate2_hypothesis_results",
                     "label": "Результаты проверки гипотез из Gate 1",
                     "status": "red",
@@ -1313,12 +1307,6 @@ def _main_analysis_json(summary: str = "Needs evidence.") -> str:
                     "evidence": "The mock document describes the target product.",
                 },
                 {
-                    "id": "gate2_input_output_metric_link",
-                    "label": "Связь Input/Output метрик с сутью продукта и УТП",
-                    "status": "red",
-                    "evidence": "The mock document does not link metrics to product value.",
-                },
-                {
                     "id": "gate2_mockups_or_user_flow",
                     "label": "Mockups или видео пользовательского flow",
                     "status": "red",
@@ -1329,12 +1317,6 @@ def _main_analysis_json(summary: str = "Needs evidence.") -> str:
                     "label": "Commitments к Gate 3: сроки, expected performance, метрики",
                     "status": "red",
                     "evidence": "The mock document omits Gate 3 commitments.",
-                },
-                {
-                    "id": "gate2_stop_criteria",
-                    "label": "Stop-критерии продукта",
-                    "status": "red",
-                    "evidence": "The mock document omits stop criteria.",
                 },
             ],
             "findings": [],
@@ -1373,12 +1355,6 @@ def _main_analysis_summary_json(summary: str = "Needs evidence.") -> str:
             "assessment_markdown": f"Оценка документа\nРекомендация: {summary}",
             "stage_checklist": [
                 {
-                    "id": "gate2_unique_value_proposition",
-                    "label": "Уникальное товарное предложение (УТП)",
-                    "status": "red",
-                    "evidence": "The mock document does not establish a unique value proposition.",
-                },
-                {
                     "id": "gate2_hypothesis_results",
                     "label": "Результаты проверки гипотез из Gate 1",
                     "status": "red",
@@ -1391,12 +1367,6 @@ def _main_analysis_summary_json(summary: str = "Needs evidence.") -> str:
                     "evidence": "The mock document describes the target product.",
                 },
                 {
-                    "id": "gate2_input_output_metric_link",
-                    "label": "Связь Input/Output метрик с сутью продукта и УТП",
-                    "status": "red",
-                    "evidence": "The mock document does not link metrics to product value.",
-                },
-                {
                     "id": "gate2_mockups_or_user_flow",
                     "label": "Mockups или видео пользовательского flow",
                     "status": "red",
@@ -1407,12 +1377,6 @@ def _main_analysis_summary_json(summary: str = "Needs evidence.") -> str:
                     "label": "Commitments к Gate 3: сроки, expected performance, метрики",
                     "status": "red",
                     "evidence": "The mock document omits Gate 3 commitments.",
-                },
-                {
-                    "id": "gate2_stop_criteria",
-                    "label": "Stop-критерии продукта",
-                    "status": "red",
-                    "evidence": "The mock document omits stop criteria.",
                 },
             ],
             "layer_1_index": [

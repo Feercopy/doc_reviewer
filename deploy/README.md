@@ -34,38 +34,14 @@ can continue to run against the migrated schema during an application rollback.
 /opt/gate-challenger/releases/<commit>
 /opt/gate-challenger/shared/infra.env         # root-readable production config
 /opt/gate-challenger/current                  # active release symlink
-/opt/gate-challenger/external                 # legacy read-only skill mounts
-/var/lib/gate-challenger/storage/external     # managed production skill checkouts
+/opt/gate-challenger/external                 # independently versioned skills
 /opt/gate-challenger/backups                  # source backups and DB dumps
 ```
 
-The production Gate Challenger source is managed during the baseline skill
-refresh. By default the API container checks out
-`https://github.com/Ilya-eremenko/Gate2-challenger-skill.git` at commit
-`3447f867987d8727cbbd16e8874c60f2b1ed07d0` into a ref-specific directory in
-the shared storage volume and seeds that checkout as the active
-`gate-challenger` source. Override `GATE_CHALLENGER_MANAGED_REPO_URL` or
-`GATE_CHALLENGER_MANAGED_REF` only when intentionally switching source. The
-default checkout path is derived from the effective managed ref. Production
-intentionally ignores the legacy `GATE_CHALLENGER_SOURCE_PATH` value that may
-remain in `infra.env`; use `GATE_CHALLENGER_MANAGED_PATH` for an intentional
-ref-specific managed checkout override.
-`GATE2_BENCHMARK_DIR` defaults to that checkout's `benchmark` directory so
-benchmark imports and analysis snapshots use the same pinned source revision.
-
-The Progress Review feature follows a compatibility release that can deserialize
-the new document type and restore either baseline skill version. The feature
-deployer stops the public application services before activating the pinned v2
-skill, then recreates them from the new release. If startup fails, rollback runs
-the previous release's seeder before bringing its containers back, which
-reactivates v1 and archives v2. A failed skill restore makes rollback fail
-explicitly instead of reporting a healthy but incompatible release. Rollback
-also stops the failed release before restoring v1, so it cannot accept traffic
-against the baseline being changed underneath it.
-
-Devil's Advocate and IC Agentic Review sources remain externally mounted and
-independently versioned so analysis runs continue to snapshot explicit skill
-source versions.
+The external Gate Challenger, Devil's Advocate, and IC Agentic Review sources
+are deliberately not updated by the application workflow. Their revisions are
+managed separately so analysis runs continue to snapshot explicit skill source
+versions.
 
 ## GitHub environment
 
