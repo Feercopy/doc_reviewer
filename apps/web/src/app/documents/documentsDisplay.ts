@@ -7,6 +7,7 @@ const documentTypeLabels: Record<string, string> = {
   gate_3: "Gate 3",
   stream_review_1: "Stream review 1",
   stream_review_2_plus: "Stream review 2 plus",
+  progress_review: "Progress review",
 };
 
 export function formatDocumentTypeLabel(value: string | null | undefined): string {

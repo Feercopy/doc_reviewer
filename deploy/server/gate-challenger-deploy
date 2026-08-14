@@ -19,6 +19,7 @@ release_dir=""
 previous_dir=""
 switched_release="false"
 relocated_current="false"
+skills_seeded="false"
 
 log() {
   printf '[deploy] %s\n' "$*"
@@ -134,6 +135,20 @@ recreate_application_services() {
   compose_for "$target" up -d --no-deps --force-recreate "${services[@]}"
 }
 
+quiesce_application_services() {
+  local target="$1"
+  local services=(edge api worker web)
+  if compose_for "$target" config --services | grep -qx "document-worker"; then
+    services+=(document-worker)
+  fi
+  compose_for "$target" stop "${services[@]}"
+}
+
+seed_baseline_skills_for() {
+  local target="$1"
+  compose_for "$target" run --rm --no-deps api python -m app.seeds.skills
+}
+
 point_current_at() {
   local target="$1"
   local next_link="$base_dir/.current-next"
@@ -182,7 +197,18 @@ rollback_release() {
   if [[ "$switched_release" == "true" && -n "$previous_dir" && -d "$previous_dir" ]]; then
     log "rolling application containers back to $previous_dir"
     point_current_at "$previous_dir"
+    if ! quiesce_application_services "$release_dir"; then
+      printf '[deploy] ERROR: failed release could not be quiesced before rollback\n' >&2
+      exit 1
+    fi
     set_release_images "$(release_version_for "$previous_dir")"
+    if [[ "$skills_seeded" == "true" ]]; then
+      if ! seed_baseline_skills_for "$previous_dir"; then
+        printf '[deploy] ERROR: previous baseline skill restore failed\n' >&2
+        exit 1
+      fi
+      log "restored the previous baseline skill version"
+    fi
     recreate_application_services "$previous_dir"
     if health_check; then
       log "application rollback passed health checks"
@@ -211,12 +237,16 @@ deploy_release() {
   log "applying database migrations"
   compose_for "$release_dir" run --rm --no-deps api alembic upgrade head
 
-  log "refreshing baseline skills"
-  compose_for "$release_dir" run --rm --no-deps api python -m app.seeds.skills
-
   capture_previous_release
   point_current_at "$release_dir"
   switched_release="true"
+
+  log "quiescing public application services for the skill activation"
+  quiesce_application_services "$previous_dir"
+
+  log "refreshing baseline skills and activating Progress Review support"
+  skills_seeded="true"
+  seed_baseline_skills_for "$release_dir"
 
   log "recreating application and edge containers"
   recreate_application_services "$release_dir"

@@ -94,7 +94,7 @@ def test_run_benchmark_persists_scores_judge_output_and_report(tmp_path):
         assert document_result["main_run_parameters"]["document_type"] == DocumentType.GATE_2.value
         assert set(document_result["expected_output"]) == {"verdict", "layer_1", "layer_2"}
         assert document_result["expected_output"]["layer_1"][0]["id"] == "SNAP-L1"
-        assert document_result["actual_output"]["stage_checklist"][0]["id"] == "gate2_hypothesis_results"
+        assert document_result["actual_output"]["stage_checklist"][0]["id"] == "gate2_unique_value_proposition"
         assert "layer_3" in document_result["actual_output"]
         assert "summary" in document_result["actual_output"]
         assert set(document_result["actual_scoring_output"]) == {"verdict", "layer_1", "layer_2"}
@@ -150,8 +150,10 @@ def test_run_benchmark_uses_etalon_document_type_for_gate_checklist(tmp_path):
         assert document_result["main_run_parameters"]["document_type"] == DocumentType.GATE_3.value
         assert [item["id"] for item in document_result["actual_output"]["stage_checklist"]] == [
             "gate3_working_mvp",
+            "gate3_mvp_hypothesis_confirmation",
             "gate3_performance_vs_gate2_plan",
             "gate3_pmf_criteria",
+            "gate3_stop_criteria",
         ]
         assert set(document_result["actual_scoring_output"]) == {"verdict", "layer_1", "layer_2"}
     finally:
@@ -213,6 +215,12 @@ def _main_analysis_json_with_benchmark_ids() -> str:
             "assessment_markdown": "Оценка документа\nРекомендация: Needs evidence.",
             "stage_checklist": [
                 {
+                    "id": "gate2_unique_value_proposition",
+                    "label": "Уникальное товарное предложение (УТП)",
+                    "status": "red",
+                    "evidence": "The mock document does not establish a unique value proposition.",
+                },
+                {
                     "id": "gate2_hypothesis_results",
                     "label": "Результаты проверки гипотез из Gate 1",
                     "status": "red",
@@ -225,6 +233,12 @@ def _main_analysis_json_with_benchmark_ids() -> str:
                     "evidence": "The mock document describes the target product.",
                 },
                 {
+                    "id": "gate2_input_output_metric_link",
+                    "label": "Связь Input/Output метрик с сутью продукта и УТП",
+                    "status": "red",
+                    "evidence": "The mock document does not link metrics to product value.",
+                },
+                {
                     "id": "gate2_mockups_or_user_flow",
                     "label": "Mockups или видео пользовательского flow",
                     "status": "red",
@@ -235,6 +249,12 @@ def _main_analysis_json_with_benchmark_ids() -> str:
                     "label": "Commitments к Gate 3: сроки, expected performance, метрики",
                     "status": "red",
                     "evidence": "The mock document omits Gate 3 commitments.",
+                },
+                {
+                    "id": "gate2_stop_criteria",
+                    "label": "Stop-критерии продукта",
+                    "status": "red",
+                    "evidence": "The mock document omits stop criteria.",
                 },
             ],
             "findings": [],
@@ -276,6 +296,12 @@ def _main_analysis_json_for_gate3() -> str:
             "evidence": "The mock document includes a working MVP.",
         },
         {
+            "id": "gate3_mvp_hypothesis_confirmation",
+            "label": "Подтверждение MVP гипотезы решения",
+            "status": "red",
+            "evidence": "The mock document does not connect MVP evidence to the solution hypothesis.",
+        },
+        {
             "id": "gate3_performance_vs_gate2_plan",
             "label": "Performance/results по сравнению с планом Gate 2",
             "status": "red",
@@ -286,6 +312,12 @@ def _main_analysis_json_for_gate3() -> str:
             "label": "Критерии product-market fit для следующего review",
             "status": "green",
             "evidence": "The mock document names PMF criteria.",
+        },
+        {
+            "id": "gate3_stop_criteria",
+            "label": "Stop-критерии продукта",
+            "status": "red",
+            "evidence": "The mock document omits stop criteria.",
         },
     ]
     return json.dumps(payload)

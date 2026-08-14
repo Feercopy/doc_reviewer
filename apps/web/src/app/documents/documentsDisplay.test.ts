@@ -26,6 +26,7 @@ describe("documents display helpers", () => {
     ["gate_2", "Gate 2"],
     ["stream_review_1", "Stream review 1"],
     ["stream_review_2_plus", "Stream review 2 plus"],
+    ["progress_review", "Progress review"],
     ["gate_3", "Gate 3"],
     [null, "-"],
   ] as const)("formats %s as a reader-facing document type", (value, expected) => {

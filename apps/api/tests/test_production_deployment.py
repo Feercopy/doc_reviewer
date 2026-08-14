@@ -21,6 +21,35 @@ def test_production_compose_uses_release_tagged_application_images() -> None:
     assert "replicas: ${ANALYSIS_WORKER_REPLICAS:-2}" in compose
 
 
+def test_production_compose_uses_pinned_managed_gate_challenger_source() -> None:
+    compose = (REPO_ROOT / "infra/docker-compose.prod.yml").read_text()
+    revision = "3447f867987d8727cbbd16e8874c60f2b1ed07d0"
+    managed_checkout = (
+        "/var/lib/gate-challenger/storage/external/gate-challenger-"
+        + "${GATE_CHALLENGER_MANAGED_REF:-"
+        + revision
+        + "}"
+    )
+
+    assert "GATE_CHALLENGER_SOURCE_PATH: ${GATE_CHALLENGER_SOURCE_PATH:-" not in compose
+    assert compose.count("GATE_CHALLENGER_SOURCE_PATH: ${GATE_CHALLENGER_MANAGED_PATH:-") == 2
+    assert compose.count(
+        "GATE_CHALLENGER_MANAGED_REPO_URL: "
+        "${GATE_CHALLENGER_MANAGED_REPO_URL:-https://github.com/"
+        "Ilya-eremenko/Gate2-challenger-skill.git}"
+    ) == 2
+    assert compose.count(
+        f"GATE_CHALLENGER_MANAGED_REF: ${{GATE_CHALLENGER_MANAGED_REF:-{revision}}}"
+    ) == 2
+    assert compose.count(f"gate-challenger-${{GATE_CHALLENGER_MANAGED_REF:-{revision}}}") == 4
+    benchmark_setting = (
+        "GATE2_BENCHMARK_DIR: ${GATE2_BENCHMARK_DIR:-${GATE_CHALLENGER_MANAGED_PATH:-"
+        + managed_checkout
+        + "}/benchmark}"
+    )
+    assert compose.count(benchmark_setting) == 2
+
+
 def test_production_workflow_deploys_only_verified_main_sha() -> None:
     workflow = (REPO_ROOT / ".github/workflows/deploy-production.yml").read_text()
 
@@ -106,6 +135,42 @@ def test_server_deployer_enforces_traceable_release_safety() -> None:
 
     for control in required_safety_controls:
         assert control in deployer
+
+
+def test_server_deployer_seeds_new_skills_before_exposing_new_release() -> None:
+    deployer = (REPO_ROOT / "deploy/server/gate-challenger-deploy").read_text()
+
+    point_current = 'point_current_at "$release_dir"'
+    quiesce_services = 'quiesce_application_services "$previous_dir"'
+    activation_attempted = 'skills_seeded="true"'
+    seed_command = 'seed_baseline_skills_for "$release_dir"'
+    recreate_services = 'recreate_application_services "$release_dir"'
+
+    assert deployer.index(point_current) < deployer.index(quiesce_services)
+    assert deployer.index(quiesce_services) < deployer.index(activation_attempted)
+    assert deployer.index(activation_attempted) < deployer.index(seed_command)
+    assert deployer.index(seed_command) < deployer.index(recreate_services)
+
+
+def test_server_deployer_restores_previous_skill_version_during_rollback() -> None:
+    deployer = (REPO_ROOT / "deploy/server/gate-challenger-deploy").read_text()
+
+    rollback_start = deployer.index("rollback_release()")
+    quiesce_failed_release = 'quiesce_application_services "$release_dir"'
+    restore_skill = 'seed_baseline_skills_for "$previous_dir"'
+    restore_failure = "previous baseline skill restore failed"
+    recreate_services = 'recreate_application_services "$previous_dir"'
+
+    assert deployer.index(quiesce_failed_release, rollback_start) < deployer.index(
+        restore_skill,
+        rollback_start,
+    )
+    assert deployer.index(restore_skill, rollback_start) < deployer.index(recreate_services, rollback_start)
+    failure_index = deployer.index(restore_failure, rollback_start)
+    assert failure_index < deployer.index("exit 1", failure_index) < deployer.index(
+        recreate_services,
+        rollback_start,
+    )
 
 
 def test_restricted_ssh_entrypoint_accepts_only_a_commit_sha() -> None:

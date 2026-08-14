@@ -9,8 +9,20 @@ from typing import Any
 @lru_cache(maxsize=1)
 def _stage_checklist_items_by_document_type() -> dict[str, list[dict[str, str]]]:
     path = _stage_checklist_contract_path()
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = json.loads(
+        path.read_text(encoding="utf-8"),
+        object_pairs_hook=_object_without_duplicate_keys,
+    )
     return value if isinstance(value, dict) else {}
+
+
+def _object_without_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"Duplicate key in stage checklist contract: {key}")
+        value[key] = item
+    return value
 
 
 def _stage_checklist_contract_path() -> Path:

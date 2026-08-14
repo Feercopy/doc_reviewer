@@ -2349,3 +2349,42 @@ Exit criteria:
   write APIs until the feature release activates it. Analysis creation also
   rejects the dormant value when it comes from a future stored document, while
   already-created worker jobs remain runnable during rollback.
+- 2026-08-14: Pinned production Gate Challenger to
+  `Ilya-eremenko/Gate2-challenger-skill@3447f867987d8727cbbd16e8874c60f2b1ed07d0`
+  and restored managed source checkout during the baseline skill refresh, so
+  the normal GitHub deployment installs the exact reviewed skill revision into
+  shared storage without direct root SSH. Added `Progress Review` as a distinct
+  supported document type with automatic detection, manual selection, and
+  routing to `progress-review-rubric.md`. Synchronized the strict stage
+  checklist contract with the expanded Gate 2, Gate 3, Stream Review 1, Stream
+  Review 2+, and Progress Review criteria. The draft Gate 1 rubric remains
+  intentionally inactive in the external skill repository. Verified the full
+  API suite (`225 passed`), full worker suite (`201 passed`), full web suite
+  (`150 passed`), Next.js production build, production Compose expansion, and
+  diff checks. GitHub's Linux runner exposed that `git clone --no-checkout`
+  reports a fresh checkout as locally modified on its Git version; the managed
+  source bootstrap now uses a normal clone before checking out the pinned ref.
+  Follow-up review hardening excludes the inactive Gate 1 draft from every
+  rendered prompt, points benchmark imports at the same managed checkout,
+  and archives superseded Gate Challenger baseline versions. Progress Review is
+  deployed after a separate compatibility release: v2 is seeded before public
+  containers are recreated, and rollback runs the compatibility release seeder
+  before restoring its containers. This removes the wrong-skill traffic window
+  while preserving both data-contract and analysis rollback compatibility and
+  keeping the active skill and benchmark source aligned. The feature renderer
+  also falls back to the equivalent Stream Review 2+ rubric only when a
+  historical Progress Review snapshot predates the dedicated rubric file, so
+  queued compatibility runs remain executable across the activation boundary.
+  The checklist loader now rejects duplicate JSON object keys, and the shared
+  contract contains one unambiguous `progress_review` definition. Final review
+  hardening adds the planned progress/status/milestone detector signals, ignores
+  legacy production source-path overrides in favor of
+  `GATE_CHALLENGER_MANAGED_PATH`, quiesces public services before the v2 skill
+  activation, treats even a partial activation as requiring rollback cleanup,
+  and aborts rollback when the previous skill version cannot be restored. The
+  detector requires distinct Progress Review signals, v2 source activation and
+  rendering require the dedicated Progress Review rubric while historical v1
+  snapshots retain the compatibility fallback, rollback stops failed new
+  containers before restoring v1, and managed source tags use detached checkout.
+  Final verification: `228` API tests and `203` worker tests passed; production
+  Compose configuration and the deploy shell syntax also validate successfully.

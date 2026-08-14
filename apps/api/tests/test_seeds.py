@@ -1,4 +1,7 @@
 import hashlib
+import subprocess
+
+import pytest
 
 from app.models.user import User
 from app.models.skill_source import SkillSource
@@ -47,13 +50,23 @@ def test_seed_baseline_skills_archives_superseded_gate_challenger_version(
     db_session,
     monkeypatch,
 ):
-    monkeypatch.setattr(skill_seeds, "GATE_CHALLENGER_SKILL_VERSION", "stage-checklist-v2")
-    future_skill = next(
+    monkeypatch.setattr(skill_seeds, "GATE_CHALLENGER_SKILL_VERSION", "stage-checklist-v1")
+    legacy_skill = next(
         skill
         for skill in seed_baseline_skills(db_session)
         if skill.name == "gate2_challenger_main_analysis"
     )
 
+    monkeypatch.setattr(skill_seeds, "GATE_CHALLENGER_SKILL_VERSION", "stage-checklist-v2")
+    current_skill = next(
+        skill
+        for skill in seed_baseline_skills(db_session)
+        if skill.name == "gate2_challenger_main_analysis"
+    )
+
+    db_session.refresh(legacy_skill)
+    assert legacy_skill.status == "archived"
+    assert current_skill.status == "active"
     monkeypatch.setattr(skill_seeds, "GATE_CHALLENGER_SKILL_VERSION", "stage-checklist-v1")
     compatibility_skill = next(
         skill
@@ -61,8 +74,8 @@ def test_seed_baseline_skills_archives_superseded_gate_challenger_version(
         if skill.name == "gate2_challenger_main_analysis"
     )
 
-    db_session.refresh(future_skill)
-    assert future_skill.status == "archived"
+    db_session.refresh(current_skill)
+    assert current_skill.status == "archived"
     assert compatibility_skill.status == "active"
 
 
@@ -72,11 +85,12 @@ def test_seeded_gate_challenger_skill_matches_supported_document_types(db_sessio
 
     assert main_skill.source_uri.endswith("/skills/gate-challenger/SKILL.md")
     assert main_skill.skill_source_id is not None
-    assert main_skill.version == "stage-checklist-v1"
+    assert main_skill.version == "stage-checklist-v2"
     assert main_skill.supported_document_types == [
         DocumentType.GATE_2.value,
         DocumentType.STREAM_REVIEW_1.value,
         DocumentType.STREAM_REVIEW_2_PLUS.value,
+        DocumentType.PROGRESS_REVIEW.value,
         DocumentType.GATE_3.value,
     ]
 
@@ -101,6 +115,96 @@ def test_seed_baseline_skills_creates_external_source_registry(db_session):
     assert "scripts/invest/run_pipeline.py" in sources["ic-agentic-review"].required_paths
 
 
+def test_seed_baseline_skills_can_manage_gate_challenger_checkout(db_session, tmp_path, monkeypatch):
+    source_repo = tmp_path / "gate-source-repo"
+    skill_file = source_repo / "skills/gate-challenger/SKILL.md"
+    skill_file.parent.mkdir(parents=True)
+    skill_file.write_text("Managed Gate Challenger prompt.", encoding="utf-8")
+    reference_file = source_repo / "skills/gate-challenger/references/common-output-contract.md"
+    reference_file.parent.mkdir()
+    reference_file.write_text("Reference contract.", encoding="utf-8")
+    progress_reference = source_repo / "skills/gate-challenger/references/progress-review-rubric.md"
+    progress_reference.write_text("Progress Review rubric.", encoding="utf-8")
+    _run_git(source_repo, "init", "-b", "main")
+    _run_git(source_repo, "config", "user.email", "test@example.com")
+    _run_git(source_repo, "config", "user.name", "Test")
+    _run_git(source_repo, "add", "skills")
+    _run_git(source_repo, "commit", "-m", "initial")
+    expected_revision = _run_git(source_repo, "rev-parse", "HEAD").stdout.strip()
+
+    checkout_path = tmp_path / "managed-checkout"
+    monkeypatch.setattr(skill_seeds, "GATE_CHALLENGER_SOURCE_PATH", checkout_path, raising=False)
+    monkeypatch.setattr(
+        skill_seeds,
+        "GATE_CHALLENGER_SKILL_PATH",
+        checkout_path / skill_seeds.GATE_CHALLENGER_ENTRYPOINT,
+        raising=False,
+    )
+    monkeypatch.setattr(skill_seeds, "GATE2_BENCHMARK_DIR", checkout_path / "benchmark", raising=False)
+    monkeypatch.setattr(skill_seeds, "GATE_CHALLENGER_MANAGED_REPO_URL", str(source_repo), raising=False)
+    monkeypatch.setattr(skill_seeds, "GATE_CHALLENGER_MANAGED_REF", expected_revision, raising=False)
+
+    skills = skill_seeds.seed_baseline_skills(db_session)
+
+    gate_skill = next(skill for skill in skills if skill.name == "gate2_challenger_main_analysis")
+    gate_source = db_session.query(SkillSource).filter_by(slug="gate-challenger").one()
+    assert gate_source.local_path == str(checkout_path)
+    assert gate_source.repo_url == str(source_repo)
+    assert gate_source.default_ref == expected_revision
+    assert gate_skill.prompt_text == "Managed Gate Challenger prompt."
+    assert _run_git(checkout_path, "rev-parse", "HEAD").stdout.strip() == expected_revision
+
+
+def test_managed_gate_challenger_checkout_supports_tag_refs(tmp_path):
+    source_repo = tmp_path / "tagged-gate-source-repo"
+    source_repo.mkdir()
+    (source_repo / "README.md").write_text("Tagged release.", encoding="utf-8")
+    _run_git(source_repo, "init", "-b", "main")
+    _run_git(source_repo, "config", "user.email", "test@example.com")
+    _run_git(source_repo, "config", "user.name", "Test")
+    _run_git(source_repo, "add", "README.md")
+    _run_git(source_repo, "commit", "-m", "tagged release")
+    _run_git(source_repo, "tag", "v2.0")
+    expected_revision = _run_git(source_repo, "rev-parse", "v2.0^{commit}").stdout.strip()
+
+    checkout_path = tmp_path / "managed-tag-checkout"
+    skill_seeds._ensure_git_checkout(checkout_path, str(source_repo), "v2.0")
+
+    assert _run_git(checkout_path, "rev-parse", "HEAD").stdout.strip() == expected_revision
+    assert _run_git(checkout_path, "symbolic-ref", "-q", "HEAD", check=False).returncode == 1
+
+
+def test_seed_baseline_skills_rejects_managed_gate_source_missing_required_paths(
+    db_session,
+    tmp_path,
+    monkeypatch,
+):
+    source_repo = tmp_path / "broken-gate-source-repo"
+    skill_file = source_repo / "skills/gate-challenger/SKILL.md"
+    skill_file.parent.mkdir(parents=True)
+    skill_file.write_text("Managed Gate Challenger prompt.", encoding="utf-8")
+    _run_git(source_repo, "init", "-b", "main")
+    _run_git(source_repo, "config", "user.email", "test@example.com")
+    _run_git(source_repo, "config", "user.name", "Test")
+    _run_git(source_repo, "add", "skills")
+    _run_git(source_repo, "commit", "-m", "initial")
+
+    checkout_path = tmp_path / "managed-checkout"
+    monkeypatch.setattr(skill_seeds, "GATE_CHALLENGER_SOURCE_PATH", checkout_path, raising=False)
+    monkeypatch.setattr(
+        skill_seeds,
+        "GATE_CHALLENGER_SKILL_PATH",
+        checkout_path / skill_seeds.GATE_CHALLENGER_ENTRYPOINT,
+        raising=False,
+    )
+    monkeypatch.setattr(skill_seeds, "GATE2_BENCHMARK_DIR", checkout_path / "benchmark", raising=False)
+    monkeypatch.setattr(skill_seeds, "GATE_CHALLENGER_MANAGED_REPO_URL", str(source_repo), raising=False)
+    monkeypatch.setattr(skill_seeds, "GATE_CHALLENGER_MANAGED_REF", "main", raising=False)
+
+    with pytest.raises(RuntimeError, match="managed Gate Challenger required path is missing"):
+        skill_seeds.seed_baseline_skills(db_session)
+
+
 def test_seeded_devils_advocate_skill_runs_for_unknown_documents(db_session):
     skills = seed_baseline_skills(db_session)
 
@@ -110,6 +214,7 @@ def test_seeded_devils_advocate_skill_runs_for_unknown_documents(db_session):
         DocumentType.GATE_2.value,
         DocumentType.STREAM_REVIEW_1.value,
         DocumentType.STREAM_REVIEW_2_PLUS.value,
+        DocumentType.PROGRESS_REVIEW.value,
         DocumentType.GATE_3.value,
         DocumentType.UNKNOWN.value,
     ]
@@ -126,6 +231,7 @@ def test_seeded_ic_agentic_review_skill_matches_source_contract(db_session):
         DocumentType.GATE_2.value,
         DocumentType.STREAM_REVIEW_1.value,
         DocumentType.STREAM_REVIEW_2_PLUS.value,
+        DocumentType.PROGRESS_REVIEW.value,
         DocumentType.GATE_3.value,
     ]
     assert ic_review_skill.source_type == SkillSourceType.LOCAL_SKILL_REPO.value
@@ -181,6 +287,7 @@ def test_seeded_result_summary_synthesis_skill_is_inline_and_result_scoped(db_se
         DocumentType.GATE_2.value,
         DocumentType.STREAM_REVIEW_1.value,
         DocumentType.STREAM_REVIEW_2_PLUS.value,
+        DocumentType.PROGRESS_REVIEW.value,
         DocumentType.GATE_3.value,
     ]
 
@@ -198,5 +305,10 @@ def test_seeded_result_rationale_synthesis_skill_is_inline_and_result_scoped(db_
         DocumentType.GATE_2.value,
         DocumentType.STREAM_REVIEW_1.value,
         DocumentType.STREAM_REVIEW_2_PLUS.value,
+        DocumentType.PROGRESS_REVIEW.value,
         DocumentType.GATE_3.value,
     ]
+
+
+def _run_git(cwd, *args, check=True):
+    return subprocess.run(["git", *args], cwd=cwd, check=check, capture_output=True, text=True)
