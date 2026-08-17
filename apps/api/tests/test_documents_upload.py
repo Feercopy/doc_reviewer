@@ -15,6 +15,7 @@ from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.provider_key import ProviderKey
 from app.models.skill import Skill
+from app.routers import admin_documents as admin_documents_router
 from app.routers import documents as documents_router
 from app.models.user import User
 from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus, Provider, Role, RunStatus, UserStatus
@@ -454,6 +455,65 @@ def test_admin_recovered_documents_uses_non_deleted_analysis_when_history_is_mix
     recovered_document = next(item for item in response.json()["documents"] if item["id"] == str(document_id))
     assert recovered_document["latest_analysis"]["id"] == str(active_analysis.id)
     assert recovered_document["latest_analysis"]["status"] == RunStatus.COMPLETED.value
+
+
+def test_admin_recovered_documents_detail_fallback_preserves_status_and_skips_deleted_documents(
+    api_client,
+    db_session,
+    monkeypatch,
+):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    author = create_user(db_session, "author", "secret")
+    skill = seed_baseline_skills(db_session)[0]
+    login(api_client, author.login, "secret")
+    visible_upload = upload_document(api_client, "visible-fallback-gate-2.txt", b"Gate 2 MVP metrics")
+    visible_document_id = UUID(visible_upload.json()["id"])
+    deleted_upload = upload_document(api_client, "deleted-fallback-gate-2.txt", b"Gate 2 MVP metrics")
+    deleted_document_id = UUID(deleted_upload.json()["id"])
+    deleted_document = db_session.get(Document, deleted_document_id)
+    deleted_document.status = EntityStatus.DELETED.value
+    visible_analysis = Analysis(
+        document_id=visible_document_id,
+        user_id=author.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="approve",
+        summary="Visible fallback analysis",
+        structured_output={},
+        raw_output="raw output",
+        run_parameters={},
+    )
+    deleted_analysis = Analysis(
+        document_id=deleted_document_id,
+        user_id=author.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="approve",
+        summary="Deleted fallback analysis",
+        structured_output={},
+        raw_output="raw output",
+        run_parameters={},
+    )
+    db_session.add_all([visible_analysis, deleted_analysis])
+    db_session.commit()
+    monkeypatch.setattr(admin_documents_router, "can_read_document", lambda _admin, _document: False)
+    api_client.post("/auth/logout")
+    login(api_client, admin.login, "secret")
+
+    response = api_client.get("/admin/documents/recovered")
+
+    assert response.status_code == 200
+    documents = response.json()["documents"]
+    assert [item["id"] for item in documents] == [str(visible_document_id)]
+    assert documents[0]["latest_analysis"]["id"] == str(visible_analysis.id)
+    assert documents[0]["latest_analysis"]["status"] == RunStatus.COMPLETED.value
+    assert all(item["id"] != str(deleted_document_id) for item in documents)
 
 
 def test_upload_rejects_partial_analysis_config_before_storing_document(api_client, db_session, storage_root):

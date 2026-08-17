@@ -2391,4 +2391,12 @@ Exit criteria:
   empty Documents table while admin analyses and direct document pages remained
   readable, rewired the admin recovery endpoint to derive active documents via a
   direct `Analysis -> Document` join and still return only compact document
-  records.
+  records. Added a bounded detail-service fallback for the production-only case
+  where set-based lists remain empty but direct document pages are readable; the
+  fallback is capped at 200 recent analysis-backed document IDs and reuses the
+  normal active/readable document guard. Added regression coverage that forces
+  the fallback branch, verifies latest-analysis status restoration, and skips a
+  deleted document backed by non-deleted analysis history. Tightened the
+  fallback latest-status lookup to rank in SQL and project only compact status
+  fields, so large raw/structured model outputs are not loaded for the
+  Documents table recovery path.
