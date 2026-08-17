@@ -2408,4 +2408,12 @@ Exit criteria:
   document IDs from `/admin/analyses`, then reads each document and its progress
   through the same direct endpoints used by the case page; this restores the
   main table when admin analyses and direct case pages are readable but list
-  endpoints still return empty.
+  endpoints still return empty. A follow-up removed the fragile per-document
+  progress dependency from that UI fallback after production showed direct case
+  pages and admin analysis history working while the Documents table still
+  rendered empty. The recovery path now reads each document once and uses the
+  compact status already returned by `/admin/analyses`, reducing request volume
+  and avoiding an all-or-nothing drop when progress status cannot be read. The
+  compact recovered status is treated as terminal when the admin analysis run
+  itself is terminal, so completed recovered rows do not poll forever or show a
+  misleading `IC Review queued` state.

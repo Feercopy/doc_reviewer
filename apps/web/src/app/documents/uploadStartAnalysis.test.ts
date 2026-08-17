@@ -25,12 +25,14 @@ describe("documents upload start analysis flow", () => {
     expect(pageSource).toContain('return { label: "Workbook attached", tone: "good" };');
     expect(pageSource).toContain("function isFullAnalysisComplete");
     expect(pageSource).toContain("function isDevilsAdvocateCompleteOrSkipped");
+    expect(pageSource).toContain("function isTerminalCompactRecoveredAnalysis");
     expect(pageSource).toContain("function latestAnalysesByDocumentId");
     expect(pageSource).toContain("function recoverDocumentsFromAdminDocuments");
     expect(pageSource).toContain("function recoverDocumentsFromAdminHistory");
     expect(pageSource).toContain("listRecoveredAdminDocuments");
     expect(pageSource).toContain("listAdminAnalyses");
-    expect(pageSource).toContain("getDocumentProgress");
+    expect(pageSource).toContain("adminAnalysisToStatus");
+    expect(pageSource).not.toContain("getDocumentProgress");
     expect(pageSource).toContain("Promise.allSettled");
     expect(pageSource).toContain("const adminHistoryRecoveryLimit = 100");
     expect(pageSource).toContain(
@@ -49,7 +51,7 @@ describe("documents upload start analysis flow", () => {
     expect(pageSource).toContain("<th>Analysis</th>");
     expect(pageSource).not.toContain("<th>Document</th>");
     expect(pageSource).not.toContain("gc-file-kind");
-    expect(pageSource).toContain("const canOpenAnalysis = caseAnalysis ? isFullAnalysisComplete(caseAnalysis) : false");
+    expect(pageSource).toContain('isFullAnalysisComplete(caseAnalysis) || caseAnalysis.status === "completed"');
     expect(pageSource).toContain('href={`/analyses/${caseAnalysis.id}`}');
     expect(pageSource).toContain("Analysis results");
     expect(pageSource).toContain('href={`/documents/${document.id}`}');
