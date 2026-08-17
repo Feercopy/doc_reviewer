@@ -968,7 +968,7 @@ def test_document_owner_cannot_delete_analysis_created_by_admin(client, db_sessi
     assert analysis.deleted_at is None
 
 
-def test_old_analysis_does_not_enqueue_or_expose_language_variants(client, db_session):
+def test_old_analysis_stays_hidden_until_run_marks_localizations_expected(client, db_session):
     from app.main import app
     from app.routers import analyses as analyses_router
 
@@ -1040,18 +1040,51 @@ def test_old_analysis_does_not_enqueue_or_expose_language_variants(client, db_se
     assert first.json()["en"]["status"] == "missing"
     assert read.json() == second.json()
 
-    from app.services.summary_localizations import request_summary_localizations
-
-    created, should_enqueue = request_summary_localizations(
-        db=db_session,
-        analysis=analysis,
-        create_if_missing=True,
+    db_session.refresh(analysis)
+    analysis.structured_output = {
+        "result": {
+            "short_summary": "Нужны подтверждения",
+            "summary_localizations": {
+                "version": 2,
+                "generation_mode": "independent",
+                "source_revision": str(check_run.id),
+                "ru": {"status": "waiting", "payload": None, "requested_at": utc_now().isoformat()},
+                "en": {"status": "waiting", "payload": None, "requested_at": utc_now().isoformat()},
+            },
+        }
+    }
+    check_run.run_parameters = {"summary_localizations_expected": "postprocessing"}
+    db_session.commit()
+    app.dependency_overrides[analyses_router.get_run_summary_localizations_enqueue] = (
+        lambda: lambda analysis_id: enqueued.append(str(analysis_id))
     )
-    assert should_enqueue is True
-    assert created.available is True
-    assert created.generation_mode == "independent"
-    assert created.ru.status == "queued"
-    assert created.en.status == "queued"
+    try:
+        waiting = client.post(f"/analyses/{analysis.id}/summary-localizations")
+    finally:
+        app.dependency_overrides.pop(analyses_router.get_run_summary_localizations_enqueue, None)
+
+    assert waiting.status_code == 200
+    assert waiting.json()["available"] is True
+    assert waiting.json()["ru"]["status"] == "waiting"
+    assert waiting.json()["en"]["status"] == "waiting"
+    assert enqueued == []
+
+    check_run.run_parameters = {"summary_localizations_expected": True}
+    db_session.commit()
+    app.dependency_overrides[analyses_router.get_run_summary_localizations_enqueue] = (
+        lambda: lambda analysis_id: enqueued.append(str(analysis_id))
+    )
+    try:
+        created = client.post(f"/analyses/{analysis.id}/summary-localizations")
+    finally:
+        app.dependency_overrides.pop(analyses_router.get_run_summary_localizations_enqueue, None)
+
+    assert created.status_code == 200
+    assert enqueued == [str(analysis.id)]
+    assert created.json()["available"] is True
+    assert created.json()["generation_mode"] == "independent"
+    assert created.json()["ru"]["status"] == "queued"
+    assert created.json()["en"]["status"] == "queued"
 
 
 def test_cancel_analysis_preserves_completed_gate_result_and_cancels_downstream_runs(client, db_session):

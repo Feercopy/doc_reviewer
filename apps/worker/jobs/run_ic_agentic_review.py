@@ -28,8 +28,11 @@ from app.security.secrets import decrypt_secret
 from app.services.provider_keys import get_shared_provider_key
 from app.services.analysis_jobs import enqueue_run_summary_localizations
 from app.services.summary_localizations import (
+    SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER,
+    SUMMARY_LOCALIZATIONS_POSTPROCESSING,
+    initialize_waiting_summary_localizations_for_check_run,
     mark_summary_localizations_enqueue_failed,
-    prepare_summary_localizations_for_check_run,
+    request_summary_localizations,
 )
 from app.storage.local import LocalDocumentStorage
 from ic_review.context import build_ic_review_context
@@ -70,6 +73,7 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
     run_uuid = UUID(str(check_run_id))
     provider_raw_output: str | None = None
     provider_structured_text: str | None = None
+    core_completion_committed = False
     try:
         worker_logger.info(
             "worker_job_started",
@@ -341,24 +345,29 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         flag_modified(check_run, "artifacts")
 
         if not pipeline_result.succeeded or validation_summary["failures_count"] > 0:
+            core_run_status = RunStatus.FAILED.value
             check_run.status = RunStatus.FAILED.value
             check_run.current_stage = "failed:validation"
             check_run.error_message = "ic_review_validation_failed"
+            check_run.completed_at = utc_now()
         else:
+            core_run_status = RunStatus.COMPLETED.value
             check_run.status = RunStatus.COMPLETED.value
             check_run.current_stage = "completed"
             check_run.error_message = None
-        check_run.completed_at = utc_now()
-        should_enqueue_localizations = False
-        if check_run.status == RunStatus.COMPLETED.value:
-            _, should_enqueue_localizations = prepare_summary_localizations_for_check_run(
+            check_run.completed_at = utc_now()
+            run_parameters = dict(check_run.run_parameters or {})
+            run_parameters[SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER] = SUMMARY_LOCALIZATIONS_POSTPROCESSING
+            check_run.run_parameters = run_parameters
+            flag_modified(check_run, "run_parameters")
+            initialize_waiting_summary_localizations_for_check_run(
                 analysis=analysis,
                 check_run=check_run,
-                create_if_missing=True,
             )
         session.commit()
+        core_completion_committed = core_run_status == RunStatus.COMPLETED.value
 
-        if check_run.status == RunStatus.COMPLETED.value:
+        if core_run_status == RunStatus.COMPLETED.value:
             try:
                 update_result_short_summary(
                     session=session,
@@ -370,7 +379,21 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
                     base_url=base_url,
                 )
             except Exception as exc:
-                _record_result_summary_failure(session=session, analysis=analysis, check_run=check_run, exc=exc)
+                session.rollback()
+                try:
+                    _record_result_summary_failure(session=session, analysis=analysis, check_run=check_run, exc=exc)
+                except Exception as record_exc:
+                    session.rollback()
+                    _log_optional_postprocessing_failure(
+                        event="result_summary_failure_record_failed",
+                        run_uuid=run_uuid,
+                        exc=record_exc,
+                    )
+                _log_optional_postprocessing_failure(
+                    event="result_summary_postprocessing_failed",
+                    run_uuid=run_uuid,
+                    exc=exc,
+                )
             try:
                 update_result_rationale(
                     session=session,
@@ -382,7 +405,56 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
                     base_url=base_url,
                 )
             except Exception as exc:
-                _record_result_rationale_failure(session=session, analysis=analysis, check_run=check_run, exc=exc)
+                session.rollback()
+                try:
+                    _record_result_rationale_failure(session=session, analysis=analysis, check_run=check_run, exc=exc)
+                except Exception as record_exc:
+                    session.rollback()
+                    _log_optional_postprocessing_failure(
+                        event="result_rationale_failure_record_failed",
+                        run_uuid=run_uuid,
+                        exc=record_exc,
+                    )
+                _log_optional_postprocessing_failure(
+                    event="result_rationale_postprocessing_failed",
+                    run_uuid=run_uuid,
+                    exc=exc,
+                )
+
+            check_run = session.get(AnalysisCheckRun, run_uuid)
+            analysis = session.get(Analysis, check_run.analysis_id)
+            postprocessing_marker_persisted = False
+            try:
+                run_parameters = dict(check_run.run_parameters or {})
+                run_parameters[SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER] = True
+                check_run.run_parameters = run_parameters
+                flag_modified(check_run, "run_parameters")
+                session.commit()
+                postprocessing_marker_persisted = True
+            except Exception as exc:
+                session.rollback()
+                _log_optional_postprocessing_failure(
+                    event="summary_localization_marker_failed",
+                    run_uuid=run_uuid,
+                    exc=exc,
+                )
+
+            should_enqueue_localizations = False
+            if postprocessing_marker_persisted:
+                try:
+                    _, should_enqueue_localizations = request_summary_localizations(
+                        db=session,
+                        analysis=analysis,
+                        create_if_missing=True,
+                    )
+                except Exception as exc:
+                    session.rollback()
+                    _log_optional_postprocessing_failure(
+                        event="summary_localization_prepare_failed",
+                        run_uuid=run_uuid,
+                        exc=exc,
+                    )
+
             if should_enqueue_localizations and owns_session:
                 try:
                     enqueue_run_summary_localizations(analysis.id)
@@ -407,7 +479,7 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
 
         worker_logger.info(
             "worker_job_completed",
-            extra={"job_type": "run_ic_agentic_review", "entity_id": str(run_uuid), "status": check_run.status},
+            extra={"job_type": "run_ic_agentic_review", "entity_id": str(run_uuid), "status": core_run_status},
         )
     except IcReviewRunCancelled:
         session.rollback()
@@ -426,6 +498,13 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         )
     except Exception as exc:
         session.rollback()
+        if core_completion_committed:
+            _log_optional_postprocessing_failure(
+                event="completed_ic_postprocessing_failed",
+                run_uuid=run_uuid,
+                exc=exc,
+            )
+            return
         failed = session.get(AnalysisCheckRun, run_uuid)
         if failed is None:
             raise
@@ -449,6 +528,19 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
     finally:
         if owns_session:
             session.close()
+
+
+def _log_optional_postprocessing_failure(*, event: str, run_uuid: UUID, exc: BaseException) -> None:
+    worker_logger.info(
+        event,
+        extra={
+            "job_type": "run_ic_agentic_review",
+            "entity_id": str(run_uuid),
+            "status": "completed",
+            "error_class": exc.__class__.__name__,
+            "error_code": safe_ic_review_error_message(exc),
+        },
+    )
 
 
 def _get_provider_key(session: Session, provider: Provider) -> ProviderKey | None:

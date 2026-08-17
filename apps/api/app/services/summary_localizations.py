@@ -15,6 +15,8 @@ from app.services.stage_checklists import canonicalize_stage_checklist_labels
 
 
 SUMMARY_LOCALIZATIONS_KEY = "summary_localizations"
+SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER = "summary_localizations_expected"
+SUMMARY_LOCALIZATIONS_POSTPROCESSING = "postprocessing"
 SUMMARY_LOCALIZATION_VERSION = 2
 SUMMARY_GENERATION_MODE = "independent"
 STALE_LOCALIZATION_AFTER = timedelta(minutes=30)
@@ -45,11 +47,35 @@ def request_summary_localizations(
     response, should_enqueue = prepare_summary_localizations_for_check_run(
         analysis=analysis,
         check_run=check_run,
-        create_if_missing=create_if_missing,
+        create_if_missing=(
+            create_if_missing
+            or (check_run.run_parameters or {}).get(SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER) is True
+        ),
     )
     if should_enqueue:
         db.commit()
     return response, should_enqueue
+
+
+def initialize_waiting_summary_localizations_for_check_run(
+    *,
+    analysis: Analysis,
+    check_run: AnalysisCheckRun,
+) -> SummaryLocalizationsRead:
+    """Persist a non-runnable localization state alongside IC completion."""
+    if analysis.status != RunStatus.COMPLETED.value or check_run.status != RunStatus.COMPLETED.value:
+        return read_summary_localizations(analysis)
+
+    revision = str(check_run.id)
+    state = _state(analysis)
+    if (
+        state.get("source_revision") != revision
+        or state.get("version") != SUMMARY_LOCALIZATION_VERSION
+        or state.get("generation_mode") != SUMMARY_GENERATION_MODE
+    ):
+        state = _empty_state(revision, status="waiting")
+        _persist_state(analysis, state)
+    return _read_state(analysis.id, state)
 
 
 def prepare_summary_localizations_for_check_run(
@@ -78,7 +104,14 @@ def prepare_summary_localizations_for_check_run(
     else:
         for language in ("ru", "en"):
             variant = state.get(language)
-            if not isinstance(variant, dict) or variant.get("status") in {None, "failed"}:
+            if isinstance(variant, dict) and variant.get("status") == "waiting":
+                postprocessing_finished = (
+                    (check_run.run_parameters or {}).get(SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER) is True
+                )
+                if postprocessing_finished or _is_stale(variant):
+                    state[language] = _queued_variant()
+                    should_enqueue = True
+            elif not isinstance(variant, dict) or variant.get("status") in {None, "failed"}:
                 state[language] = _queued_variant()
                 should_enqueue = True
             elif variant.get("status") in {"queued", "running"} and _is_stale(variant):
@@ -111,7 +144,12 @@ def _state(analysis: Analysis) -> dict[str, Any]:
 
 
 def _empty_state(revision: str | None, *, status: str = "queued") -> dict[str, Any]:
-    variant = _queued_variant() if status == "queued" else {"status": status, "payload": None, "error_message": None}
+    variant = _queued_variant() if status == "queued" else {
+        "status": status,
+        "payload": None,
+        "error_message": None,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+    }
     return {
         "version": SUMMARY_LOCALIZATION_VERSION,
         "generation_mode": SUMMARY_GENERATION_MODE,

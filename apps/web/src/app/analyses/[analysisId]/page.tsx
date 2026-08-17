@@ -170,11 +170,14 @@ export default function AnalysisDetailPage() {
     let cancelled = false;
     let timer: number | undefined;
     const hasPendingVariant = (value: SummaryLocalizationsRecord) =>
-      value.available && [value.ru.status, value.en.status].some((status) => status === "queued" || status === "running");
+      value.available
+      && [value.ru.status, value.en.status].some((status) => status === "waiting" || status === "queued" || status === "running");
+    const hasWaitingVariant = (value: SummaryLocalizationsRecord) =>
+      value.available && [value.ru.status, value.en.status].some((status) => status === "waiting");
 
-    async function refreshLocalizations(initial: boolean) {
+    async function refreshLocalizations(ensure: boolean) {
       try {
-        const loaded = initial
+        const loaded = ensure
           ? await ensureSummaryLocalizations(params.analysisId)
           : await getSummaryLocalizations(params.analysisId);
         if (cancelled) {
@@ -183,7 +186,7 @@ export default function AnalysisDetailPage() {
         setSummaryLocalizations(loaded);
         setSummaryLocalizationError("");
         if (hasPendingVariant(loaded)) {
-          timer = window.setTimeout(() => refreshLocalizations(false), 2000);
+          timer = window.setTimeout(() => refreshLocalizations(hasWaitingVariant(loaded)), 2000);
         }
       } catch (err) {
         if (!cancelled) {

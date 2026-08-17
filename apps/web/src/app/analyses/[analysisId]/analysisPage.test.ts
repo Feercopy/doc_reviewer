@@ -399,6 +399,7 @@ describe("analysis result page", () => {
     );
 
     expect(pageSource).toContain("ensureSummaryLocalizations(params.analysisId)");
+    expect(pageSource).toContain("refreshLocalizations(hasWaitingVariant(loaded))");
     expect(pageSource).toContain("getSummaryLocalizations(params.analysisId)");
     expect(pageSource).toContain('useState<OutputLanguage>("ru")');
     expect(resultPanelSource).toContain('localizations?.available === true');
