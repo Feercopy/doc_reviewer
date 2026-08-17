@@ -250,6 +250,32 @@ function adminAnalysisToStatus(analysis: AdminAnalysis): AnalysisStatusRecord {
   };
 }
 
+function adminAnalysisToRecoveredDocument(analysis: AdminAnalysis): DocumentRecord {
+  const timestamp = analysis.completed_at ?? analysis.started_at ?? analysis.created_at;
+  return {
+    id: analysis.document_id,
+    owner_id: analysis.user_id,
+    linked_fin_summary_document_id: null,
+    title: analysis.document_title || "Recovered case",
+    original_filename: analysis.document_title || "Recovered case",
+    mime_type: "application/octet-stream",
+    file_size_bytes: 0,
+    file_hash_sha256: "",
+    parse_status: "completed",
+    detected_document_type: "unknown",
+    document_type_confidence: null,
+    document_type_explanation: null,
+    manual_document_type: null,
+    document_role: "primary",
+    parse_error: null,
+    status: "active",
+    linked_fin_summary_document: null,
+    latest_analysis: adminAnalysisToStatus(analysis),
+    created_at: analysis.created_at,
+    updated_at: timestamp,
+  };
+}
+
 async function recoverDocumentsFromAdminDocuments(): Promise<DocumentRecord[]> {
   let recoveryError: unknown;
   try {
@@ -258,9 +284,6 @@ async function recoverDocumentsFromAdminDocuments(): Promise<DocumentRecord[]> {
       return response.documents;
     }
   } catch (err) {
-    if (err instanceof Error && err.message.includes("403")) {
-      return [];
-    }
     recoveryError = err;
   }
 
@@ -287,11 +310,15 @@ async function recoverDocumentsFromAdminHistory(): Promise<DocumentRecord[]> {
   }
   const recovered = await Promise.allSettled(
     Array.from(latestAnalyses.entries()).map(async ([documentId, analysis]) => {
-      const document = await getDocument(documentId);
-      return {
-        ...document,
-        latest_analysis: document.latest_analysis ?? adminAnalysisToStatus(analysis),
-      };
+      try {
+        const document = await getDocument(documentId);
+        return {
+          ...document,
+          latest_analysis: document.latest_analysis ?? adminAnalysisToStatus(analysis),
+        };
+      } catch {
+        return adminAnalysisToRecoveredDocument(analysis);
+      }
     }),
   );
   return recovered.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));

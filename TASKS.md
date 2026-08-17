@@ -2416,4 +2416,11 @@ Exit criteria:
   and avoiding an all-or-nothing drop when progress status cannot be read. The
   compact recovered status is treated as terminal when the admin analysis run
   itself is terminal, so completed recovered rows do not poll forever or show a
-  misleading `IC Review queued` state.
+  misleading `IC Review queued` state. Production still showed an empty table
+  after this deploy, so the UI recovery path now has a final synthetic row
+  fallback: if `/admin/analyses` has a run but `/documents/{id}` cannot be read
+  for the list, the Documents table renders a minimal case row from admin
+  analysis metadata instead of dropping the case. The UI also no longer stops
+  recovery after a `/admin/documents/recovered` failure or 403; it still tries
+  `/admin/analyses`, which is the production page that demonstrably has the
+  surviving case history.
