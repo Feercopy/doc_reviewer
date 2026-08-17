@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 import zipfile
 
 from fastapi import UploadFile
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.authz.policies import can_read_document
@@ -307,6 +307,9 @@ def list_documents_for_actor(*, db: Session, actor: User) -> list[Document]:
     documents_by_id = {document.id: document for document in db.execute(statement).scalars().all()}
     for document in _list_active_analyzed_documents_for_actor(db=db, actor=actor):
         documents_by_id.setdefault(document.id, document)
+    if actor.role == Role.ADMIN.value:
+        for document in _list_recoverable_admin_analysis_documents(db=db):
+            documents_by_id.setdefault(document.id, document)
     return sorted(documents_by_id.values(), key=lambda document: document.created_at, reverse=True)
 
 
@@ -336,6 +339,23 @@ def _list_active_analyzed_documents_for_actor(*, db: Session, actor: User) -> li
         .order_by(Document.created_at.desc())
     )
     return list(db.execute(statement).scalars().all())
+
+
+def _list_recoverable_admin_analysis_documents(*, db: Session) -> list[Document]:
+    latest_analysis_at = func.max(Analysis.created_at).label("latest_analysis_at")
+    rows = db.execute(
+        select(Document, latest_analysis_at)
+        .join(Analysis, Analysis.document_id == Document.id)
+        .options(selectinload(Document.linked_fin_summary_document))
+        .where(
+            Analysis.deleted_at.is_(None),
+            Document.status != EntityStatus.DELETED.value,
+        )
+        .group_by(Document.id)
+        .order_by(latest_analysis_at.desc())
+        .limit(200)
+    ).all()
+    return [document for document, _ in rows]
 
 
 def get_document_for_actor(*, db: Session, actor: User, document_id: UUID) -> Document:

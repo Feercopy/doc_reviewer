@@ -333,6 +333,44 @@ def test_documents_list_ignores_non_primary_documents_with_only_deleted_analysis
     assert str(deleted_only_document_id) not in document_ids
 
 
+def test_admin_documents_list_recovers_analyzed_documents_without_primary_role(api_client, db_session):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    author = create_user(db_session, "author", "secret")
+    skill = seed_baseline_skills(db_session)[0]
+    login(api_client, author.login, "secret")
+    upload = upload_document(api_client, "admin-legacy-gate-2.txt", b"Gate 2 MVP metrics")
+    document_id = UUID(upload.json()["id"])
+    document = db_session.get(Document, document_id)
+    document.document_role = DocumentRole.FIN_SUMMARY.value
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=author.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="approve",
+        summary="Completed analysis",
+        structured_output={"summary": "x" * 500_000},
+        raw_output="raw output" * 10_000,
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.commit()
+    api_client.post("/auth/logout")
+    login(api_client, admin.login, "secret")
+
+    response = api_client.get("/documents")
+
+    assert response.status_code == 200
+    documents = response.json()["documents"]
+    assert [item["id"] for item in documents] == [str(document_id)]
+    assert documents[0]["latest_analysis"]["id"] == str(analysis.id)
+    assert "structured_output" not in documents[0]["latest_analysis"]
+    assert "raw_output" not in documents[0]["latest_analysis"]
+
+
 def test_admin_recovered_documents_returns_compact_statuses_for_analyzed_documents(api_client, db_session):
     admin = create_user(db_session, "admin", "secret", Role.ADMIN)
     author = create_user(db_session, "author", "secret")
