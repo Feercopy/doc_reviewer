@@ -5,7 +5,7 @@ import { DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState
 
 import { AppShell } from "@/components/AppShell";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
-import { listRecoveredAdminDocuments } from "@/lib/api/admin";
+import { listAdminAnalyses, listRecoveredAdminDocuments } from "@/lib/api/admin";
 import {
   getProviderDefaultModel,
   listProviderModels,
@@ -14,6 +14,8 @@ import {
 import {
   USER_SELECTABLE_DOCUMENT_TYPES,
   deleteDocumentAnalyses,
+  getDocument,
+  getDocumentProgress,
   listDocuments,
   uploadDocument,
   type AnalysisStatusRecord,
@@ -29,6 +31,7 @@ import { formatDocumentTypeLabel, getDocumentParsePresentation } from "./documen
 type ParseFilter = "all" | ParseStatus;
 
 const supportedExtensions = [".docx", ".pdf", ".md", ".txt"];
+const adminHistoryRecoveryLimit = 100;
 type UploadSlot = "primary" | "finSummary";
 type UploadStep = "uploading" | "parsing" | "starting_analysis";
 
@@ -213,15 +216,45 @@ function latestAnalysesByDocumentId(
 }
 
 async function recoverDocumentsFromAdminDocuments(): Promise<DocumentRecord[]> {
+  let recoveryError: unknown;
   try {
     const response = await listRecoveredAdminDocuments();
-    return response.documents;
+    if (response.documents.length > 0) {
+      return response.documents;
+    }
   } catch (err) {
     if (err instanceof Error && err.message.includes("403")) {
       return [];
     }
-    throw err;
+    recoveryError = err;
   }
+
+  try {
+    return await recoverDocumentsFromAdminHistory();
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("403")) {
+      return [];
+    }
+    throw recoveryError ?? err;
+  }
+}
+
+async function recoverDocumentsFromAdminHistory(): Promise<DocumentRecord[]> {
+  const response = await listAdminAnalyses();
+  const documentIds = Array.from(new Set(response.analyses.map((analysis) => analysis.document_id))).slice(
+    0,
+    adminHistoryRecoveryLimit,
+  );
+  const recovered = await Promise.allSettled(
+    documentIds.map(async (documentId) => {
+      const [document, progress] = await Promise.all([getDocument(documentId), getDocumentProgress(documentId)]);
+      return {
+        ...document,
+        latest_analysis: progress.analyses[0] ?? document.latest_analysis,
+      };
+    }),
+  );
+  return recovered.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
 }
 
 function isCaseStatusActive(document: DocumentRecord, analysis: AnalysisStatusRecord | undefined): boolean {
