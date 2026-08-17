@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.schemas.enums import (
     DocumentParseStatus,
@@ -15,6 +15,7 @@ from app.schemas.enums import (
     Provider,
     RunStatus,
     Verdict,
+    coerce_document_type,
 )
 
 
@@ -38,6 +39,11 @@ class AdminDocumentRead(BaseModel):
     parsed_text_available: bool
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("detected_document_type", "manual_document_type", mode="before")
+    @classmethod
+    def normalize_document_type(cls, value: object) -> object:
+        return coerce_document_type(value)
 
 
 class AdminDocumentsListResponse(BaseModel):

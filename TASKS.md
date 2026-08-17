@@ -2423,4 +2423,15 @@ Exit criteria:
   analysis metadata instead of dropping the case. The UI also no longer stops
   recovery after a `/admin/documents/recovered` failure or 403; it still tries
   `/admin/analyses`, which is the production page that demonstrably has the
-  surviving case history.
+  surviving case history. After PR #46 still left the production Documents
+  table empty while `/admin/analyses` showed 88 runs, moved the recovery closer
+  to the source of truth: admin `/documents` now also merges a bounded set of
+  non-deleted analysis-backed documents without requiring `document_role =
+  primary` or an owner join, so navigating away and back reloads cases from the
+  backend instead of depending on transient upload state.
+  Production logs then showed `/documents` returning 500 because legacy
+  persisted `detected_document_type = progress_review` values no longer matched
+  the rolled-back document type enum. Added response-layer coercion so unsupported
+  stored document types are rendered as `unknown` instead of breaking the entire
+  Documents table, while keeping Progress Review out of active Gate Challenger
+  stage support.
