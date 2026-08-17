@@ -40,6 +40,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
         };
   const response = await fetch(`${resolveApiBaseUrl()}${path}`, {
     ...init,
+    cache: init.cache ?? "no-store",
     credentials: "include",
     headers,
   });
@@ -60,6 +61,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 export async function apiFetchText(path: string, init: RequestInit = {}): Promise<string> {
   const response = await fetch(`${resolveApiBaseUrl()}${path}`, {
     ...init,
+    cache: init.cache ?? "no-store",
     credentials: "include",
     headers: init.headers,
   });
@@ -80,6 +82,7 @@ export async function apiFetchText(path: string, init: RequestInit = {}): Promis
 export async function apiFetchNoContent(path: string, init: RequestInit = {}): Promise<void> {
   const response = await fetch(`${resolveApiBaseUrl()}${path}`, {
     ...init,
+    cache: init.cache ?? "no-store",
     credentials: "include",
     headers: init.headers,
   });
