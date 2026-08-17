@@ -2435,3 +2435,11 @@ Exit criteria:
   stored document types are rendered as `unknown` instead of breaking the entire
   Documents table, while keeping Progress Review out of active Gate Challenger
   stage support.
+- 2026-08-17: Investigated production `IC review failed: pii_residue_error`.
+  Hardened the strict local anonymizer to run a bounded residual masking pass
+  after initial replacements, covering broken opaque identifiers such as
+  `ABC[PHONE_001]XYZ` that could appear when a numeric fragment inside a larger
+  token was masked first. This keeps IC Review fail-closed on true unresolved
+  residue but avoids stopping a run when the remaining residue can be masked
+  locally before the prompt is sent to the provider. Verified focused worker
+  anonymizer coverage (`7 passed`).
