@@ -8,6 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.authz.policies import can_read_document
+from app.models.analysis import Analysis
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.user import User
@@ -303,6 +304,30 @@ def list_documents_for_actor(*, db: Session, actor: User) -> list[Document]:
     if actor.role != Role.ADMIN.value:
         statement = statement.where(Document.owner_id == actor.id)
     statement = statement.order_by(Document.created_at.desc())
+    documents_by_id = {document.id: document for document in db.execute(statement).scalars().all()}
+    for document in _list_active_analyzed_documents_for_actor(db=db, actor=actor):
+        documents_by_id.setdefault(document.id, document)
+    return sorted(documents_by_id.values(), key=lambda document: document.created_at, reverse=True)
+
+
+def _list_active_analyzed_documents_for_actor(*, db: Session, actor: User) -> list[Document]:
+    document_ids = (
+        select(Analysis.document_id)
+        .join(Document, Document.id == Analysis.document_id)
+        .where(Document.status == EntityStatus.ACTIVE.value)
+    )
+    if actor.role != Role.ADMIN.value:
+        document_ids = document_ids.where(Document.owner_id == actor.id)
+
+    statement = (
+        select(Document)
+        .options(selectinload(Document.linked_fin_summary_document))
+        .where(
+            Document.status == EntityStatus.ACTIVE.value,
+            Document.id.in_(document_ids),
+        )
+        .order_by(Document.created_at.desc())
+    )
     return list(db.execute(statement).scalars().all())
 
 

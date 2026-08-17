@@ -21,6 +21,14 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Restore the production Documents table when case detail pages remain
+  readable but `/documents` misses analyzed cases. Added a narrow API recovery
+  path that merges primary active documents with active, actor-visible documents
+  reconstructed from existing analyses, deduplicated by document ID, without
+  exposing deleted records or orphan Fin Summary attachments. Verified with
+  focused document API tests (`26 passed`), `git diff --check`, Python
+  compilation, and production Compose validation with dummy required environment
+  values.
 - [x] Make Required elements labels deterministic in bilingual Summary output.
   A Stream Review label (`Подтвержденная проблематика`) was falsely classified
   as a person name, restored after the English language check, and displayed in
