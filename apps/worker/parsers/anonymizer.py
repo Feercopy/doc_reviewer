@@ -269,6 +269,7 @@ class PersonalDataAnonymizer:
         spans = self._detect_spans_with_aliases(text)
         result = text
         result = self._anonymize_spans(result, spans)
+        result = self._anonymize_residual_spans(result)
         self._assert_no_residue(result)
         return result
 
@@ -290,6 +291,17 @@ class PersonalDataAnonymizer:
         for span in reversed(spans):
             value = result[span.start : span.end]
             result = result[: span.start] + self._placeholder_for(span.kind, value) + result[span.end :]
+        return result
+
+    def _anonymize_residual_spans(self, text: str) -> str:
+        result = text
+        for _ in range(3):
+            if not residual_counts(result):
+                return result
+            updated = self._anonymize_spans(result, detect_spans(result))
+            if updated == result:
+                return result
+            result = updated
         return result
 
     def anonymize_value(self, value: Any, current_key: str | None = None) -> Any:
@@ -501,6 +513,8 @@ def detect_spans(text: str) -> list[Span]:
     # A complete opaque identifier wins over phone/card-looking substrings inside it.
     for match in _LONG_IDENTIFIER.finditer(text):
         add(match, "identifier", 120)
+    for match in _BROKEN_IDENTIFIER.finditer(text):
+        spans.append(Span(match.start(), match.end(), "identifier", 130))
 
     return _accept_spans(spans)
 

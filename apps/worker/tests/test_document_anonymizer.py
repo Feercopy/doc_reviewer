@@ -154,6 +154,16 @@ def test_anonymizer_keeps_link_and_identifier_context_in_placeholders():
     assert "[IDENTIFIER_EXPERIMENT_001]" in anonymized
 
 
+def test_anonymizer_masks_broken_identifier_residue_after_numeric_replacement():
+    text = "Opaque account token ABCD-1234567890-WXYZ must not stop review."
+
+    anonymized = PersonalDataAnonymizer().anonymize_text(text)
+
+    assert "ABCD-1234567890-WXYZ" not in anonymized
+    assert "[IDENTIFIER_OPAQUE_001]" in anonymized
+    assert residual_counts(anonymized) == {}
+
+
 def test_provider_safe_run_parameters_do_not_leak_anonymization_mapping_or_context():
     safe = provider_safe_run_parameters(
         {
