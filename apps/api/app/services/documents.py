@@ -318,7 +318,10 @@ def _list_active_analyzed_documents_for_actor(*, db: Session, actor: User) -> li
     document_ids = (
         select(Analysis.document_id)
         .join(Document, Document.id == Analysis.document_id)
-        .where(Document.status == EntityStatus.ACTIVE.value)
+        .where(
+            Analysis.deleted_at.is_(None),
+            Document.status == EntityStatus.ACTIVE.value,
+        )
     )
     if actor.role != Role.ADMIN.value:
         document_ids = document_ids.where(Document.owner_id == actor.id)

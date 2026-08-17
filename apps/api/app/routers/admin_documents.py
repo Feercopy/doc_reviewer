@@ -2,11 +2,13 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
 
+from app.authz.policies import can_read_document
 from app.db.session import get_db
 from app.dependencies.auth import require_admin
+from app.models.analysis import Analysis
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.admin import AdminDocumentRead, AdminDocumentsListResponse
@@ -14,7 +16,6 @@ from app.schemas.documents import DocumentRead, DocumentsListResponse
 from app.schemas.enums import DocumentType, EntityStatus
 from app.services.analyses import latest_document_analysis_statuses_for_actor
 from app.services.audit import record_audit
-from app.services.documents import list_active_analyzed_documents_for_actor
 
 router = APIRouter(prefix="/admin/documents", tags=["admin-documents"])
 
@@ -55,7 +56,24 @@ def list_recovered_admin_documents(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ) -> DocumentsListResponse:
-    documents = list_active_analyzed_documents_for_actor(db=db, actor=admin)
+    analysis_rows = db.execute(
+        select(Analysis.document_id, func.max(Analysis.created_at).label("latest_created_at"))
+        .where(Analysis.deleted_at.is_(None))
+        .group_by(Analysis.document_id)
+        .order_by(func.max(Analysis.created_at).desc())
+    ).all()
+    candidate_document_ids = [document_id for document_id, _ in analysis_rows]
+    documents_by_id: dict[UUID, Document] = {}
+    if candidate_document_ids:
+        statement = (
+            select(Document)
+            .options(selectinload(Document.linked_fin_summary_document))
+            .where(Document.id.in_(candidate_document_ids))
+        )
+        for document in db.execute(statement).scalars().all():
+            if document.status == EntityStatus.ACTIVE.value and can_read_document(admin, document):
+                documents_by_id[document.id] = document
+    documents = [documents_by_id[document_id] for document_id in candidate_document_ids if document_id in documents_by_id]
     latest_analyses = latest_document_analysis_statuses_for_actor(
         db=db,
         actor=admin,

@@ -2381,3 +2381,10 @@ Exit criteria:
   Verified focused API coverage (`test_documents_upload.py`, `27 passed`),
   focused web coverage (`uploadStartAnalysis.test.ts`, `4 passed`), Python
   compile, and diff checks.
+  A follow-up tightened the recovery endpoint to derive candidate document IDs
+  from non-deleted analysis history and then pass every document through the
+  regular active/readable document access check used by detail pages. The
+  recovery fetch is bulked to avoid N+1 queries and has regressions for
+  all-deleted and mixed deleted/non-deleted analysis histories. The shared
+  `/documents` listing now also ignores soft-deleted analysis history when
+  recovering legacy non-primary documents.

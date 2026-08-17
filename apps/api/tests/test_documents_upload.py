@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.main import app
+from app.models.base import utc_now
 from app.models.analysis import Analysis, AnalysisCheckRun, PredictedCommentRun
 from app.models.audit_log import AuditLog
 from app.models.document import Document
@@ -295,6 +296,42 @@ def test_documents_list_recovers_active_analyzed_documents_alongside_primary_doc
     assert legacy_document["latest_analysis"]["id"] == str(analysis.id)
 
 
+def test_documents_list_ignores_non_primary_documents_with_only_deleted_analysis_history(api_client, db_session):
+    author = create_user(db_session, "author", "secret")
+    skill = seed_baseline_skills(db_session)[0]
+    login(api_client, "author", "secret")
+    deleted_only_upload = upload_document(api_client, "deleted-only-gate-2.txt", b"Gate 2 MVP metrics")
+    deleted_only_document_id = UUID(deleted_only_upload.json()["id"])
+    visible_upload = upload_document(api_client, "visible-gate-2.txt", b"Gate 2 MVP metrics")
+    visible_document_id = UUID(visible_upload.json()["id"])
+    deleted_only_document = db_session.get(Document, deleted_only_document_id)
+    deleted_only_document.document_role = DocumentRole.FIN_SUMMARY.value
+    deleted_analysis = Analysis(
+        document_id=deleted_only_document_id,
+        user_id=author.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="approve",
+        summary="Deleted analysis",
+        structured_output={},
+        raw_output="raw output",
+        run_parameters={},
+        deleted_at=utc_now(),
+    )
+    db_session.add(deleted_analysis)
+    db_session.commit()
+
+    response = api_client.get("/documents")
+
+    assert response.status_code == 200
+    document_ids = {item["id"] for item in response.json()["documents"]}
+    assert str(visible_document_id) in document_ids
+    assert str(deleted_only_document_id) not in document_ids
+
+
 def test_admin_recovered_documents_returns_compact_statuses_for_analyzed_documents(api_client, db_session):
     admin = create_user(db_session, "admin", "secret", Role.ADMIN)
     author = create_user(db_session, "author", "secret")
@@ -335,6 +372,88 @@ def test_admin_recovered_documents_returns_compact_statuses_for_analyzed_documen
     assert "raw_output" not in latest_analysis
     assert "run_parameters" not in latest_analysis
     assert len(response.content) < 20_000
+
+
+def test_admin_recovered_documents_ignores_documents_with_only_deleted_analysis_history(api_client, db_session):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    author = create_user(db_session, "author", "secret")
+    skill = seed_baseline_skills(db_session)[0]
+    login(api_client, author.login, "secret")
+    upload = upload_document(api_client, "deleted-history-gate-2.txt", b"Gate 2 MVP metrics")
+    document_id = UUID(upload.json()["id"])
+    deleted_analysis = Analysis(
+        document_id=document_id,
+        user_id=author.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="approve",
+        summary="Deleted analysis",
+        structured_output={},
+        raw_output="raw output",
+        run_parameters={},
+        deleted_at=utc_now(),
+    )
+    db_session.add(deleted_analysis)
+    db_session.commit()
+    api_client.post("/auth/logout")
+    login(api_client, admin.login, "secret")
+
+    response = api_client.get("/admin/documents/recovered")
+
+    assert response.status_code == 200
+    assert all(item["id"] != str(document_id) for item in response.json()["documents"])
+
+
+def test_admin_recovered_documents_uses_non_deleted_analysis_when_history_is_mixed(api_client, db_session):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    author = create_user(db_session, "author", "secret")
+    skill = seed_baseline_skills(db_session)[0]
+    login(api_client, author.login, "secret")
+    upload = upload_document(api_client, "mixed-history-gate-2.txt", b"Gate 2 MVP metrics")
+    document_id = UUID(upload.json()["id"])
+    deleted_analysis = Analysis(
+        document_id=document_id,
+        user_id=author.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.FAILED.value,
+        verdict=None,
+        summary="Deleted analysis",
+        structured_output={},
+        raw_output="raw output",
+        run_parameters={},
+        deleted_at=utc_now(),
+    )
+    active_analysis = Analysis(
+        document_id=document_id,
+        user_id=author.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="approve",
+        summary="Active analysis",
+        structured_output={},
+        raw_output="raw output",
+        run_parameters={},
+    )
+    db_session.add_all([deleted_analysis, active_analysis])
+    db_session.commit()
+    api_client.post("/auth/logout")
+    login(api_client, admin.login, "secret")
+
+    response = api_client.get("/admin/documents/recovered")
+
+    assert response.status_code == 200
+    recovered_document = next(item for item in response.json()["documents"] if item["id"] == str(document_id))
+    assert recovered_document["latest_analysis"]["id"] == str(active_analysis.id)
+    assert recovered_document["latest_analysis"]["status"] == RunStatus.COMPLETED.value
 
 
 def test_upload_rejects_partial_analysis_config_before_storing_document(api_client, db_session, storage_root):
