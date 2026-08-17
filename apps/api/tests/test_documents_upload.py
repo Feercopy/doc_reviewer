@@ -259,6 +259,42 @@ def test_documents_list_embeds_latest_analysis_status(api_client, db_session):
     assert len(response.content) < 20_000
 
 
+def test_documents_list_recovers_active_analyzed_documents_alongside_primary_documents(api_client, db_session):
+    author = create_user(db_session, "author", "secret")
+    skill = seed_baseline_skills(db_session)[0]
+    login(api_client, "author", "secret")
+    legacy_upload = upload_document(api_client, "legacy-gate-2.txt", b"Gate 2 MVP metrics")
+    legacy_document_id = UUID(legacy_upload.json()["id"])
+    primary_upload = upload_document(api_client, "primary-gate-2.txt", b"Gate 2 MVP metrics")
+    primary_document_id = UUID(primary_upload.json()["id"])
+    document = db_session.get(Document, legacy_document_id)
+    document.document_role = DocumentRole.FIN_SUMMARY.value
+    analysis = Analysis(
+        document_id=legacy_document_id,
+        user_id=author.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="approve",
+        summary="Completed analysis",
+        structured_output={},
+        raw_output="raw output",
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.commit()
+
+    response = api_client.get("/documents")
+
+    assert response.status_code == 200
+    documents = response.json()["documents"]
+    assert {item["id"] for item in documents} == {str(legacy_document_id), str(primary_document_id)}
+    legacy_document = next(item for item in documents if item["id"] == str(legacy_document_id))
+    assert legacy_document["latest_analysis"]["id"] == str(analysis.id)
+
+
 def test_upload_rejects_partial_analysis_config_before_storing_document(api_client, db_session, storage_root):
     create_user(db_session, "author", "secret")
     login(api_client, "author", "secret")
