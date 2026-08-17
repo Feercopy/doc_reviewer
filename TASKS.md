@@ -2404,4 +2404,8 @@ Exit criteria:
   JSON/text/no-content requests to `cache: "no-store"` so document lists,
   analysis statuses, and recovery responses are always fetched fresh. Added
   focused API-client tests for default cache policy and explicit cache
-  overrides.
+  overrides. Added a final admin-only UI fallback that derives recent case
+  document IDs from `/admin/analyses`, then reads each document and its progress
+  through the same direct endpoints used by the case page; this restores the
+  main table when admin analyses and direct case pages are readable but list
+  endpoints still return empty.
