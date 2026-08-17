@@ -21,6 +21,15 @@ class DocumentType(StrEnum):
     UNKNOWN = "unknown"
 
 
+def coerce_document_type(value: object) -> object:
+    if value is None or isinstance(value, DocumentType):
+        return value
+    try:
+        return DocumentType(str(value))
+    except ValueError:
+        return DocumentType.UNKNOWN
+
+
 class DocumentRole(StrEnum):
     PRIMARY = "primary"
     FIN_SUMMARY = "fin_summary"

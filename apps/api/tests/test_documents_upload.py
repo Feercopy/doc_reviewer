@@ -371,6 +371,23 @@ def test_admin_documents_list_recovers_analyzed_documents_without_primary_role(a
     assert "raw_output" not in documents[0]["latest_analysis"]
 
 
+def test_documents_list_coerces_unsupported_legacy_document_type_to_unknown(api_client, db_session):
+    create_user(db_session, "author", "secret")
+    login(api_client, "author", "secret")
+    upload = upload_document(api_client, "legacy-progress-review.txt", b"Progress review plan fact")
+    document_id = UUID(upload.json()["id"])
+    document = db_session.get(Document, document_id)
+    document.detected_document_type = "progress_review"
+    db_session.commit()
+
+    response = api_client.get("/documents")
+
+    assert response.status_code == 200
+    documents = response.json()["documents"]
+    assert [item["id"] for item in documents] == [str(document_id)]
+    assert documents[0]["detected_document_type"] == DocumentType.UNKNOWN.value
+
+
 def test_admin_recovered_documents_returns_compact_statuses_for_analyzed_documents(api_client, db_session):
     admin = create_user(db_session, "admin", "secret", Role.ADMIN)
     author = create_user(db_session, "author", "secret")

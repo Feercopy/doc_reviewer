@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.analyses import AnalysisStatusRead
-from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus
+from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus, coerce_document_type
 
 
 class DocumentTypePatch(BaseModel):
@@ -62,6 +62,11 @@ class DocumentRead(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("detected_document_type", "manual_document_type", mode="before")
+    @classmethod
+    def normalize_document_type(cls, value: object) -> object:
+        return coerce_document_type(value)
+
 
 class DocumentsListResponse(BaseModel):
     documents: list[DocumentRead]
@@ -77,3 +82,8 @@ class DocumentProgressRead(BaseModel):
     manual_document_type: DocumentType | None
     updated_at: datetime
     analyses: list[AnalysisStatusRead]
+
+    @field_validator("detected_document_type", "manual_document_type", mode="before")
+    @classmethod
+    def normalize_document_type(cls, value: object) -> object:
+        return coerce_document_type(value)
