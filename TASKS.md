@@ -2387,4 +2387,8 @@ Exit criteria:
   recovery fetch is bulked to avoid N+1 queries and has regressions for
   all-deleted and mixed deleted/non-deleted analysis histories. The shared
   `/documents` listing now also ignores soft-deleted analysis history when
-  recovering legacy non-primary documents.
+  recovering legacy non-primary documents. After production still rendered an
+  empty Documents table while admin analyses and direct document pages remained
+  readable, rewired the admin recovery endpoint to derive active documents via a
+  direct `Analysis -> Document` join and still return only compact document
+  records.

@@ -56,24 +56,19 @@ def list_recovered_admin_documents(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ) -> DocumentsListResponse:
-    analysis_rows = db.execute(
-        select(Analysis.document_id, func.max(Analysis.created_at).label("latest_created_at"))
-        .where(Analysis.deleted_at.is_(None))
-        .group_by(Analysis.document_id)
-        .order_by(func.max(Analysis.created_at).desc())
-    ).all()
-    candidate_document_ids = [document_id for document_id, _ in analysis_rows]
-    documents_by_id: dict[UUID, Document] = {}
-    if candidate_document_ids:
-        statement = (
-            select(Document)
-            .options(selectinload(Document.linked_fin_summary_document))
-            .where(Document.id.in_(candidate_document_ids))
+    latest_analysis_at = func.max(Analysis.created_at).label("latest_analysis_at")
+    rows = db.execute(
+        select(Document, latest_analysis_at)
+        .join(Analysis, Analysis.document_id == Document.id)
+        .options(selectinload(Document.linked_fin_summary_document))
+        .where(
+            Analysis.deleted_at.is_(None),
+            Document.status == EntityStatus.ACTIVE.value,
         )
-        for document in db.execute(statement).scalars().all():
-            if document.status == EntityStatus.ACTIVE.value and can_read_document(admin, document):
-                documents_by_id[document.id] = document
-    documents = [documents_by_id[document_id] for document_id in candidate_document_ids if document_id in documents_by_id]
+        .group_by(Document.id)
+        .order_by(latest_analysis_at.desc())
+    ).all()
+    documents = [document for document, _ in rows if can_read_document(admin, document)]
     latest_analyses = latest_document_analysis_statuses_for_actor(
         db=db,
         actor=admin,
