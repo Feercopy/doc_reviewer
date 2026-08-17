@@ -11,11 +11,18 @@ from app.dependencies.auth import require_admin
 from app.models.analysis import Analysis
 from app.models.document import Document
 from app.models.user import User
+from app.schemas.analyses import AnalysisStatusRead
 from app.schemas.admin import AdminDocumentRead, AdminDocumentsListResponse
 from app.schemas.documents import DocumentRead, DocumentsListResponse
 from app.schemas.enums import DocumentType, EntityStatus
-from app.services.analyses import latest_document_analysis_statuses_for_actor
+from app.services.analyses import (
+    ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY,
+    AnalysisStatusSource,
+    latest_document_analysis_statuses_for_actor,
+    read_analysis_statuses,
+)
 from app.services.audit import record_audit
+from app.services.documents import DocumentNotFoundError, get_document_for_actor
 
 router = APIRouter(prefix="/admin/documents", tags=["admin-documents"])
 
@@ -69,11 +76,21 @@ def list_recovered_admin_documents(
         .order_by(latest_analysis_at.desc())
     ).all()
     documents = [document for document, _ in rows if can_read_document(admin, document)]
-    latest_analyses = latest_document_analysis_statuses_for_actor(
-        db=db,
-        actor=admin,
-        document_ids=[document.id for document in documents],
-    )
+    recovered_through_detail_lookup = False
+    if not documents:
+        documents = _recover_documents_through_detail_lookup(db=db, admin=admin)
+        recovered_through_detail_lookup = True
+    if recovered_through_detail_lookup:
+        latest_analyses = _latest_analysis_statuses_through_analysis_lookup(
+            db=db,
+            document_ids=[document.id for document in documents],
+        )
+    else:
+        latest_analyses = latest_document_analysis_statuses_for_actor(
+            db=db,
+            actor=admin,
+            document_ids=[document.id for document in documents],
+        )
     return DocumentsListResponse(
         documents=[
             DocumentRead.model_validate(document).model_copy(
@@ -82,6 +99,96 @@ def list_recovered_admin_documents(
             for document in documents
         ]
     )
+
+
+def _recover_documents_through_detail_lookup(*, db: Session, admin: User) -> list[Document]:
+    rows = db.execute(
+        select(Analysis.document_id)
+        .where(Analysis.deleted_at.is_(None))
+        .group_by(Analysis.document_id)
+        .order_by(func.max(Analysis.created_at).desc())
+        .limit(200)
+    ).all()
+    documents: list[Document] = []
+    seen: set[UUID] = set()
+    for (document_id,) in rows:
+        if document_id in seen:
+            continue
+        seen.add(document_id)
+        try:
+            documents.append(get_document_for_actor(db=db, actor=admin, document_id=document_id))
+        except DocumentNotFoundError:
+            continue
+    return documents
+
+
+def _latest_analysis_statuses_through_analysis_lookup(
+    *,
+    db: Session,
+    document_ids: list[UUID],
+) -> dict[UUID, AnalysisStatusRead]:
+    if not document_ids:
+        return {}
+
+    chain_cancel_requested = (
+        Analysis.run_parameters[ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY]
+        .as_string()
+        .is_not(None)
+        .label("chain_cancel_requested")
+    )
+    ranked = (
+        select(
+            Analysis.id.label("id"),
+            Analysis.document_id.label("document_id"),
+            Analysis.skill_id.label("skill_id"),
+            Analysis.skill_version.label("skill_version"),
+            Analysis.provider.label("provider"),
+            Analysis.model.label("model"),
+            Analysis.status.label("status"),
+            Analysis.verdict.label("verdict"),
+            Analysis.error_message.label("error_message"),
+            chain_cancel_requested,
+            Analysis.created_at.label("created_at"),
+            Analysis.started_at.label("started_at"),
+            Analysis.completed_at.label("completed_at"),
+            func.row_number()
+            .over(
+                partition_by=Analysis.document_id,
+                order_by=(
+                    func.coalesce(Analysis.completed_at, Analysis.created_at).desc(),
+                    Analysis.created_at.desc(),
+                    Analysis.id.desc(),
+                ),
+            )
+            .label("status_rank"),
+        )
+        .where(
+            Analysis.document_id.in_(document_ids),
+            Analysis.deleted_at.is_(None),
+        )
+        .subquery()
+    )
+    rows = db.execute(select(ranked).where(ranked.c.status_rank == 1)).mappings().all()
+    sources = [
+        AnalysisStatusSource(
+            id=row["id"],
+            document_id=row["document_id"],
+            skill_id=row["skill_id"],
+            skill_version=row["skill_version"],
+            provider=row["provider"],
+            model=row["model"],
+            status=row["status"],
+            verdict=row["verdict"],
+            error_message=row["error_message"],
+            chain_cancel_requested=bool(row["chain_cancel_requested"]),
+            created_at=row["created_at"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
+        )
+        for row in rows
+    ]
+    statuses = read_analysis_statuses(db=db, sources=sources)
+    return {status.document_id: status for status in statuses}
 
 
 @router.post("/{document_id}/archive", response_model=AdminDocumentRead)
