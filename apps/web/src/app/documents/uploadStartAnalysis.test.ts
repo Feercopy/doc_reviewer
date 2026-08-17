@@ -29,6 +29,7 @@ describe("documents upload start analysis flow", () => {
     expect(pageSource).toContain("function latestAnalysesByDocumentId");
     expect(pageSource).toContain("function recoverDocumentsFromAdminDocuments");
     expect(pageSource).toContain("function recoverDocumentsFromAdminHistory");
+    expect(pageSource).toContain("function adminAnalysisToRecoveredDocument");
     expect(pageSource).toContain("listRecoveredAdminDocuments");
     expect(pageSource).toContain("listAdminAnalyses");
     expect(pageSource).toContain("adminAnalysisToStatus");
