@@ -310,6 +310,10 @@ def list_documents_for_actor(*, db: Session, actor: User) -> list[Document]:
     return sorted(documents_by_id.values(), key=lambda document: document.created_at, reverse=True)
 
 
+def list_active_analyzed_documents_for_actor(*, db: Session, actor: User) -> list[Document]:
+    return _list_active_analyzed_documents_for_actor(db=db, actor=actor)
+
+
 def _list_active_analyzed_documents_for_actor(*, db: Session, actor: User) -> list[Document]:
     document_ids = (
         select(Analysis.document_id)

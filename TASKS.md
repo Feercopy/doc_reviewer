@@ -25,10 +25,13 @@ Primary plan index:
   readable but `/documents` misses analyzed cases. Added a narrow API recovery
   path that merges primary active documents with active, actor-visible documents
   reconstructed from existing analyses, deduplicated by document ID, without
-  exposing deleted records or orphan Fin Summary attachments. Verified with
-  focused document API tests (`26 passed`), `git diff --check`, Python
-  compilation, and production Compose validation with dummy required environment
-  values.
+  exposing deleted records or orphan Fin Summary attachments. Added a frontend
+  admin-only recovery path for the same production symptom: if `/documents`
+  returns no rows, the Documents page derives recent document IDs from
+  `/admin/analyses` and loads their normal document detail records. Verified
+  with focused document API tests (`26 passed`), focused web source tests,
+  `git diff --check`, Python compilation, and production Compose validation
+  with dummy required environment values.
 - [x] Make Required elements labels deterministic in bilingual Summary output.
   A Stream Review label (`Подтвержденная проблематика`) was falsely classified
   as a person name, restored after the English language check, and displayed in
@@ -2369,3 +2372,12 @@ Exit criteria:
   recovery. Verified the full worker suite (`205 passed`), the full API suite
   (`213 passed`), the full web suite (`149 passed`), focused recovery coverage,
   and `git diff --check`.
+- 2026-08-17: Restored the production Documents table after active historical
+  cases were still readable by direct URL but absent from `/documents`.
+  The backend list now merges active analyzed documents with primary uploads,
+  and the web page has an admin-only compact recovery fallback through
+  `/admin/documents/recovered` that returns document rows with latest compact
+  analysis status without loading raw outputs or full structured outputs.
+  Verified focused API coverage (`test_documents_upload.py`, `27 passed`),
+  focused web coverage (`uploadStartAnalysis.test.ts`, `4 passed`), Python
+  compile, and diff checks.

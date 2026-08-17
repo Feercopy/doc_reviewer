@@ -10,8 +10,11 @@ from app.dependencies.auth import require_admin
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.admin import AdminDocumentRead, AdminDocumentsListResponse
+from app.schemas.documents import DocumentRead, DocumentsListResponse
 from app.schemas.enums import DocumentType, EntityStatus
+from app.services.analyses import latest_document_analysis_statuses_for_actor
 from app.services.audit import record_audit
+from app.services.documents import list_active_analyzed_documents_for_actor
 
 router = APIRouter(prefix="/admin/documents", tags=["admin-documents"])
 
@@ -44,6 +47,27 @@ def list_admin_documents(
     statement = statement.order_by(Document.created_at.desc())
     return AdminDocumentsListResponse(
         documents=[_read_document(document, owner) for document, owner in db.execute(statement).all()]
+    )
+
+
+@router.get("/recovered", response_model=DocumentsListResponse)
+def list_recovered_admin_documents(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> DocumentsListResponse:
+    documents = list_active_analyzed_documents_for_actor(db=db, actor=admin)
+    latest_analyses = latest_document_analysis_statuses_for_actor(
+        db=db,
+        actor=admin,
+        document_ids=[document.id for document in documents],
+    )
+    return DocumentsListResponse(
+        documents=[
+            DocumentRead.model_validate(document).model_copy(
+                update={"latest_analysis": latest_analyses.get(document.id)}
+            )
+            for document in documents
+        ]
     )
 
 
