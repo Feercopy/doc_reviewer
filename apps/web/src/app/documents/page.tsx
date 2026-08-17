@@ -5,7 +5,7 @@ import { DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState
 
 import { AppShell } from "@/components/AppShell";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
-import { listAdminAnalyses, listRecoveredAdminDocuments } from "@/lib/api/admin";
+import { listAdminAnalyses, listRecoveredAdminDocuments, type AdminAnalysis } from "@/lib/api/admin";
 import {
   getProviderDefaultModel,
   listProviderModels,
@@ -15,7 +15,6 @@ import {
   USER_SELECTABLE_DOCUMENT_TYPES,
   deleteDocumentAnalyses,
   getDocument,
-  getDocumentProgress,
   listDocuments,
   uploadDocument,
   type AnalysisStatusRecord,
@@ -105,6 +104,17 @@ function isFullAnalysisFailed(analysis: AnalysisStatusRecord): boolean {
   );
 }
 
+function isCompactRecoveredAnalysisStatus(analysis: AnalysisStatusRecord): boolean {
+  return !analysis.predicted_comment_run && !analysis.detail_run && !analysis.ic_review_run;
+}
+
+function isTerminalCompactRecoveredAnalysis(analysis: AnalysisStatusRecord): boolean {
+  return (
+    isCompactRecoveredAnalysisStatus(analysis) &&
+    (analysis.status === "completed" || analysis.status === "failed" || analysis.status === "cancelled")
+  );
+}
+
 function getAnalysisStatusSignal(
   analysis: AnalysisStatusRecord | undefined,
   parseStatus: ParseStatus,
@@ -123,6 +133,9 @@ function getAnalysisStatusSignal(
   }
   if (isFullAnalysisFailed(analysis)) {
     return { label: "Analysis failed", tone: "bad" };
+  }
+  if (isTerminalCompactRecoveredAnalysis(analysis)) {
+    return { label: analysis.status === "completed" ? "Analysis complete" : "Analysis failed", tone: "good" };
   }
   if (analysis.status === "queued") {
     return { label: "Gate Challenger queued", tone: "warn" };
@@ -215,6 +228,28 @@ function latestAnalysesByDocumentId(
   return next;
 }
 
+function adminAnalysisToStatus(analysis: AdminAnalysis): AnalysisStatusRecord {
+  return {
+    id: analysis.id,
+    document_id: analysis.document_id,
+    skill_name: analysis.skill_name,
+    skill_version: analysis.skill_version,
+    provider: analysis.provider,
+    model: analysis.model,
+    status: analysis.status,
+    verdict: analysis.verdict,
+    error_message: analysis.error_message,
+    chain_cancel_requested: false,
+    source_trace: null,
+    created_at: analysis.created_at,
+    started_at: analysis.started_at,
+    completed_at: analysis.completed_at,
+    predicted_comment_run: null,
+    detail_run: null,
+    ic_review_run: null,
+  };
+}
+
 async function recoverDocumentsFromAdminDocuments(): Promise<DocumentRecord[]> {
   let recoveryError: unknown;
   try {
@@ -241,16 +276,21 @@ async function recoverDocumentsFromAdminDocuments(): Promise<DocumentRecord[]> {
 
 async function recoverDocumentsFromAdminHistory(): Promise<DocumentRecord[]> {
   const response = await listAdminAnalyses();
-  const documentIds = Array.from(new Set(response.analyses.map((analysis) => analysis.document_id))).slice(
-    0,
-    adminHistoryRecoveryLimit,
-  );
+  const latestAnalyses = new Map<string, AdminAnalysis>();
+  for (const analysis of response.analyses) {
+    if (!latestAnalyses.has(analysis.document_id)) {
+      latestAnalyses.set(analysis.document_id, analysis);
+    }
+    if (latestAnalyses.size >= adminHistoryRecoveryLimit) {
+      break;
+    }
+  }
   const recovered = await Promise.allSettled(
-    documentIds.map(async (documentId) => {
-      const [document, progress] = await Promise.all([getDocument(documentId), getDocumentProgress(documentId)]);
+    Array.from(latestAnalyses.entries()).map(async ([documentId, analysis]) => {
+      const document = await getDocument(documentId);
       return {
         ...document,
-        latest_analysis: progress.analyses[0] ?? document.latest_analysis,
+        latest_analysis: document.latest_analysis ?? adminAnalysisToStatus(analysis),
       };
     }),
   );
@@ -262,6 +302,9 @@ function isCaseStatusActive(document: DocumentRecord, analysis: AnalysisStatusRe
     return true;
   }
   if (!analysis) {
+    return false;
+  }
+  if (isTerminalCompactRecoveredAnalysis(analysis)) {
     return false;
   }
   return !isFullAnalysisComplete(analysis) && !isFullAnalysisFailed(analysis);
@@ -757,7 +800,9 @@ export default function DocumentsPage() {
                     const finSummaryParseState = getFinSummaryPresentation(finSummary);
                     const caseAnalysis = caseAnalysesByDocumentId[document.id];
                     const analysisSignal = getAnalysisStatusSignal(caseAnalysis, document.parse_status);
-                    const canOpenAnalysis = caseAnalysis ? isFullAnalysisComplete(caseAnalysis) : false;
+                    const canOpenAnalysis = caseAnalysis
+                      ? isFullAnalysisComplete(caseAnalysis) || caseAnalysis.status === "completed"
+                      : false;
 
                     return (
                       <tr key={document.id}>
