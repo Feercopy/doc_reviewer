@@ -2399,4 +2399,9 @@ Exit criteria:
   deleted document backed by non-deleted analysis history. Tightened the
   fallback latest-status lookup to rank in SQL and project only compact status
   fields, so large raw/structured model outputs are not loaded for the
-  Documents table recovery path.
+  Documents table recovery path. After production deploy still rendered the
+  old empty list in the browser, changed the shared web API client to default
+  JSON/text/no-content requests to `cache: "no-store"` so document lists,
+  analysis statuses, and recovery responses are always fetched fresh. Added
+  focused API-client tests for default cache policy and explicit cache
+  overrides.
