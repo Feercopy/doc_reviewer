@@ -5,6 +5,7 @@ import { DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState
 
 import { AppShell } from "@/components/AppShell";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { listRecoveredAdminDocuments } from "@/lib/api/admin";
 import {
   getProviderDefaultModel,
   listProviderModels,
@@ -211,6 +212,18 @@ function latestAnalysesByDocumentId(
   return next;
 }
 
+async function recoverDocumentsFromAdminDocuments(): Promise<DocumentRecord[]> {
+  try {
+    const response = await listRecoveredAdminDocuments();
+    return response.documents;
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("403")) {
+      return [];
+    }
+    throw err;
+  }
+}
+
 function isCaseStatusActive(document: DocumentRecord, analysis: AnalysisStatusRecord | undefined): boolean {
   if (document.parse_status === "queued" || document.parse_status === "running") {
     return true;
@@ -244,8 +257,10 @@ export default function DocumentsPage() {
 
   const refresh = useCallback(async () => {
     const response = await listDocuments();
-    setDocuments(response.documents);
-    setCaseAnalysesByDocumentId((current) => latestAnalysesByDocumentId(response.documents, current));
+    const nextDocuments =
+      response.documents.length > 0 ? response.documents : await recoverDocumentsFromAdminDocuments();
+    setDocuments(nextDocuments);
+    setCaseAnalysesByDocumentId((current) => latestAnalysesByDocumentId(nextDocuments, current));
   }, []);
 
   const hasActiveCases = useMemo(

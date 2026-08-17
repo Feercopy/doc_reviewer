@@ -1,5 +1,5 @@
 import { apiFetch, apiFetchNoContent } from "./client";
-import type { DocumentType, Provider } from "./documents";
+import type { DocumentRecord, DocumentType, Provider } from "./documents";
 import type { SkillRecord } from "./skills";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -133,6 +133,10 @@ export function listAdminDocuments(filters: {
   document_type?: DocumentType | "";
 } = {}) {
   return apiFetch<{ documents: AdminDocument[] }>(withQuery("/admin/documents", filters));
+}
+
+export function listRecoveredAdminDocuments() {
+  return apiFetch<{ documents: DocumentRecord[] }>("/admin/documents/recovered");
 }
 
 export function listAdminAnalyses(filters: {

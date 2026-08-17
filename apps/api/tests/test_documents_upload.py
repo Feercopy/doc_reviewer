@@ -295,6 +295,48 @@ def test_documents_list_recovers_active_analyzed_documents_alongside_primary_doc
     assert legacy_document["latest_analysis"]["id"] == str(analysis.id)
 
 
+def test_admin_recovered_documents_returns_compact_statuses_for_analyzed_documents(api_client, db_session):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    author = create_user(db_session, "author", "secret")
+    skill = seed_baseline_skills(db_session)[0]
+    login(api_client, author.login, "secret")
+    upload = upload_document(api_client, "legacy-gate-2.txt", b"Gate 2 MVP metrics")
+    legacy_document_id = UUID(upload.json()["id"])
+    document = db_session.get(Document, legacy_document_id)
+    document.document_role = DocumentRole.FIN_SUMMARY.value
+    analysis = Analysis(
+        document_id=legacy_document_id,
+        user_id=author.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="approve",
+        summary="Completed analysis",
+        structured_output={"summary": "x" * 500_000},
+        raw_output="raw output" * 10_000,
+        run_parameters={"secret": "large"},
+    )
+    db_session.add(analysis)
+    db_session.commit()
+    api_client.post("/auth/logout")
+    login(api_client, admin.login, "secret")
+
+    response = api_client.get("/admin/documents/recovered")
+
+    assert response.status_code == 200
+    documents = response.json()["documents"]
+    assert [item["id"] for item in documents] == [str(legacy_document_id)]
+    latest_analysis = documents[0]["latest_analysis"]
+    assert latest_analysis["id"] == str(analysis.id)
+    assert latest_analysis["status"] == RunStatus.COMPLETED.value
+    assert "structured_output" not in latest_analysis
+    assert "raw_output" not in latest_analysis
+    assert "run_parameters" not in latest_analysis
+    assert len(response.content) < 20_000
+
+
 def test_upload_rejects_partial_analysis_config_before_storing_document(api_client, db_session, storage_root):
     create_user(db_session, "author", "secret")
     login(api_client, "author", "secret")
