@@ -27,6 +27,7 @@ from app.schemas.enums import Provider, RunStatus
 from app.security.secrets import decrypt_secret
 from app.services.provider_keys import get_shared_provider_key
 from app.services.analysis_jobs import enqueue_run_summary_localizations
+from app.services.new_summaries import mark_new_summary_enqueue_failed, request_new_summary
 from app.services.summary_localizations import (
     SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER,
     SUMMARY_LOCALIZATIONS_POSTPROCESSING,
@@ -440,6 +441,7 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
                 )
 
             should_enqueue_localizations = False
+            should_enqueue_new_summary = False
             if postprocessing_marker_persisted:
                 try:
                     _, should_enqueue_localizations = request_summary_localizations(
@@ -454,17 +456,37 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
                         run_uuid=run_uuid,
                         exc=exc,
                     )
+                try:
+                    _, should_enqueue_new_summary = request_new_summary(
+                        db=session,
+                        analysis=analysis,
+                        create_if_missing=True,
+                    )
+                except Exception as exc:
+                    session.rollback()
+                    _log_optional_postprocessing_failure(
+                        event="new_summary_prepare_failed",
+                        run_uuid=run_uuid,
+                        exc=exc,
+                    )
 
-            if should_enqueue_localizations and owns_session:
+            if (should_enqueue_localizations or should_enqueue_new_summary) and owns_session:
                 try:
                     enqueue_run_summary_localizations(analysis.id)
                 except Exception as exc:
                     try:
-                        mark_summary_localizations_enqueue_failed(
-                            db=session,
-                            analysis=analysis,
-                            error_message="summary_generation_queue_unavailable",
-                        )
+                        if should_enqueue_localizations:
+                            mark_summary_localizations_enqueue_failed(
+                                db=session,
+                                analysis=analysis,
+                                error_message="summary_generation_queue_unavailable",
+                            )
+                        if should_enqueue_new_summary:
+                            mark_new_summary_enqueue_failed(
+                                db=session,
+                                analysis=analysis,
+                                error_message="new_summary_generation_queue_unavailable",
+                            )
                     except Exception:
                         session.rollback()
                     worker_logger.info(

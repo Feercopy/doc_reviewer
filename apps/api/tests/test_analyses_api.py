@@ -1087,6 +1087,68 @@ def test_old_analysis_stays_hidden_until_run_marks_localizations_expected(client
     assert created.json()["en"]["status"] == "queued"
 
 
+def test_new_summary_endpoint_queues_repository_skill_summary_once(client, db_session):
+    from app.main import app
+    from app.routers import analyses as analyses_router
+
+    user = create_user(db_session, "author", "secret")
+    skills = seed_baseline_skills(db_session)
+    document_id = _create_completed_document(client, db_session, user)
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=user.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="need_evidence",
+        summary="Нужны подтверждения",
+        structured_output={"result": {"short_summary": "Нужны подтверждения"}},
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.flush()
+    check_run = AnalysisCheckRun(
+        analysis_id=analysis.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        check_type="ic_agentic_review",
+        provider=analysis.provider,
+        model=analysis.model,
+        status=RunStatus.COMPLETED.value,
+        structured_output={"run_mode": "ic_agentic_review_compact"},
+        run_parameters={},
+        artifacts=[],
+        uploaded_workbook_metadata={},
+    )
+    db_session.add(check_run)
+    db_session.commit()
+
+    login(client, "author", "secret")
+    enqueued: list[str] = []
+    app.dependency_overrides[analyses_router.get_run_summary_localizations_enqueue] = (
+        lambda: lambda analysis_id: enqueued.append(str(analysis_id))
+    )
+    try:
+        first = client.post(f"/analyses/{analysis.id}/new-summary")
+        second = client.post(f"/analyses/{analysis.id}/new-summary")
+        read = client.get(f"/analyses/{analysis.id}/new-summary")
+    finally:
+        app.dependency_overrides.pop(analyses_router.get_run_summary_localizations_enqueue, None)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert read.status_code == 200
+    assert enqueued == [str(analysis.id)]
+    assert first.json()["available"] is True
+    assert first.json()["generation_mode"] == "new_summary_skill"
+    assert first.json()["source_revision"] == str(check_run.id)
+    assert first.json()["ru"]["status"] == "queued"
+    assert first.json()["en"]["status"] == "queued"
+    assert second.json() == read.json()
+
+
 def test_cancel_analysis_preserves_completed_gate_result_and_cancels_downstream_runs(client, db_session):
     user = create_user(db_session, "author", "secret")
     skills = seed_baseline_skills(db_session)

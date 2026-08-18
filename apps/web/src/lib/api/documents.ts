@@ -1,4 +1,5 @@
 import { apiFetch, apiFetchNoContent, apiFetchText } from "./client";
+import type { NewSummaryContent } from "../newSummary";
 
 export type DocumentType =
   | "gate_2"
@@ -51,6 +52,22 @@ export type SummaryLocalizationsRecord = {
   available: boolean;
   ru: SummaryLocalizationVariant;
   en: SummaryLocalizationVariant;
+};
+
+export type NewSummaryVariantRecord = {
+  status: string;
+  payload: NewSummaryContent | null;
+  error_message: string | null;
+  source_fingerprint: string | null;
+};
+
+export type NewSummaryRecord = {
+  analysis_id: string;
+  source_revision: string | null;
+  generation_mode: "new_summary_skill" | null;
+  available: boolean;
+  ru: NewSummaryVariantRecord;
+  en: NewSummaryVariantRecord;
 };
 
 export type DocumentRecord = {
@@ -513,4 +530,12 @@ export async function ensureSummaryLocalizations(analysisId: string): Promise<Su
 
 export async function getSummaryLocalizations(analysisId: string): Promise<SummaryLocalizationsRecord> {
   return apiFetch<SummaryLocalizationsRecord>(`/analyses/${analysisId}/summary-localizations`);
+}
+
+export async function ensureNewSummary(analysisId: string): Promise<NewSummaryRecord> {
+  return apiFetch<NewSummaryRecord>(`/analyses/${analysisId}/new-summary`, { method: "POST" });
+}
+
+export async function getNewSummary(analysisId: string): Promise<NewSummaryRecord> {
+  return apiFetch<NewSummaryRecord>(`/analyses/${analysisId}/new-summary`);
 }
