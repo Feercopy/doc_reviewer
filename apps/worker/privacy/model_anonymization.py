@@ -104,6 +104,13 @@ def provider_safe_run_parameters(run_parameters: dict[str, Any] | None) -> dict[
     return {key: parameters[key] for key in PROVIDER_RUN_PARAMETER_ALLOWLIST if key in parameters}
 
 
+def db_safe_anonymization_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+    if metadata is None:
+        return None
+    sanitized = _strip_postgres_unsafe_text(metadata)
+    return sanitized if isinstance(sanitized, dict) else None
+
+
 def _anonymizer(existing_metadata: dict[str, Any] | None) -> PersonalDataAnonymizer:
     return PersonalDataAnonymizer(replacements=_metadata_replacements(existing_metadata))
 
@@ -174,3 +181,16 @@ def _metadata_replacements(metadata: dict[str, Any] | None) -> list[dict[str, st
         if isinstance(kind, str) and isinstance(placeholder, str) and isinstance(value, str):
             normalized.append({"kind": kind, "placeholder": placeholder, "value": value})
     return normalized
+
+
+def _strip_postgres_unsafe_text(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, list):
+        return [_strip_postgres_unsafe_text(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _strip_postgres_unsafe_text(key): _strip_postgres_unsafe_text(item)
+            for key, item in value.items()
+        }
+    return value

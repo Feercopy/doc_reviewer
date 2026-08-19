@@ -12,6 +12,11 @@ from app.models.provider_key import ProviderKey
 from app.schemas.enums import Provider
 from app.security.secrets import decrypt_secret
 from app.services.provider_keys import get_shared_provider_key, list_shared_provider_keys
+from app.services.new_summaries import (
+    NEW_SUMMARY_GENERATION_MODE,
+    NEW_SUMMARY_VERSION,
+    mark_new_summary_failed,
+)
 from app.services.summary_localizations import (
     SUMMARY_GENERATION_MODE,
     SUMMARY_LOCALIZATION_VERSION,
@@ -23,6 +28,12 @@ from skills.summary_localization import (
     generate_and_persist_summary_variant,
     mark_localization_failed,
     summary_payload_fingerprint,
+)
+from skills.new_summary_generation import (
+    LANGUAGES as NEW_SUMMARY_LANGUAGES,
+    build_new_summary_source,
+    generate_and_persist_new_summary_variant,
+    new_summary_source_fingerprint,
 )
 
 
@@ -39,11 +50,18 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
         if check_run is None:
             return
         state = ((analysis.structured_output or {}).get("result") or {}).get("summary_localizations") or {}
-        if not (
+        new_summary_state = ((analysis.structured_output or {}).get("result") or {}).get("new_summary") or {}
+        summary_requested = (
             state.get("version") == SUMMARY_LOCALIZATION_VERSION
             and state.get("generation_mode") == SUMMARY_GENERATION_MODE
             and state.get("source_revision") == str(check_run.id)
-        ):
+        )
+        new_summary_requested = (
+            new_summary_state.get("version") == NEW_SUMMARY_VERSION
+            and new_summary_state.get("generation_mode") == NEW_SUMMARY_GENERATION_MODE
+            and new_summary_state.get("source_revision") == str(check_run.id)
+        )
+        if not summary_requested and not new_summary_requested:
             worker_logger.info(
                 "summary_generation_skipped",
                 extra={
@@ -56,7 +74,14 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
             return
 
         runnable_statuses = {"queued", "running"}
-        if not any((state.get(language) or {}).get("status") in runnable_statuses for language in LANGUAGES):
+        summary_runnable = summary_requested and any(
+            (state.get(language) or {}).get("status") in runnable_statuses for language in LANGUAGES
+        )
+        new_summary_runnable = new_summary_requested and any(
+            (new_summary_state.get(language) or {}).get("status") in runnable_statuses
+            for language in NEW_SUMMARY_LANGUAGES
+        )
+        if not summary_runnable and not new_summary_runnable:
             worker_logger.info(
                 "summary_generation_skipped",
                 extra={
@@ -68,44 +93,95 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
             )
             return
 
-        source_payload = build_summary_generation_source(
-            analysis=analysis,
-            check_run=check_run,
-        )
-        source_fingerprint = summary_payload_fingerprint(source_payload)
         generation_provider: tuple[Provider, str, str | None, str | None] | None = None
         failed_languages: list[str] = []
-        for target_language in LANGUAGES:
-            state = ((analysis.structured_output or {}).get("result") or {}).get("summary_localizations") or {}
-            target = state.get(target_language) or {}
-            if target.get("status") == "completed" and target.get("source_fingerprint") == source_fingerprint:
-                continue
-            if target.get("status") not in runnable_statuses:
-                continue
-            if generation_provider is None:
-                generation_provider = _resolve_summary_provider(session=session, check_run=check_run)
-            provider, model, api_key, base_url = generation_provider
+        if summary_runnable:
+            source_payload = build_summary_generation_source(
+                analysis=analysis,
+                check_run=check_run,
+            )
+            source_fingerprint = summary_payload_fingerprint(source_payload)
+            for target_language in LANGUAGES:
+                state = ((analysis.structured_output or {}).get("result") or {}).get("summary_localizations") or {}
+                target = state.get(target_language) or {}
+                if target.get("status") == "completed" and target.get("source_fingerprint") == source_fingerprint:
+                    continue
+                if target.get("status") not in runnable_statuses:
+                    continue
+                if generation_provider is None:
+                    generation_provider = _resolve_summary_provider(session=session, check_run=check_run)
+                provider, model, api_key, base_url = generation_provider
+                try:
+                    generate_and_persist_summary_variant(
+                        session=session,
+                        analysis=analysis,
+                        check_run=check_run,
+                        source_payload=source_payload,
+                        target_language=target_language,
+                        provider=provider,
+                        model=model,
+                        api_key=api_key,
+                        base_url=base_url,
+                    )
+                except Exception as exc:
+                    mark_localization_failed(
+                        session=session,
+                        analysis=analysis,
+                        check_run=check_run,
+                        language=target_language,
+                        error_message=str(exc),
+                    )
+                    failed_languages.append(f"summary_localization:{target_language}")
+        if new_summary_runnable:
             try:
-                generate_and_persist_summary_variant(
+                new_summary_source = build_new_summary_source(
                     session=session,
                     analysis=analysis,
                     check_run=check_run,
-                    source_payload=source_payload,
-                    target_language=target_language,
-                    provider=provider,
-                    model=model,
-                    api_key=api_key,
-                    base_url=base_url,
                 )
+                new_summary_fingerprint = new_summary_source_fingerprint(new_summary_source)
             except Exception as exc:
-                mark_localization_failed(
-                    session=session,
-                    analysis=analysis,
-                    check_run=check_run,
-                    language=target_language,
-                    error_message=str(exc),
-                )
-                failed_languages.append(target_language)
+                for target_language in NEW_SUMMARY_LANGUAGES:
+                    mark_new_summary_failed(
+                        analysis=analysis,
+                        revision=str(check_run.id),
+                        language=target_language,
+                        error_message=str(exc),
+                    )
+                session.commit()
+                failed_languages.extend(f"new_summary:{language}" for language in NEW_SUMMARY_LANGUAGES)
+            else:
+                for target_language in NEW_SUMMARY_LANGUAGES:
+                    new_summary_state = ((analysis.structured_output or {}).get("result") or {}).get("new_summary") or {}
+                    target = new_summary_state.get(target_language) or {}
+                    if target.get("status") == "completed" and target.get("source_fingerprint") == new_summary_fingerprint:
+                        continue
+                    if target.get("status") not in runnable_statuses:
+                        continue
+                    if generation_provider is None:
+                        generation_provider = _resolve_summary_provider(session=session, check_run=check_run)
+                    provider, model, api_key, base_url = generation_provider
+                    try:
+                        generate_and_persist_new_summary_variant(
+                            session=session,
+                            analysis=analysis,
+                            check_run=check_run,
+                            source_payload=new_summary_source,
+                            target_language=target_language,
+                            provider=provider,
+                            model=model,
+                            api_key=api_key,
+                            base_url=base_url,
+                        )
+                    except Exception as exc:
+                        mark_new_summary_failed(
+                            analysis=analysis,
+                            revision=str(check_run.id),
+                            language=target_language,
+                            error_message=str(exc),
+                        )
+                        session.commit()
+                        failed_languages.append(f"new_summary:{target_language}")
         worker_logger.info(
             "worker_job_completed",
             extra={
@@ -129,6 +205,16 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
                         language=language,
                         error_message=str(exc),
                     )
+            new_summary_state = ((current_analysis.structured_output or {}).get("result") or {}).get("new_summary") or {}
+            for language in NEW_SUMMARY_LANGUAGES:
+                if (new_summary_state.get(language) or {}).get("status") != "completed":
+                    mark_new_summary_failed(
+                        analysis=current_analysis,
+                        revision=str(current_check_run.id),
+                        language=language,
+                        error_message=str(exc),
+                    )
+            session.commit()
         worker_logger.info(
             "worker_job_failed",
             extra={

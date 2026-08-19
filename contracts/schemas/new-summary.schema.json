@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gate-challenger.local/schemas/new-summary.schema.json",
+  "title": "New Summary localized result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "language",
+    "title",
+    "stage",
+    "context",
+    "required_elements",
+    "confirmed",
+    "insufficiently_confirmed",
+    "critical_problems",
+    "other"
+  ],
+  "properties": {
+    "schema_version": { "const": "new-summary-v1" },
+    "language": { "type": "string", "enum": ["ru", "en"] },
+    "title": { "type": "string", "minLength": 1 },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "Gate 1",
+        "Gate 2",
+        "Gate 3",
+        "Stream Review 1",
+        "Stream Review 2+ / Progress Review"
+      ]
+    },
+    "context": { "type": "string", "minLength": 1 },
+    "required_elements": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 7,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "status", "evidence"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "label": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "enum": ["present", "missing"] },
+          "evidence": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "confirmed": { "$ref": "#/$defs/findings" },
+    "insufficiently_confirmed": { "$ref": "#/$defs/findings" },
+    "critical_problems": { "$ref": "#/$defs/findings" },
+    "other": {
+      "type": "array",
+      "maxItems": 5,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "findings": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 5,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

@@ -19,6 +19,7 @@ from app.schemas.enums import DocumentParseStatus, DocumentType, EntityStatus, P
 from app.security.secrets import encrypt_secret
 from jobs.run_summary_localizations import run_summary_localizations
 from providers.base import AnalysisProviderResult
+from skills import new_summary_generation
 from skills import summary_localization
 
 
@@ -150,6 +151,74 @@ def test_summary_variants_are_generated_independently_without_changing_decision_
         assert en["financial_analysis"]["confidence"] == ru["financial_analysis"]["confidence"]
         assert en["financial_analysis"]["key_numbers"][0]["value"] == "42"
         assert en["financial_analysis"]["spreadsheet_audit"]["formula_issues_count"] == 2
+    finally:
+        db.close()
+        get_settings.cache_clear()
+
+
+def test_new_summary_variants_are_generated_from_repository_skill(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
+    db = _session()
+    try:
+        analysis, check_run = _seed(db)
+        output = dict(analysis.structured_output)
+        result = dict(output["result"])
+        result["summary_localizations"] = {
+            "version": summary_localization.SUMMARY_LOCALIZATION_VERSION,
+            "generation_mode": summary_localization.SUMMARY_GENERATION_MODE,
+            "source_revision": str(check_run.id),
+            "ru": {"status": "completed", "payload": {"language": "ru"}, "source_fingerprint": "legacy"},
+            "en": {"status": "completed", "payload": {"language": "en"}, "source_fingerprint": "legacy"},
+        }
+        result["new_summary"] = {
+            "version": 1,
+            "generation_mode": "new_summary_skill",
+            "source_revision": str(check_run.id),
+            "ru": {"status": "queued", "payload": None, "error_message": None},
+            "en": {"status": "queued", "payload": None, "error_message": None},
+        }
+        output["result"] = result
+        analysis.structured_output = output
+        payloads = {
+            "ru": _new_summary_payload(language="ru", title="Кейс", context="Команда проверяет новый продукт."),
+            "en": _new_summary_payload(language="en", title="Case", context="The team is validating a new product."),
+        }
+        check_run.run_parameters = {
+            "new_summary_mock_provider_results": {
+                language: {
+                    "structured_text": json.dumps(payload, ensure_ascii=False),
+                    "raw_output": f"raw new summary {language}",
+                    "input_tokens": 11,
+                    "output_tokens": 22,
+                    "latency_ms": 33,
+                }
+                for language, payload in payloads.items()
+            }
+        }
+        db.commit()
+
+        run_summary_localizations(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        state = analysis.structured_output["result"]["new_summary"]
+        assert state["ru"]["status"] == "completed", state["ru"]
+        assert state["en"]["status"] == "completed", state["en"]
+        assert state["ru"]["payload"]["schema_version"] == "new-summary-v1"
+        assert state["en"]["payload"]["schema_version"] == "new-summary-v1"
+        assert state["ru"]["payload"]["context"] == "Команда проверяет новый продукт."
+        assert state["en"]["payload"]["context"] == "The team is validating a new product."
+        assert state["ru"]["source_fingerprint"] == new_summary_generation.new_summary_source_fingerprint(
+            new_summary_generation.build_new_summary_source(session=db, analysis=analysis, check_run=check_run)
+        )
+        steps = {
+            step.step_name: step
+            for step in db.query(AnalysisCheckStep).filter_by(check_run_id=check_run.id).all()
+        }
+        assert "new_summary_ru" in steps
+        assert "new_summary_en" in steps
+        skill_artifact = next(item for item in steps["new_summary_ru"].artifacts if item["key"] == "skill")
+        assert skill_artifact["skill"]["source_path"] == "skills/new-summary/SKILL.md"
     finally:
         db.close()
         get_settings.cache_clear()
@@ -572,6 +641,48 @@ def _session():
     )
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+
+
+def _new_summary_payload(*, language: str, title: str, context: str) -> dict:
+    return {
+        "schema_version": "new-summary-v1",
+        "language": language,
+        "title": title,
+        "stage": "Gate 2",
+        "context": context,
+        "required_elements": [
+            {
+                "id": "gate2_hypothesis_results",
+                "label": "Результаты проверки гипотез из Gate 1" if language == "ru" else "Gate 1 hypothesis validation results",
+                "status": "present",
+                "evidence": "Раздел есть." if language == "ru" else "The section is present.",
+            },
+            {
+                "id": "gate2_mvp_or_target_product",
+                "label": "Описание MVP/целевого продукта" if language == "ru" else "MVP or target product description",
+                "status": "missing",
+                "evidence": "Нет данных." if language == "ru" else "No evidence is provided.",
+            },
+            {
+                "id": "gate2_mockups_or_user_flow",
+                "label": "Mockups или видео пользовательского flow" if language == "ru" else "User-flow mockups or video",
+                "status": "present",
+                "evidence": "Раздел есть." if language == "ru" else "The section is present.",
+            },
+            {
+                "id": "gate2_gate3_commitments",
+                "label": "Commitments к Gate 3: сроки, expected performance, метрики" if language == "ru" else "Gate 3 commitments: timeline, expected performance, and metrics",
+                "status": "missing",
+                "evidence": "Нет данных." if language == "ru" else "No evidence is provided.",
+            },
+        ],
+        "confirmed": ["Спрос частично подтверждён." if language == "ru" else "Demand is partly confirmed."],
+        "insufficiently_confirmed": [
+            "Не хватает связи метрик с продуктом." if language == "ru" else "Metric linkage to the product is missing."
+        ],
+        "critical_problems": ["Нет stop-критериев." if language == "ru" else "Stop criteria are missing."],
+        "other": [],
+    }
 
 
 def _seed(db):

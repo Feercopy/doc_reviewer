@@ -5,14 +5,17 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { MarkdownPreview } from "@/components/MarkdownPreview";
+import { NewSummaryReportView } from "@/components/new-summary/NewSummaryReport";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
   createAnalysisDetails,
   deleteAnalysis,
+  ensureNewSummary,
   ensureSummaryLocalizations,
   getAnalysis,
   getAnalysisStatus,
   getDocument,
+  getNewSummary,
   getParsedText,
   getSummaryLocalizations,
   type AnalysisCheckRunStatusRecord,
@@ -23,6 +26,7 @@ import {
   type AnalysisRecord,
   type AnalysisStatusRecord,
   type DocumentRecord,
+  type NewSummaryRecord,
   type OutputLanguage,
   type PredictedCommentRunRecord,
   type Provider,
@@ -33,6 +37,7 @@ import {
 } from "@/lib/api/documents";
 import { submitFeedback } from "@/lib/api/feedback";
 import { createIcReviewRun, icReviewArtifactUrl } from "@/lib/api/ic-review";
+import type { NewSummaryReport } from "@/lib/newSummary";
 import {
   getProviderDefaultModel,
   listProviderModels,
@@ -137,6 +142,8 @@ export default function AnalysisDetailPage() {
   const [summaryLanguage, setSummaryLanguage] = useState<OutputLanguage>("ru");
   const [summaryLocalizations, setSummaryLocalizations] = useState<SummaryLocalizationsRecord | null>(null);
   const [summaryLocalizationError, setSummaryLocalizationError] = useState("");
+  const [newSummary, setNewSummary] = useState<NewSummaryRecord | null>(null);
+  const [newSummaryError, setNewSummaryError] = useState("");
 
   useEffect(() => {
     let ignore = false;
@@ -196,6 +203,49 @@ export default function AnalysisDetailPage() {
     }
 
     void refreshLocalizations(true);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [analysis?.id, analysis?.status, analysis?.ic_review_run?.id, analysis?.ic_review_run?.status, params.analysisId]);
+
+  useEffect(() => {
+    if (analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed") {
+      setNewSummary(null);
+      setNewSummaryError("");
+      return;
+    }
+
+    let cancelled = false;
+    let timer: number | undefined;
+    const hasPendingVariant = (value: NewSummaryRecord) =>
+      value.available
+      && [value.ru.status, value.en.status].some((status) => status === "waiting" || status === "queued" || status === "running");
+
+    async function refreshNewSummary(ensure: boolean) {
+      try {
+        const loaded = ensure
+          ? await ensureNewSummary(params.analysisId)
+          : await getNewSummary(params.analysisId);
+        if (cancelled) {
+          return;
+        }
+        setNewSummary(loaded);
+        setNewSummaryError("");
+        if (hasPendingVariant(loaded)) {
+          timer = window.setTimeout(() => refreshNewSummary(false), 2000);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setNewSummaryError(err instanceof Error ? err.message : "Failed to prepare new Summary");
+          timer = window.setTimeout(() => refreshNewSummary(false), 5000);
+        }
+      }
+    }
+
+    void refreshNewSummary(true);
     return () => {
       cancelled = true;
       if (timer !== undefined) {
@@ -587,6 +637,8 @@ export default function AnalysisDetailPage() {
                     language={summaryLanguage}
                     localizations={summaryLocalizations}
                     localizationError={summaryLocalizationError}
+                    newSummary={newSummary}
+                    newSummaryError={newSummaryError}
                     onLanguageChange={setSummaryLanguage}
                   />
                 ) : null}
@@ -913,14 +965,45 @@ function ResultPanel({
   language,
   localizations,
   localizationError,
+  newSummary,
+  newSummaryError,
   onLanguageChange,
 }: {
   analysis: AnalysisRecord;
   language: OutputLanguage;
   localizations: SummaryLocalizationsRecord | null;
   localizationError: string;
+  newSummary: NewSummaryRecord | null;
+  newSummaryError: string;
   onLanguageChange: (language: OutputLanguage) => void;
 }) {
+  const newSummaryReady =
+    newSummary?.available === true
+    && newSummary.ru.status === "completed"
+    && newSummary.en.status === "completed"
+    && newSummary.ru.payload !== null
+    && newSummary.en.payload !== null;
+  const newSummaryRequested = newSummary?.available === true;
+  const newSummaryFailed =
+    newSummaryRequested && [newSummary.ru.status, newSummary.en.status].some((status) => status === "failed");
+  const newSummaryPending =
+    newSummaryRequested
+    && !newSummaryReady
+    && [newSummary.ru.status, newSummary.en.status].some((status) => status === "queued" || status === "running");
+  const newSummaryRu = newSummaryReady ? newSummary.ru.payload : null;
+  const newSummaryEn = newSummaryReady ? newSummary.en.payload : null;
+  if (newSummaryRu && newSummaryEn) {
+    const report: NewSummaryReport = {
+      analysis_id: analysis.id,
+      created_at: analysis.completed_at ?? analysis.created_at,
+      pdf_path: null,
+      route: null,
+      ru: newSummaryRu,
+      en: newSummaryEn,
+    };
+    return <NewSummaryReportView embedded report={report} />;
+  }
+
   const verdict = buildFinalVerdict(analysis);
   const agentVerdicts = buildAgentVerdicts(analysis);
   const nativeLanguage: OutputLanguage = analysis.run_parameters?.output_language === "en" ? "en" : "ru";
@@ -953,6 +1036,16 @@ function ResultPanel({
 
   return (
     <section className="analysis-result-surface" aria-label={labels.summaryReport}>
+      {newSummaryPending ? (
+        <div className="analysis-summary-language-loading" aria-live="polite">
+          Готовим Summary в новом формате. Старый Summary пока остаётся доступен.
+        </div>
+      ) : null}
+      {newSummaryError || newSummaryFailed ? (
+        <div className="analysis-alert">
+          Новый формат Summary пока не удалось подготовить. Ниже показан прежний Summary.
+        </div>
+      ) : null}
       {bilingualReady ? <div className="analysis-summary-language-switch" aria-label={labels.languageSelector}>
         <button
           aria-pressed={language === "ru"}

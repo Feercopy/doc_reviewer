@@ -101,6 +101,22 @@ class SummaryLocalizationsRead(BaseModel):
     en: SummaryLocalizationVariantRead
 
 
+class NewSummaryVariantRead(BaseModel):
+    status: str
+    payload: dict | None = None
+    error_message: str | None = None
+    source_fingerprint: str | None = None
+
+
+class NewSummaryRead(BaseModel):
+    analysis_id: UUID
+    source_revision: str | None = None
+    generation_mode: str | None = None
+    available: bool = False
+    ru: NewSummaryVariantRead
+    en: NewSummaryVariantRead
+
+
 class AnalysisRead(BaseModel):
     id: UUID
     document_id: UUID

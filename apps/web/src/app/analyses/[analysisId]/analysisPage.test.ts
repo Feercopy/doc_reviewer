@@ -418,6 +418,23 @@ describe("analysis result page", () => {
     expect(resultPanelSource).not.toContain("window.location.reload");
   });
 
+  it("replaces the Summary tab with the repository new-summary report when both variants are ready", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const resultPanelSource = pageSource.slice(
+      pageSource.indexOf("function ResultPanel"),
+      pageSource.indexOf("function MainSkillMarkdownPanel"),
+    );
+
+    expect(pageSource).toContain("ensureNewSummary(params.analysisId)");
+    expect(pageSource).toContain("getNewSummary(params.analysisId)");
+    expect(pageSource).toContain('import { NewSummaryReportView } from "@/components/new-summary/NewSummaryReport";');
+    expect(resultPanelSource).toContain('newSummary?.available === true');
+    expect(resultPanelSource).toContain('newSummary.ru.status === "completed"');
+    expect(resultPanelSource).toContain('newSummary.en.status === "completed"');
+    expect(resultPanelSource).toContain("return <NewSummaryReportView embedded report={report} />");
+    expect(resultPanelSource).toContain("Старый Summary пока остаётся доступен");
+  });
+
   it("renders the stage checklist as a red and green traffic-light block above Summary product analysis", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const resultPanelSource = pageSource.slice(

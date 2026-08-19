@@ -22,6 +22,7 @@ from providers.registry import get_provider_adapter
 from privacy.model_anonymization import (
     RUN_PARAMETER_KEY,
     anonymize_value_for_model,
+    db_safe_anonymization_metadata,
     deanonymize_model_value,
     provider_safe_run_parameters,
 )
@@ -336,7 +337,7 @@ def _render_and_persist_detail_prompt(
     run_parameters = dict(detail_run.run_parameters or {})
     run_parameters["provider_api"] = "responses" if previous_response_id else "chat_completions_fallback"
     run_parameters["previous_response_id"] = previous_response_id
-    run_parameters[RUN_PARAMETER_KEY] = anonymization.metadata
+    run_parameters[RUN_PARAMETER_KEY] = db_safe_anonymization_metadata(anonymization.metadata) or {"enabled": False}
     if previous_response_id is None:
         run_parameters["fallback_reason"] = "gate_challenger_response_id_missing"
         run_parameters["fallback_context_source"] = "rendered_prompt_artifact_path" if original_prompt is not None else "unavailable"
