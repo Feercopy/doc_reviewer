@@ -240,6 +240,7 @@ export default function AnalysisDetailPage() {
       } catch (err) {
         if (!cancelled) {
           setNewSummaryError(err instanceof Error ? err.message : "Failed to prepare new Summary");
+          timer = window.setTimeout(() => refreshNewSummary(false), 5000);
         }
       }
     }

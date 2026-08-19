@@ -999,7 +999,7 @@ def test_old_analysis_stays_hidden_until_run_marks_localizations_expected(client
         model=analysis.model,
         status=RunStatus.COMPLETED.value,
         structured_output={"run_mode": "ic_agentic_review_compact"},
-        run_parameters={},
+        run_parameters={"summary_localizations_expected": True},
         artifacts=[],
         uploaded_workbook_metadata={},
     )
@@ -1147,6 +1147,50 @@ def test_new_summary_endpoint_queues_repository_skill_summary_once(client, db_se
     assert first.json()["ru"]["status"] == "queued"
     assert first.json()["en"]["status"] == "queued"
     assert second.json() == read.json()
+
+
+def test_new_summary_endpoint_waits_for_ic_postprocessing(client, db_session):
+    user = create_user(db_session, "postprocessing-author", "secret")
+    skills = seed_baseline_skills(db_session)
+    document_id = _create_completed_document(client, db_session, user)
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=user.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="need_evidence",
+        summary="Нужны подтверждения",
+        structured_output={"result": {"short_summary": "Нужны подтверждения"}},
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.flush()
+    check_run = AnalysisCheckRun(
+        analysis_id=analysis.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        check_type="ic_agentic_review",
+        provider=analysis.provider,
+        model=analysis.model,
+        status=RunStatus.COMPLETED.value,
+        structured_output={"run_mode": "ic_agentic_review_compact"},
+        run_parameters={"summary_localizations_expected": "postprocessing"},
+        artifacts=[],
+        uploaded_workbook_metadata={},
+    )
+    db_session.add(check_run)
+    db_session.commit()
+
+    login(client, "postprocessing-author", "secret")
+    response = client.post(f"/analyses/{analysis.id}/new-summary")
+
+    assert response.status_code == 200
+    assert response.json()["available"] is True
+    assert response.json()["ru"]["status"] == "waiting"
+    assert response.json()["en"]["status"] == "waiting"
 
 
 def test_cancel_analysis_preserves_completed_gate_result_and_cancels_downstream_runs(client, db_session):

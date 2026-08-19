@@ -652,14 +652,26 @@ def _new_summary_payload(*, language: str, title: str, context: str) -> dict:
         "context": context,
         "required_elements": [
             {
-                "id": "gate2_usp",
-                "label": "Уникальное товарное предложение" if language == "ru" else "Unique value proposition",
+                "id": "gate2_hypothesis_results",
+                "label": "Результаты проверки гипотез из Gate 1" if language == "ru" else "Gate 1 hypothesis validation results",
                 "status": "present",
                 "evidence": "Раздел есть." if language == "ru" else "The section is present.",
             },
             {
-                "id": "gate2_hypothesis_results",
-                "label": "Результаты проверки гипотез из Gate 1" if language == "ru" else "Gate 1 hypothesis results",
+                "id": "gate2_mvp_or_target_product",
+                "label": "Описание MVP/целевого продукта" if language == "ru" else "MVP or target product description",
+                "status": "missing",
+                "evidence": "Нет данных." if language == "ru" else "No evidence is provided.",
+            },
+            {
+                "id": "gate2_mockups_or_user_flow",
+                "label": "Mockups или видео пользовательского flow" if language == "ru" else "User-flow mockups or video",
+                "status": "present",
+                "evidence": "Раздел есть." if language == "ru" else "The section is present.",
+            },
+            {
+                "id": "gate2_gate3_commitments",
+                "label": "Commitments к Gate 3: сроки, expected performance, метрики" if language == "ru" else "Gate 3 commitments: timeline, expected performance, and metrics",
                 "status": "missing",
                 "evidence": "Нет данных." if language == "ru" else "No evidence is provided.",
             },

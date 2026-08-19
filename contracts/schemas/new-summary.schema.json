@@ -33,7 +33,7 @@
     "context": { "type": "string", "minLength": 1 },
     "required_elements": {
       "type": "array",
-      "minItems": 2,
+      "minItems": 0,
       "maxItems": 7,
       "items": {
         "type": "object",
@@ -59,7 +59,7 @@
   "$defs": {
     "findings": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "maxItems": 5,
       "items": { "type": "string", "minLength": 1 }
     }

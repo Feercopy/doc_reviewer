@@ -44,7 +44,6 @@ from app.services.analysis_jobs import (
 from app.services.documents import DocumentNotFoundError
 from app.services.new_summaries import (
     mark_new_summary_enqueue_failed,
-    read_new_summary,
     request_new_summary,
 )
 from app.services.summary_localizations import (
@@ -194,12 +193,24 @@ def get_analysis_new_summary(
     analysis_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_current_user),
+    enqueue: RunSummaryLocalizationsEnqueue = Depends(get_run_summary_localizations_enqueue),
 ) -> NewSummaryRead:
     try:
         analysis = get_analysis_for_actor(db=db, actor=current_user, analysis_id=analysis_id)
     except AnalysisNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
-    return read_new_summary(analysis)
+    response, should_enqueue = request_new_summary(db=db, analysis=analysis)
+    if should_enqueue:
+        try:
+            enqueue(analysis.id)
+        except Exception as exc:
+            mark_new_summary_enqueue_failed(
+                db=db,
+                analysis=analysis,
+                error_message="new_summary_generation_queue_unavailable",
+            )
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="New Summary generation queue is unavailable") from exc
+    return response
 
 
 @router.post("/analyses/{analysis_id}/new-summary", response_model=NewSummaryRead)

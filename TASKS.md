@@ -35,6 +35,15 @@ Primary plan index:
   runtime image because it is built without the dev `pytest` extra; the
   production web build still reaches compilation but fails on the pre-existing
   `/404` `<Html>` import issue.
+- [x] Address blocking Codex review findings before production merge of the
+  new Summary PR: new Summary generation now waits for IC postprocessing,
+  stale states can be recovered from reads, the shared Summary RQ job is
+  deduplicated by stable job ID with a 7,200-second timeout, empty evidence
+  sections are schema-valid, source-dependent language/stage/required-element
+  fields are validated and canonicalized from the Gate checklist, and the
+  generation source includes structured Gate findings/checks/layers. Verified
+  focused Analysis page tests (`26 passed`), Python compilation, runtime
+  source-dependent Summary normalization, and `git diff --check`.
 - [x] Replace the production analysis Summary tab with the repository
   `skills/new-summary` format while keeping legacy Summary as a fallback and
   hiding the frontend-only Full Report tab. New Summary is stored under the

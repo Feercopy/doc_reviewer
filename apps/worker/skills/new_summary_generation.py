@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.models.analysis import Analysis, AnalysisCheckRun
 from app.models.document import Document
 from app.schemas.enums import Provider
+from app.services.stage_checklists import stage_checklist_items
 from app.services.new_summaries import (
     NEW_SUMMARY_GENERATION_MODE,
     NEW_SUMMARY_VERSION,
@@ -127,6 +128,12 @@ def generate_and_persist_new_summary_variant(
         )
         payload = deanonymize_model_value(payload, metadata=run_parameters.get(RUN_PARAMETER_KEY))
         validate(instance=payload, schema=response_schema)
+        payload = _validated_source_dependent_payload(
+            payload=payload,
+            source_payload=source_payload,
+            target_language=target_language,
+            response_schema=response_schema,
+        )
     except Exception as exc:
         session.rollback()
         fail_result_synthesis_step(
@@ -229,6 +236,12 @@ def _gate_challenger_source(value: dict[str, Any] | None) -> dict[str, Any]:
         "verdict": _copy_jsonish(result.get("verdict") or value.get("verdict")),
         "short_summary": _copy_jsonish(result.get("short_summary") or value.get("summary")),
         "stage_checklist": _copy_jsonish(value.get("stage_checklist") or result.get("stage_checklist")),
+        "findings": _copy_jsonish(result.get("findings") or value.get("findings")),
+        "checks": _copy_jsonish(result.get("checks") or value.get("checks")),
+        "layer_1": _copy_jsonish(result.get("layer_1") or value.get("layer_1")),
+        "layer_2": _copy_jsonish(result.get("layer_2") or value.get("layer_2")),
+        "layer_1_index": _copy_jsonish(result.get("layer_1_index") or value.get("layer_1_index")),
+        "layer_2_index": _copy_jsonish(result.get("layer_2_index") or value.get("layer_2_index")),
         "critical_risks": _copy_jsonish(result.get("critical_risks")),
         "data_gaps": _copy_jsonish(result.get("data_gaps")),
         "rationale_items": _copy_jsonish(result.get("rationale_items")),
@@ -357,6 +370,67 @@ def _validated_new_summary(
     payload = parse_json_output(result.structured_text)
     validate(instance=payload, schema=response_schema)
     return payload
+
+
+def _validated_source_dependent_payload(
+    *,
+    payload: dict[str, Any],
+    source_payload: dict[str, Any],
+    target_language: str,
+    response_schema: dict[str, Any],
+) -> dict[str, Any]:
+    if payload.get("language") != target_language:
+        raise ValueError("new_summary_language_mismatch")
+    expected_stage = source_payload.get("document_stage")
+    if isinstance(expected_stage, str) and payload.get("stage") != expected_stage:
+        raise ValueError("new_summary_stage_mismatch")
+
+    normalized = dict(payload)
+    normalized["required_elements"] = _required_elements_from_source(
+        source_payload=source_payload,
+        target_language=target_language,
+    )
+    validate(instance=normalized, schema=response_schema)
+    return normalized
+
+
+def _required_elements_from_source(*, source_payload: dict[str, Any], target_language: str) -> list[dict[str, str]]:
+    document_type = source_payload.get("document_type")
+    expected = stage_checklist_items(str(document_type) if isinstance(document_type, str) else None, output_language=target_language)
+    by_id = _gate_stage_checklist_by_id(source_payload)
+    return [
+        {
+            "id": item_id,
+            "label": label,
+            "status": _required_element_status(by_id.get(item_id)),
+            "evidence": _required_element_evidence(by_id.get(item_id), target_language=target_language),
+        }
+        for item_id, label in expected
+    ]
+
+
+def _gate_stage_checklist_by_id(source_payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    gate = source_payload.get("gate_challenger") if isinstance(source_payload.get("gate_challenger"), dict) else {}
+    checklist = gate.get("stage_checklist") if isinstance(gate.get("stage_checklist"), list) else []
+    result: dict[str, dict[str, Any]] = {}
+    for item in checklist:
+        if isinstance(item, dict) and isinstance(item.get("id"), str):
+            result[item["id"]] = item
+    return result
+
+
+def _required_element_status(item: dict[str, Any] | None) -> str:
+    status = str((item or {}).get("status") or "").lower()
+    if status in {"present", "green", "true", "yes"}:
+        return "present"
+    return "missing"
+
+
+def _required_element_evidence(item: dict[str, Any] | None, *, target_language: str) -> str:
+    evidence = (item or {}).get("evidence")
+    if isinstance(evidence, str) and evidence.strip():
+        return evidence.strip()
+    return "Не найдено в чеклисте Gate Challenger." if target_language == "ru" else "Not found in the Gate Challenger checklist."
 
 
 def _skill_text() -> str:

@@ -12,6 +12,7 @@ from app.models.analysis import Analysis, AnalysisCheckRun
 from app.schemas.analyses import NewSummaryRead, NewSummaryVariantRead
 from app.schemas.enums import RunStatus
 from app.services.summary_localizations import latest_completed_ic_review
+from app.services.summary_localizations import SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER
 
 
 NEW_SUMMARY_KEY = "new_summary"
@@ -52,6 +53,20 @@ def prepare_new_summary_for_check_run(
 
     revision = str(check_run.id)
     state = _state(analysis)
+    postprocessing_finished = (
+        (check_run.run_parameters or {}).get(SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER) is True
+    )
+    if not postprocessing_finished:
+        is_waiting_current = (
+            state.get("source_revision") == revision
+            and state.get("version") == NEW_SUMMARY_VERSION
+            and state.get("generation_mode") == NEW_SUMMARY_GENERATION_MODE
+        )
+        if create_if_missing and not is_waiting_current:
+            state = _empty_state(revision, status="waiting")
+            _persist_state(analysis, state)
+        return _read_state(analysis.id, state), False
+
     should_enqueue = False
     is_current = (
         state.get("source_revision") == revision
@@ -66,7 +81,10 @@ def prepare_new_summary_for_check_run(
     else:
         for language in ("ru", "en"):
             variant = state.get(language)
-            if not isinstance(variant, dict) or variant.get("status") in {None, "failed"}:
+            if isinstance(variant, dict) and variant.get("status") == "waiting":
+                state[language] = _queued_variant()
+                should_enqueue = True
+            elif not isinstance(variant, dict) or variant.get("status") in {None, "failed"}:
                 state[language] = _queued_variant()
                 should_enqueue = True
             elif variant.get("status") in {"queued", "running"} and _is_stale(variant):
@@ -146,13 +164,19 @@ def _state_for_revision(*, analysis: Analysis, revision: str) -> dict[str, Any]:
     return dict(state)
 
 
-def _empty_state(revision: str | None) -> dict[str, Any]:
+def _empty_state(revision: str | None, *, status: str = "queued") -> dict[str, Any]:
+    variant = _queued_variant() if status == "queued" else {
+        "status": status,
+        "payload": None,
+        "error_message": None,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+    }
     return {
         "version": NEW_SUMMARY_VERSION,
         "generation_mode": NEW_SUMMARY_GENERATION_MODE,
         "source_revision": revision,
-        "ru": _queued_variant(),
-        "en": _queued_variant(),
+        "ru": dict(variant),
+        "en": dict(variant),
     }
 
 
