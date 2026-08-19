@@ -219,13 +219,61 @@ def _initiative_title(*, analysis: Analysis, document: Document) -> str:
     result = output.get("result") if isinstance(output.get("result"), dict) else {}
     for value in (
         result.get("initiative_title"),
+        result.get("title"),
+        result.get("project_name"),
         output.get("initiative_title"),
+        output.get("title"),
+        output.get("project_name"),
+        _initiative_title_from_text(document.parsed_text),
         document.title,
         document.original_filename,
     ):
         if isinstance(value, str) and value.strip():
             return value.strip()
     return "Untitled initiative"
+
+
+def _initiative_title_from_text(text: str | None) -> str | None:
+    if not isinstance(text, str):
+        return None
+    lines = [_clean_title_line(line) for line in text.splitlines()]
+    lines = [line for line in lines if line]
+    for line in lines[:80]:
+        lowered = line.lower()
+        for marker in (
+            "название инициативы",
+            "название проекта",
+            "инициатива",
+            "проект",
+            "initiative name",
+            "project name",
+        ):
+            if lowered.startswith(marker):
+                value = line.split(":", 1)[1].strip() if ":" in line else ""
+                if _is_plausible_initiative_title(value):
+                    return value
+    for line in lines[:20]:
+        if _is_plausible_initiative_title(line):
+            return line
+    return None
+
+
+def _clean_title_line(line: str) -> str:
+    return line.strip().strip("#").strip(" -*\t")
+
+
+def _is_plausible_initiative_title(value: str | None) -> bool:
+    if not isinstance(value, str):
+        return False
+    title = value.strip()
+    if len(title) < 4 or len(title) > 160:
+        return False
+    lowered = title.lower()
+    if lowered in {"gate 1", "gate 2", "gate 3", "stream review", "progress review"}:
+        return False
+    if lowered.endswith((".docx", ".pdf", ".xlsx", ".pptx")):
+        return False
+    return any(character.isalpha() for character in title)
 
 
 def _gate_challenger_source(value: dict[str, Any] | None) -> dict[str, Any]:
