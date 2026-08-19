@@ -55,6 +55,7 @@ from providers.registry import get_provider_adapter
 from privacy.model_anonymization import (
     RUN_PARAMETER_KEY,
     anonymize_prompt_sections_for_model,
+    db_safe_anonymization_metadata,
     deanonymize_model_value,
     provider_safe_run_parameters,
 )
@@ -241,7 +242,7 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         run_parameters = dict(check_run.run_parameters or {})
         run_parameters["synthesis_prompt_artifact_path"] = str(synthesis_prompt_path)
         run_parameters["synthesis_prompt_fingerprint"] = hashlib.sha256(synthesis_prompt.encode("utf-8")).hexdigest()
-        run_parameters[RUN_PARAMETER_KEY] = synthesis_anonymization.metadata
+        run_parameters[RUN_PARAMETER_KEY] = db_safe_anonymization_metadata(synthesis_anonymization.metadata) or {"enabled": False}
         check_run.run_parameters = run_parameters
         flag_modified(check_run, "run_parameters")
         session.commit()

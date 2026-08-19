@@ -51,7 +51,7 @@ describe("analysis result page", () => {
     expect(layer2Source).not.toContain("evidenceDisplayLabel");
   });
 
-  it("shows only Summary in the top tabs while keeping Full Report data panels in code", () => {
+  it("splits analysis output into Summary and nested Full Report tabs", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const topTabsSource = pageSource.slice(
       pageSource.indexOf("const analysisTabs"),
@@ -63,7 +63,7 @@ describe("analysis result page", () => {
     );
 
     expect(topTabsSource).toContain('{ id: "executiveSummary", label: "Summary" }');
-    expect(topTabsSource).not.toContain('{ id: "fullReport", label: "Full Report" }');
+    expect(topTabsSource).toContain('{ id: "fullReport", label: "Full Report" }');
     expect(topTabsSource).not.toContain("Gate Challenger");
     expect(topTabsSource).not.toContain("Document comments");
     expect(fullReportTabsSource).toContain('{ id: "mainOutput", label: "Product Analysis" }');

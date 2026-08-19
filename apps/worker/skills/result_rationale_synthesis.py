@@ -20,6 +20,7 @@ from providers.registry import get_provider_adapter
 from privacy.model_anonymization import (
     RUN_PARAMETER_KEY,
     anonymize_value_for_model,
+    db_safe_anonymization_metadata,
     deanonymize_model_value,
     provider_safe_run_parameters,
 )
@@ -106,7 +107,7 @@ def update_result_rationale(
         response_schema=schema,
     )
     run_parameters = _result_rationale_run_parameters(check_run.run_parameters or {})
-    run_parameters[RUN_PARAMETER_KEY] = anonymization.metadata
+    run_parameters[RUN_PARAMETER_KEY] = db_safe_anonymization_metadata(anonymization.metadata) or {"enabled": False}
     step = start_result_synthesis_step(
         session=session,
         check_run=check_run,

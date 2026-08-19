@@ -21,6 +21,20 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Restore the Analysis page Full Report tab and harden model-anonymization
+  metadata persistence after production IC Review runs failed immediately at
+  `ic-financial-auditor` with `programming_error`. Production DB evidence
+  showed failed role steps without prompt artifacts or raw output, pointing to
+  a pre-provider persistence failure rather than a model failure. Persisted
+  anonymization metadata is now stripped of PostgreSQL-unsafe NUL bytes before
+  it is saved to analysis, detail, Devil's Advocate, IC role/synthesis, and
+  Summary run parameters; provider-facing parameters still exclude the mapping.
+  Verified the Analysis page focused test (`26 passed`), worker Python
+  compilation, runtime sanitizer import/check in the worker image, Compose
+  config, and `git diff --check`. Worker pytest could not run in the available
+  runtime image because it is built without the dev `pytest` extra; the
+  production web build still reaches compilation but fails on the pre-existing
+  `/404` `<Html>` import issue.
 - [x] Replace the production analysis Summary tab with the repository
   `skills/new-summary` format while keeping legacy Summary as a fallback and
   hiding the frontend-only Full Report tab. New Summary is stored under the

@@ -1,6 +1,6 @@
 from parsers.anonymizer import PersonalDataAnonymizer, residual_counts
 from parsers.artifact import ParseBlock, ParsedDocument, ParserInfo, ParseQuality
-from privacy.model_anonymization import provider_safe_run_parameters
+from privacy.model_anonymization import db_safe_anonymization_metadata, provider_safe_run_parameters
 
 
 def test_anonymizer_scrubs_supported_pii_and_comment_author_metadata():
@@ -179,3 +179,29 @@ def test_provider_safe_run_parameters_do_not_leak_anonymization_mapping_or_conte
     )
 
     assert safe == {"temperature": 0.2, "max_output_tokens": 1000}
+
+
+def test_db_safe_anonymization_metadata_strips_postgres_unsafe_null_bytes():
+    metadata = {
+        "enabled": True,
+        "replacements": [
+            {"kind": "name", "placeholder": "[PERSON_001]", "value": "Иван\x00 Петров"},
+        ],
+        "report": {
+            "examples": ["email\x00@example.com"],
+            "nested": {"bad\x00key": "bad\x00value"},
+        },
+    }
+
+    safe = db_safe_anonymization_metadata(metadata)
+
+    assert safe == {
+        "enabled": True,
+        "replacements": [
+            {"kind": "name", "placeholder": "[PERSON_001]", "value": "Иван Петров"},
+        ],
+        "report": {
+            "examples": ["email@example.com"],
+            "nested": {"badkey": "badvalue"},
+        },
+    }

@@ -23,6 +23,7 @@ from providers.registry import get_provider_adapter
 from privacy.model_anonymization import (
     RUN_PARAMETER_KEY,
     anonymize_prompt_sections_for_model,
+    db_safe_anonymization_metadata,
     deanonymize_model_value,
     provider_safe_run_parameters,
 )
@@ -89,7 +90,7 @@ def run_role_step(
         prompt = anonymization.prompt
         check_run.run_parameters = {
             **dict(check_run.run_parameters or {}),
-            RUN_PARAMETER_KEY: anonymization.metadata,
+            RUN_PARAMETER_KEY: db_safe_anonymization_metadata(anonymization.metadata) or {"enabled": False},
         }
         storage_backend = storage or LocalDocumentStorage(get_settings().storage_root)
         prompt_path = write_prompt_artifact(

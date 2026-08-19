@@ -36,6 +36,7 @@ from providers.registry import get_provider_adapter
 from privacy.model_anonymization import (
     RUN_PARAMETER_KEY,
     anonymize_value_for_model,
+    db_safe_anonymization_metadata,
     deanonymize_model_value,
     provider_safe_run_parameters,
 )
@@ -612,7 +613,7 @@ def _render_and_persist_prompt(
     run_parameters = dict(analysis.run_parameters or {})
     run_parameters["rendered_prompt_artifact_path"] = str(prompt_path)
     run_parameters["prompt_fingerprint"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-    run_parameters[RUN_PARAMETER_KEY] = prompt_context["metadata"]
+    run_parameters[RUN_PARAMETER_KEY] = db_safe_anonymization_metadata(prompt_context["metadata"]) or {"enabled": False}
     analysis.run_parameters = run_parameters
     flag_modified(analysis, "run_parameters")
     session.commit()

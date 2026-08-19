@@ -88,6 +88,7 @@ type EvidenceItem = {
 
 const analysisTabs: Array<{ id: AnalysisTopTab; label: string }> = [
   { id: "executiveSummary", label: "Summary" },
+  { id: "fullReport", label: "Full Report" },
 ];
 
 const fullReportTabs: Array<{ id: FullReportTab; label: string }> = [
@@ -460,7 +461,8 @@ export default function AnalysisDetailPage() {
         ...(icReviewWorkbook ? { financial_model: icReviewWorkbook } : {}),
       });
       setAnalysis((current) => (current?.id === analysis.id ? { ...current, ic_review_run: run } : current));
-      setActiveTopTab("executiveSummary");
+      setActiveTopTab("fullReport");
+      setActiveFullReportTab("icReview");
       setIcReviewWorkbook(null);
       setIcReviewWorkbookInputKey((current) => current + 1);
       setIcReviewWorkbookError("");
@@ -504,7 +506,8 @@ export default function AnalysisDetailPage() {
       const detailRun = await createAnalysisDetails(analysis.id);
       setAnalysis((current) => (current?.id === analysis.id ? { ...current, detail_run: detailRun } : current));
       if (isActiveRunStatus(detailRun.status)) {
-        setActiveTopTab("executiveSummary");
+        setActiveTopTab("fullReport");
+        setActiveFullReportTab("fullOutput");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load analysis details");

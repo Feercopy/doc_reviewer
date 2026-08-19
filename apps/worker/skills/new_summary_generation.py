@@ -23,6 +23,7 @@ from ic_review.role_runner import apply_ic_review_provider_defaults
 from privacy.model_anonymization import (
     RUN_PARAMETER_KEY,
     anonymize_value_for_model,
+    db_safe_anonymization_metadata,
     deanonymize_model_value,
     provider_safe_run_parameters,
 )
@@ -91,7 +92,7 @@ def generate_and_persist_new_summary_variant(
     run_parameters["new_summary_provider"] = provider.value
     run_parameters["new_summary_model"] = model
     run_parameters["new_summary_generation_mode"] = NEW_SUMMARY_GENERATION_MODE
-    run_parameters[RUN_PARAMETER_KEY] = anonymization.metadata
+    run_parameters[RUN_PARAMETER_KEY] = db_safe_anonymization_metadata(anonymization.metadata) or {"enabled": False}
 
     step = start_result_synthesis_step(
         session=session,
