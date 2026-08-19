@@ -742,15 +742,17 @@ def test_delete_analysis_ignores_generic_run_parameter_path(client, db_session, 
     get_settings.cache_clear()
 
 
-def test_delete_analysis_preserves_feedback_trace_fields(client, db_session):
+def test_delete_analysis_preserves_feedback_trace_fields(client, db_session, monkeypatch, tmp_path):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
     user = create_user(db_session, "author", "secret")
-    skill = seed_baseline_skills(db_session)[0]
+    skills = seed_baseline_skills(db_session)
     document_id = _create_completed_document(client, db_session, user)
     analysis = Analysis(
         document_id=document_id,
         user_id=user.id,
-        skill_id=skill.id,
-        skill_version=skill.version,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
         provider=Provider.OPENAI_COMPATIBLE.value,
         model="gpt-test",
         status=RunStatus.COMPLETED.value,
@@ -762,6 +764,51 @@ def test_delete_analysis_preserves_feedback_trace_fields(client, db_session):
     )
     db_session.add(analysis)
     db_session.flush()
+    check_run = AnalysisCheckRun(
+        analysis_id=analysis.id,
+        skill_id=skills[2].id,
+        skill_version=skills[2].version,
+        check_type="summary_localizations",
+        provider=analysis.provider,
+        model=analysis.model,
+        status=RunStatus.COMPLETED.value,
+        structured_output={"ok": True},
+        raw_output="raw check",
+        run_parameters={},
+        artifacts=[],
+        uploaded_workbook_metadata={},
+    )
+    db_session.add(check_run)
+    db_session.flush()
+    check_step = AnalysisCheckStep(
+        check_run_id=check_run.id,
+        step_type="synthesis",
+        step_name="new_summary_ru",
+        status=RunStatus.COMPLETED.value,
+        raw_output="raw summary",
+        structured_output={"language": "ru"},
+        artifacts=[],
+    )
+    db_session.add(check_step)
+    db_session.flush()
+    step_prompt = tmp_path / "storage" / "rendered-prompts" / str(check_step.id) / "prompt.txt"
+    ic_artifact = tmp_path / "storage" / "ic-review" / str(analysis.id) / str(check_run.id) / "artifacts" / "raw.txt"
+    for path in [step_prompt, ic_artifact]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("artifact", encoding="utf-8")
+    check_step.prompt_artifact_path = str(ic_artifact)
+    analysis.structured_output = {
+        "result": {
+            "new_summary": {
+                "version": "2026-08-17",
+                "ru": {
+                    "status": "completed",
+                    "payload": {"language": "ru"},
+                    "trace_step_id": str(check_step.id),
+                },
+            }
+        }
+    }
     db_session.add(
         Feedback(
             user_id=user.id,
@@ -786,8 +833,13 @@ def test_delete_analysis_preserves_feedback_trace_fields(client, db_session):
     assert analysis.deleted_at is not None
     assert analysis.verdict == "need_evidence"
     assert analysis.summary == "Needs evidence"
-    assert analysis.structured_output == {"verdict": "need_evidence"}
+    assert analysis.structured_output["result"]["new_summary"]["ru"]["trace_step_id"] == str(check_step.id)
     assert analysis.raw_output == "raw output"
+    assert db_session.get(AnalysisCheckRun, check_run.id) is not None
+    assert db_session.get(AnalysisCheckStep, check_step.id) is not None
+    assert step_prompt.exists()
+    assert ic_artifact.exists()
+    get_settings.cache_clear()
     assert analysis.run_parameters["output_language"] == "ru"
     assert analysis.run_parameters["deleted_result_trace_preserved_for_feedback"] is True
 

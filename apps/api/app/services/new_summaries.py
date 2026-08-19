@@ -84,7 +84,10 @@ def prepare_new_summary_for_check_run(
             if isinstance(variant, dict) and variant.get("status") == "waiting":
                 state[language] = _queued_variant()
                 should_enqueue = True
-            elif not isinstance(variant, dict) or variant.get("status") in {None, "failed"}:
+            elif not isinstance(variant, dict) or variant.get("status") is None:
+                state[language] = _queued_variant()
+                should_enqueue = True
+            elif variant.get("status") == "failed" and create_if_missing:
                 state[language] = _queued_variant()
                 should_enqueue = True
             elif variant.get("status") in {"queued", "running"} and _is_stale(variant):

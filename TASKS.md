@@ -2476,3 +2476,11 @@ Exit criteria:
   residue but avoids stopping a run when the remaining residue can be masked
   locally before the prompt is sent to the provider. Verified focused worker
   anonymizer coverage (`7 passed`).
+- 2026-08-19: Prepared PR #49 for production merge of the new Summary format.
+  New Summary now uses its own stage checklist contract from
+  `contracts/new-summary-stage-checklists.json`, includes completed Gate detail
+  output in the source payload, keeps polling while IC postprocessing leaves the
+  summary in `waiting`, avoids automatic GET requeue for deterministic failed
+  variants, and preserves feedback-linked new Summary trace steps and artifacts
+  when analysis results are deleted. Verified focused API, worker, and web
+  regressions plus Python compile and `git diff --check`.

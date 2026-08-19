@@ -3,16 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from jsonschema import ValidationError, validate
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.analysis import Analysis, AnalysisCheckRun
+from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisDetailRun
 from app.models.document import Document
-from app.schemas.enums import Provider
-from app.services.stage_checklists import stage_checklist_items
+from app.schemas.enums import Provider, RunStatus
 from app.services.new_summaries import (
     NEW_SUMMARY_GENERATION_MODE,
     NEW_SUMMARY_VERSION,
@@ -42,6 +43,7 @@ LANGUAGES = ("ru", "en")
 MAX_OUTPUT_TOKENS = 12000
 SCHEMA_PATH = "contracts/schemas/new-summary.schema.json"
 SKILL_PATH = "skills/new-summary/SKILL.md"
+CHECKLIST_PATH = "contracts/new-summary-stage-checklists.json"
 
 STAGE_LABELS = {
     "gate_1": "Gate 1",
@@ -191,6 +193,7 @@ def build_new_summary_source(
         "document_stage": stage,
         "document_type": document_type,
         "gate_challenger": _gate_challenger_source(analysis.structured_output),
+        "gate_challenger_detail": _latest_detail_source(session=session, analysis=analysis),
         "ic_review": _ic_review_source(check_run.structured_output),
     }
 
@@ -437,24 +440,64 @@ def _validated_source_dependent_payload(
     normalized["required_elements"] = _required_elements_from_source(
         source_payload=source_payload,
         target_language=target_language,
+        generated_payload=payload,
     )
     validate(instance=normalized, schema=response_schema)
     return normalized
 
 
-def _required_elements_from_source(*, source_payload: dict[str, Any], target_language: str) -> list[dict[str, str]]:
+def _required_elements_from_source(
+    *,
+    source_payload: dict[str, Any],
+    target_language: str,
+    generated_payload: dict[str, Any],
+) -> list[dict[str, str]]:
     document_type = source_payload.get("document_type")
-    expected = stage_checklist_items(str(document_type) if isinstance(document_type, str) else None, output_language=target_language)
+    expected = _new_summary_stage_checklist_items(
+        str(document_type) if isinstance(document_type, str) else None,
+        output_language=target_language,
+    )
     by_id = _gate_stage_checklist_by_id(source_payload)
+    generated_by_id = _generated_required_elements_by_id(generated_payload)
     return [
         {
             "id": item_id,
             "label": label,
             "status": _required_element_status(by_id.get(item_id)),
-            "evidence": _required_element_evidence(by_id.get(item_id), target_language=target_language),
+            "evidence": _required_element_evidence(
+                by_id.get(item_id),
+                generated_by_id.get(item_id),
+                target_language=target_language,
+            ),
         }
         for item_id, label in expected
     ]
+
+
+def _latest_detail_source(*, session: Session, analysis: Analysis) -> Any:
+    detail_run = session.execute(
+        select(AnalysisDetailRun)
+        .where(
+            AnalysisDetailRun.analysis_id == analysis.id,
+            AnalysisDetailRun.status == RunStatus.COMPLETED.value,
+        )
+        .order_by(AnalysisDetailRun.created_at.desc())
+    ).scalars().first()
+    return _copy_jsonish(detail_run.structured_output) if detail_run and isinstance(detail_run.structured_output, dict) else None
+
+
+def _new_summary_stage_checklist_items(document_type: str | None, *, output_language: str) -> list[tuple[str, str]]:
+    language_key = "label_en" if output_language == "en" else "label_ru"
+    return [
+        (item["id"], item[language_key])
+        for item in _new_summary_stage_checklists().get(str(document_type or ""), [])
+    ]
+
+
+@lru_cache(maxsize=1)
+def _new_summary_stage_checklists() -> dict[str, list[dict[str, str]]]:
+    value = json.loads((_repo_root() / CHECKLIST_PATH).read_text(encoding="utf-8"))
+    return value if isinstance(value, dict) else {}
 
 
 def _gate_stage_checklist_by_id(source_payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -467,6 +510,15 @@ def _gate_stage_checklist_by_id(source_payload: dict[str, Any]) -> dict[str, dic
     return result
 
 
+def _generated_required_elements_by_id(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    items = payload.get("required_elements") if isinstance(payload.get("required_elements"), list) else []
+    result: dict[str, dict[str, Any]] = {}
+    for item in items:
+        if isinstance(item, dict) and isinstance(item.get("id"), str):
+            result[item["id"]] = item
+    return result
+
+
 def _required_element_status(item: dict[str, Any] | None) -> str:
     status = str((item or {}).get("status") or "").lower()
     if status in {"present", "green", "true", "yes"}:
@@ -474,9 +526,17 @@ def _required_element_status(item: dict[str, Any] | None) -> str:
     return "missing"
 
 
-def _required_element_evidence(item: dict[str, Any] | None, *, target_language: str) -> str:
+def _required_element_evidence(
+    item: dict[str, Any] | None,
+    generated_item: dict[str, Any] | None,
+    *,
+    target_language: str,
+) -> str:
+    generated_evidence = (generated_item or {}).get("evidence")
+    if isinstance(generated_evidence, str) and generated_evidence.strip():
+        return generated_evidence.strip()
     evidence = (item or {}).get("evidence")
-    if isinstance(evidence, str) and evidence.strip():
+    if target_language == "ru" and isinstance(evidence, str) and evidence.strip():
         return evidence.strip()
     return "Не найдено в чеклисте Gate Challenger." if target_language == "ru" else "Not found in the Gate Challenger checklist."
 

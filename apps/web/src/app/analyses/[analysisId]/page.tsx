@@ -222,7 +222,7 @@ export default function AnalysisDetailPage() {
     let timer: number | undefined;
     const hasPendingVariant = (value: NewSummaryRecord) =>
       value.available
-      && [value.ru.status, value.en.status].some((status) => status === "queued" || status === "running");
+      && [value.ru.status, value.en.status].some((status) => status === "waiting" || status === "queued" || status === "running");
 
     async function refreshNewSummary(ensure: boolean) {
       try {

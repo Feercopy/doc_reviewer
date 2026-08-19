@@ -654,6 +654,13 @@ def _delete_analysis_result(*, db: Session, actor: User, context: AnalysisDeleti
     detail_runs = context.detail_runs
     check_runs = context.check_runs
     check_steps = context.check_steps
+    has_feedback = db.execute(select(Feedback.id).where(Feedback.analysis_id == analysis.id).limit(1)).first() is not None
+    preserved_step_ids = _feedback_trace_step_ids(analysis) if has_feedback else set()
+    preserved_check_run_ids = {
+        step.check_run_id
+        for step in check_steps
+        if step.id in preserved_step_ids
+    }
     storage = LocalDocumentStorage(get_settings().storage_root)
     deleted_storage_paths = _delete_analysis_storage_artifacts(
         db=db,
@@ -663,26 +670,35 @@ def _delete_analysis_result(*, db: Session, actor: User, context: AnalysisDeleti
         detail_runs=detail_runs,
         check_runs=check_runs,
         check_steps=check_steps,
+        preserved_step_ids=preserved_step_ids,
+        preserved_check_run_ids=preserved_check_run_ids,
     )
 
     predicted_run_ids = [run.id for run in predicted_runs]
     check_run_ids = [run.id for run in check_runs]
+    deleted_check_run_ids = [run_id for run_id in check_run_ids if run_id not in preserved_check_run_ids]
     if predicted_run_ids:
         db.execute(delete(RetrievalSnapshot).where(RetrievalSnapshot.predicted_comment_run_id.in_(predicted_run_ids)))
         db.execute(
             delete(SkillSourceSnapshot).where(SkillSourceSnapshot.predicted_comment_run_id.in_(predicted_run_ids))
         )
         db.execute(delete(PredictedCommentRun).where(PredictedCommentRun.id.in_(predicted_run_ids)))
-    if check_run_ids:
-        db.execute(delete(SkillSourceSnapshot).where(SkillSourceSnapshot.analysis_check_run_id.in_(check_run_ids)))
-        db.execute(delete(AnalysisCheckStep).where(AnalysisCheckStep.check_run_id.in_(check_run_ids)))
-        db.execute(delete(AnalysisCheckRun).where(AnalysisCheckRun.id.in_(check_run_ids)))
+    if deleted_check_run_ids:
+        db.execute(delete(SkillSourceSnapshot).where(SkillSourceSnapshot.analysis_check_run_id.in_(deleted_check_run_ids)))
+        db.execute(delete(AnalysisCheckStep).where(AnalysisCheckStep.check_run_id.in_(deleted_check_run_ids)))
+        db.execute(delete(AnalysisCheckRun).where(AnalysisCheckRun.id.in_(deleted_check_run_ids)))
+    if preserved_check_run_ids:
+        db.execute(
+            delete(AnalysisCheckStep).where(
+                AnalysisCheckStep.check_run_id.in_(preserved_check_run_ids),
+                AnalysisCheckStep.id.not_in(preserved_step_ids),
+            )
+        )
 
     db.execute(delete(SkillSourceSnapshot).where(SkillSourceSnapshot.analysis_id == analysis.id))
     db.execute(delete(AnalysisDetailRun).where(AnalysisDetailRun.analysis_id == analysis.id))
 
     previous_status = analysis.status
-    has_feedback = db.execute(select(Feedback.id).where(Feedback.analysis_id == analysis.id).limit(1)).first() is not None
     analysis.deleted_at = deleted_at
     if has_feedback:
         analysis.run_parameters = {
@@ -717,10 +733,32 @@ def _delete_analysis_result(*, db: Session, actor: User, context: AnalysisDeleti
             "storage_paths_deleted_count": len(deleted_storage_paths),
             "predicted_comment_runs_deleted": len(predicted_runs),
             "analysis_detail_runs_deleted": len(detail_runs),
-            "analysis_check_runs_deleted": len(check_runs),
+            "analysis_check_runs_deleted": len(deleted_check_run_ids),
+            "analysis_check_steps_preserved": len(preserved_step_ids),
             "result_trace_preserved_for_feedback": has_feedback,
         },
     )
+
+
+def _feedback_trace_step_ids(analysis: Analysis) -> set[UUID]:
+    output = analysis.structured_output if isinstance(analysis.structured_output, dict) else {}
+    result = output.get("result") if isinstance(output, dict) else {}
+    state = result.get("new_summary") if isinstance(result, dict) else {}
+    step_ids: set[UUID] = set()
+    if not isinstance(state, dict):
+        return step_ids
+    for language in ("ru", "en"):
+        variant = state.get(language)
+        if not isinstance(variant, dict):
+            continue
+        trace_step_id = variant.get("trace_step_id")
+        if not isinstance(trace_step_id, str):
+            continue
+        try:
+            step_ids.add(UUID(trace_step_id))
+        except ValueError:
+            continue
+    return step_ids
 
 
 def _analysis_chain_has_active_runs(
@@ -745,20 +783,29 @@ def _delete_analysis_storage_artifacts(
     detail_runs: list[AnalysisDetailRun],
     check_runs: list[AnalysisCheckRun],
     check_steps: list[AnalysisCheckStep],
+    preserved_step_ids: set[UUID],
+    preserved_check_run_ids: set[UUID],
 ) -> list[str]:
     paths: set[str] = set()
     run_ids = [analysis.id]
     run_ids.extend(run.id for run in predicted_runs)
     run_ids.extend(run.id for run in detail_runs)
-    run_ids.extend(step.id for step in check_steps)
+    run_ids.extend(step.id for step in check_steps if step.id not in preserved_step_ids)
 
     for run_id in run_ids:
         storage.delete_rendered_prompt_dir(run_id=run_id)
 
-    storage.delete_ic_review_analysis_dir(analysis_id=analysis.id)
+    if preserved_check_run_ids:
+        for run in check_runs:
+            if run.id not in preserved_check_run_ids:
+                storage.delete_ic_review_run_dir(analysis_id=analysis.id, run_id=run.id)
+    else:
+        storage.delete_ic_review_analysis_dir(analysis_id=analysis.id)
 
     check_runs_by_id = {run.id: run for run in check_runs}
     for run in check_runs:
+        if run.id in preserved_check_run_ids:
+            continue
         paths.update(
             _safe_ic_review_artifact_paths(
                 storage=storage,
@@ -771,6 +818,8 @@ def _delete_analysis_storage_artifacts(
             )
         )
     for step in check_steps:
+        if step.id in preserved_step_ids:
+            continue
         check_run = check_runs_by_id.get(step.check_run_id)
         if check_run is None:
             continue
