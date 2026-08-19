@@ -999,7 +999,7 @@ def test_old_analysis_stays_hidden_until_run_marks_localizations_expected(client
         model=analysis.model,
         status=RunStatus.COMPLETED.value,
         structured_output={"run_mode": "ic_agentic_review_compact"},
-        run_parameters={"summary_localizations_expected": True},
+        run_parameters={},
         artifacts=[],
         uploaded_workbook_metadata={},
     )
@@ -1105,7 +1105,7 @@ def test_new_summary_endpoint_queues_repository_skill_summary_once(client, db_se
         verdict="need_evidence",
         summary="Нужны подтверждения",
         structured_output={"result": {"short_summary": "Нужны подтверждения"}},
-        run_parameters={},
+        run_parameters={"summary_localizations_expected": True},
     )
     db_session.add(analysis)
     db_session.flush()
