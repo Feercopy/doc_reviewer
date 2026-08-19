@@ -2484,3 +2484,8 @@ Exit criteria:
   variants, and preserves feedback-linked new Summary trace steps and artifacts
   when analysis results are deleted. Verified focused API, worker, and web
   regressions plus Python compile and `git diff --check`.
+- 2026-08-19: Diagnosed production New Summary fallback after PR #49. RQ rejects
+  job IDs containing `:`, so `summary-localizations:<analysis_id>` failed during
+  enqueue and persisted `new_summary_generation_queue_unavailable` before the
+  worker or model could run. Changed the deterministic Summary localization job
+  ID to use only RQ-safe characters and added focused enqueue coverage.

@@ -51,7 +51,7 @@ def enqueue_run_summary_localizations(analysis_id: UUID) -> None:
     settings = get_settings()
     connection = Redis.from_url(settings.redis_url)
     queue = Queue(ANALYSIS_QUEUE_NAME, connection=connection)
-    job_id = f"summary-localizations:{analysis_id}"
+    job_id = f"summary-localizations-{analysis_id}"
     existing = queue.fetch_job(job_id)
     if existing is not None:
         status = existing.get_status(refresh=True)
