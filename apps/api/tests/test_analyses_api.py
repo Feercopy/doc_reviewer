@@ -1105,7 +1105,7 @@ def test_new_summary_endpoint_queues_repository_skill_summary_once(client, db_se
         verdict="need_evidence",
         summary="Нужны подтверждения",
         structured_output={"result": {"short_summary": "Нужны подтверждения"}},
-        run_parameters={"summary_localizations_expected": True},
+        run_parameters={},
     )
     db_session.add(analysis)
     db_session.flush()
@@ -1118,7 +1118,7 @@ def test_new_summary_endpoint_queues_repository_skill_summary_once(client, db_se
         model=analysis.model,
         status=RunStatus.COMPLETED.value,
         structured_output={"run_mode": "ic_agentic_review_compact"},
-        run_parameters={},
+        run_parameters={"summary_localizations_expected": True},
         artifacts=[],
         uploaded_workbook_metadata={},
     )
