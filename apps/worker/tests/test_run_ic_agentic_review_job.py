@@ -957,7 +957,7 @@ def test_short_compact_strings_are_repaired_before_validation(tmp_path, monkeypa
         assert structured["executive_brief"].startswith("Too short.")
         assert len(structured["executive_brief"]) >= 400
         assert len(structured["role_summaries"][0]["summary"]) >= 120
-        assert structured["critical_risks"] == ["Не указано в исходных материалах."]
+        assert structured["critical_risks"] == []
         assert records["check_run"].error_message is None
     finally:
         db.close()

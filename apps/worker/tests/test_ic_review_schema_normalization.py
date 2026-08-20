@@ -138,6 +138,65 @@ def test_drops_findings_without_evidence_instead_of_fabricating_evidence():
     assert normalized["findings"][0]["title"] == "Measured proof"
 
 
+def test_drops_numbers_without_source_instead_of_fabricating_provenance():
+    schema = {
+        "type": "object",
+        "required": ["numbers_used"],
+        "properties": {
+            "numbers_used": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["label", "value", "source"],
+                    "properties": {
+                        "label": {"type": "string", "minLength": 1, "maxLength": 80},
+                        "value": {"type": "string", "minLength": 1, "maxLength": 80},
+                        "source": {"type": "string", "minLength": 1, "maxLength": 120},
+                    },
+                },
+            },
+        },
+    }
+
+    normalized = normalize_schema_bounded_strings(
+        {
+            "numbers_used": [
+                {"label": "Revenue", "value": "10", "source": ""},
+                {"label": "GMV", "value": "20", "source": "Financial model sheet 2"},
+            ]
+        },
+        schema,
+        schema,
+    )
+
+    validate(instance=normalized, schema=schema)
+    assert normalized["numbers_used"] == [
+        {"label": "GMV", "value": "20", "source": "Financial model sheet 2"}
+    ]
+
+
+def test_drops_blank_categorical_list_items_instead_of_fabricating_risks():
+    schema = {
+        "type": "object",
+        "required": ["critical_risks"],
+        "properties": {
+            "critical_risks": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1, "maxLength": 120},
+            },
+        },
+    }
+
+    normalized = normalize_schema_bounded_strings(
+        {"critical_risks": [" ", "Margin sensitivity is not quantified."]},
+        schema,
+        schema,
+    )
+
+    validate(instance=normalized, schema=schema)
+    assert normalized["critical_risks"] == ["Margin sensitivity is not quantified."]
+
+
 def test_keeps_enum_and_const_values_strict():
     schema = {
         "type": "object",

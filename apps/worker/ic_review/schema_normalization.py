@@ -17,12 +17,19 @@ _NARRATIVE_STRING_PROPERTIES = {
     "questions_for_team",
     "recommendation",
     "required_actions",
-    "source",
     "summary",
     "title",
 }
 _REFERENCE_ARRAY_PROPERTIES = {"evidence_ids", "section_keys"}
 _FINDING_ARRAY_PROPERTIES = {"findings", "top_findings"}
+_NUMBER_ARRAY_PROPERTIES = {"key_numbers", "numbers_used"}
+_CATEGORICAL_TEXT_ARRAY_PROPERTIES = {
+    "critical_risks",
+    "data_gaps",
+    "primary_verify_notes",
+    "questions_for_team",
+    "required_actions",
+}
 
 
 def normalize_schema_bounded_strings(
@@ -132,6 +139,14 @@ def _normalize_schema_bounded_strings(
             normalized_items = [
                 item for item in value if not _finding_lacks_evidence(item)
             ]
+        elif property_name in _NUMBER_ARRAY_PROPERTIES:
+            normalized_items = [
+                item for item in value if not _number_lacks_source(item)
+            ]
+        elif property_name in _CATEGORICAL_TEXT_ARRAY_PROPERTIES:
+            normalized_items = [
+                item for item in value if not (isinstance(item, str) and not item.strip())
+            ]
         if isinstance(item_schema, dict):
             return [
                 _normalize_schema_bounded_strings(
@@ -184,6 +199,13 @@ def _finding_lacks_evidence(item: Any) -> bool:
         return False
     evidence = item.get("evidence")
     return isinstance(evidence, str) and not evidence.strip()
+
+
+def _number_lacks_source(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    source = item.get("source")
+    return isinstance(source, str) and not source.strip()
 
 
 def _schema_option_matches_value(schema: dict, value: Any, root_schema: dict) -> bool:

@@ -26,11 +26,12 @@ Primary plan index:
   string normalization now trims whitespace, repairs `minLength` failures with
   a localized source-material gap marker, preserves useful underlength provider
   text before appending the marker, drops empty reference IDs instead of
-  fabricating evidence links, drops findings that lack evidence instead of
-  inventing source support, keeps enum/const fields strict, and still trims
-  overlong strings. Added focused normalization coverage and an end-to-end IC
-  Review regression where short synthesis fields no longer fail the whole run
-  with `schema_validation_failed:minLength`.
+  fabricating evidence links, drops findings that lack evidence, drops numeric
+  claims that lack source provenance, drops blank categorical list entries
+  instead of inventing risks or actions, keeps enum/const fields strict, and
+  still trims overlong strings. Added focused normalization coverage and an
+  end-to-end IC Review regression where short synthesis fields no longer fail
+  the whole run with `schema_validation_failed:minLength`.
 - [x] Restore the Analysis page Full Report tab and harden model-anonymization
   metadata persistence after production IC Review runs failed immediately at
   `ic-financial-auditor` with `programming_error`. Production DB evidence
