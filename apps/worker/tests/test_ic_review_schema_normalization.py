@@ -257,6 +257,86 @@ def test_reconciles_compact_verdict_when_any_top_finding_is_dropped():
     assert normalized["top_findings"][0]["title"] == "Grounded medium risk"
 
 
+def test_reconciliation_notice_does_not_discard_existing_data_gaps_at_limit():
+    schema = {
+        "type": "object",
+        "required": ["verdict", "confidence", "top_findings", "data_gaps"],
+        "properties": {
+            "verdict": {"type": "string", "enum": ["NO-GO", "UNKNOWN"]},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "top_findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["title", "severity", "summary", "evidence", "recommendation"],
+                    "properties": {
+                        "title": {"type": "string", "minLength": 1, "maxLength": 80},
+                        "severity": {"type": "string", "enum": ["critical"]},
+                        "summary": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "evidence": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "recommendation": {"type": "string", "minLength": 1, "maxLength": 120},
+                    },
+                },
+            },
+            "data_gaps": {
+                "type": "array",
+                "maxItems": 7,
+                "items": {"type": "string", "minLength": 1, "maxLength": 200},
+            },
+        },
+    }
+    gaps = [f"Existing gap {index}" for index in range(7)]
+
+    normalized = normalize_schema_bounded_strings(
+        {
+            "verdict": "NO-GO",
+            "confidence": 0.8,
+            "top_findings": [
+                {
+                    "title": "Unsupported blocker",
+                    "severity": "critical",
+                    "summary": "The claim is not supported.",
+                    "evidence": "",
+                    "recommendation": "Do not approve.",
+                }
+            ],
+            "data_gaps": gaps,
+        },
+        schema,
+        schema,
+    )
+
+    validate(instance=normalized, schema=schema)
+    assert normalized["data_gaps"] == gaps
+
+
+def test_reconciliation_keeps_boolean_confidence_invalid():
+    schema = {
+        "type": "object",
+        "required": ["verdict", "confidence", "top_findings", "data_gaps"],
+        "properties": {
+            "verdict": {"type": "string", "enum": ["NO-GO", "UNKNOWN"]},
+            "confidence": {"type": "boolean"},
+            "top_findings": {"type": "array", "items": {"type": "object"}},
+            "data_gaps": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+
+    normalized = normalize_schema_bounded_strings(
+        {
+            "verdict": "NO-GO",
+            "confidence": True,
+            "top_findings": [{"evidence": ""}],
+            "data_gaps": [],
+        },
+        schema,
+        schema,
+    )
+
+    assert normalized["verdict"] == "UNKNOWN"
+    assert normalized["confidence"] is True
+
+
 def test_drops_numbers_without_source_instead_of_fabricating_provenance():
     schema = {
         "type": "object",
@@ -362,6 +442,56 @@ def test_drops_blank_report_items_instead_of_fabricating_structured_risks():
             "severity": "critical",
         }
     ]
+
+
+def test_drops_blank_section_drafts_and_tables_instead_of_fabricating_content():
+    schema = {
+        "type": "object",
+        "required": ["section_drafts", "tables"],
+        "properties": {
+            "section_drafts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["title", "content"],
+                    "properties": {
+                        "title": {"type": "string", "minLength": 1, "maxLength": 80},
+                        "content": {"type": "string", "minLength": 1, "maxLength": 120},
+                    },
+                },
+            },
+            "tables": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["title", "markdown"],
+                    "properties": {
+                        "title": {"type": "string", "minLength": 1, "maxLength": 80},
+                        "markdown": {"type": "string", "minLength": 1, "maxLength": 120},
+                    },
+                },
+            },
+        },
+    }
+
+    normalized = normalize_schema_bounded_strings(
+        {
+            "section_drafts": [
+                {"title": "", "content": ""},
+                {"title": "Valid section", "content": "Grounded content."},
+            ],
+            "tables": [
+                {"title": "", "markdown": ""},
+                {"title": "Valid table", "markdown": "| Metric | Value |"},
+            ],
+        },
+        schema,
+        schema,
+    )
+
+    validate(instance=normalized, schema=schema)
+    assert normalized["section_drafts"] == [{"title": "Valid section", "content": "Grounded content."}]
+    assert normalized["tables"] == [{"title": "Valid table", "markdown": "| Metric | Value |"}]
 
 
 def test_keeps_enum_and_const_values_strict():

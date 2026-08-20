@@ -142,9 +142,9 @@ def _normalize_schema_bounded_strings(
     if expected_type == "array" and isinstance(value, list):
         item_schema = resolved_schema.get("items")
         normalized_items = value
-        if _array_items_are_report_items(item_schema, root_schema):
+        if _array_items_are_structured_narrative_objects(item_schema, root_schema):
             normalized_items = [
-                item for item in value if not _report_item_lacks_substance(item)
+                item for item in value if not _structured_narrative_object_lacks_substance(item)
             ]
         elif property_name in _REFERENCE_ARRAY_PROPERTIES:
             normalized_items = [
@@ -226,20 +226,19 @@ def _number_lacks_source(item: Any) -> bool:
     return isinstance(source, str) and not source.strip()
 
 
-def _report_item_lacks_substance(item: Any) -> bool:
+def _structured_narrative_object_lacks_substance(item: Any) -> bool:
     if not isinstance(item, dict):
         return False
     title = item.get("title")
-    detail = item.get("detail")
-    return (
-        isinstance(title, str)
-        and not title.strip()
-        and isinstance(detail, str)
-        and not detail.strip()
-    )
+    body = item.get("detail")
+    if body is None:
+        body = item.get("content")
+    if body is None:
+        body = item.get("markdown")
+    return isinstance(title, str) and not title.strip() and isinstance(body, str) and not body.strip()
 
 
-def _array_items_are_report_items(item_schema: Any, root_schema: dict) -> bool:
+def _array_items_are_structured_narrative_objects(item_schema: Any, root_schema: dict) -> bool:
     if not isinstance(item_schema, dict):
         return False
     resolved_schema = item_schema
@@ -249,12 +248,13 @@ def _array_items_are_report_items(item_schema: Any, root_schema: dict) -> bool:
             resolved_schema = resolved
     properties = resolved_schema.get("properties")
     required = resolved_schema.get("required")
-    return (
-        resolved_schema.get("type") == "object"
-        and isinstance(properties, dict)
-        and isinstance(required, list)
-        and {"title", "detail"}.issubset(set(required))
-        and {"title", "detail"}.issubset(properties)
+    if resolved_schema.get("type") != "object" or not isinstance(properties, dict) or not isinstance(required, list):
+        return False
+    required_set = set(required)
+    property_set = set(properties)
+    return any(
+        {"title", body_field}.issubset(required_set) and {"title", body_field}.issubset(property_set)
+        for body_field in ("detail", "content", "markdown")
     )
 
 
@@ -263,7 +263,7 @@ def _reconcile_unsupported_compact_verdict(value: dict, *, output_language: str 
         return value
     normalized = dict(value)
     normalized["verdict"] = "UNKNOWN"
-    if isinstance(normalized.get("confidence"), int | float):
+    if isinstance(normalized.get("confidence"), int | float) and not isinstance(normalized.get("confidence"), bool):
         normalized["confidence"] = min(float(normalized["confidence"]), 0.1)
     gap = (
         "Неподтвержденные выводы IC Review отброшены: в них не было evidence."
@@ -272,7 +272,7 @@ def _reconcile_unsupported_compact_verdict(value: dict, *, output_language: str 
     )
     existing_gaps = normalized.get("data_gaps")
     if isinstance(existing_gaps, list):
-        normalized["data_gaps"] = [gap, *existing_gaps][:7]
+        normalized["data_gaps"] = [gap, *existing_gaps] if len(existing_gaps) < 7 else existing_gaps
     return normalized
 
 
