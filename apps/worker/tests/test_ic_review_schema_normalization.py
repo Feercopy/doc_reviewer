@@ -196,6 +196,67 @@ def test_reconciles_compact_verdict_when_all_top_findings_lack_evidence():
     ]
 
 
+def test_reconciles_compact_verdict_when_any_top_finding_is_dropped():
+    schema = {
+        "type": "object",
+        "required": ["verdict", "confidence", "top_findings", "data_gaps"],
+        "properties": {
+            "verdict": {"type": "string", "enum": ["NO-GO", "UNKNOWN"]},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "top_findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["title", "severity", "summary", "evidence", "recommendation"],
+                    "properties": {
+                        "title": {"type": "string", "minLength": 1, "maxLength": 80},
+                        "severity": {"type": "string", "enum": ["critical", "medium"]},
+                        "summary": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "evidence": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "recommendation": {"type": "string", "minLength": 1, "maxLength": 120},
+                    },
+                },
+            },
+            "data_gaps": {
+                "type": "array",
+                "maxItems": 7,
+                "items": {"type": "string", "minLength": 1, "maxLength": 200},
+            },
+        },
+    }
+
+    normalized = normalize_schema_bounded_strings(
+        {
+            "verdict": "NO-GO",
+            "confidence": 0.8,
+            "top_findings": [
+                {
+                    "title": "Unsupported blocker",
+                    "severity": "critical",
+                    "summary": "The claim is not supported.",
+                    "evidence": "",
+                    "recommendation": "Do not approve.",
+                },
+                {
+                    "title": "Grounded medium risk",
+                    "severity": "medium",
+                    "summary": "The risk is supported.",
+                    "evidence": "Document page 5 describes the risk.",
+                    "recommendation": "Discuss the risk.",
+                },
+            ],
+            "data_gaps": [],
+        },
+        schema,
+        schema,
+    )
+
+    validate(instance=normalized, schema=schema)
+    assert normalized["verdict"] == "UNKNOWN"
+    assert len(normalized["top_findings"]) == 1
+    assert normalized["top_findings"][0]["title"] == "Grounded medium risk"
+
+
 def test_drops_numbers_without_source_instead_of_fabricating_provenance():
     schema = {
         "type": "object",

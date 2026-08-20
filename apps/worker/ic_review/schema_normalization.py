@@ -116,7 +116,7 @@ def _normalize_schema_bounded_strings(
         properties = resolved_schema.get("properties")
         if not isinstance(properties, dict):
             return value
-        had_top_findings = bool(value.get("top_findings"))
+        original_top_findings_count = _list_length(value.get("top_findings"))
         normalized = dict(value)
         for key, child_schema in properties.items():
             if key in normalized and isinstance(child_schema, dict):
@@ -127,7 +127,12 @@ def _normalize_schema_bounded_strings(
                     property_name=key,
                     output_language=output_language,
                 )
-        if had_top_findings and normalized.get("top_findings") == []:
+        normalized_top_findings_count = _list_length(normalized.get("top_findings"))
+        if (
+            original_top_findings_count is not None
+            and normalized_top_findings_count is not None
+            and normalized_top_findings_count < original_top_findings_count
+        ):
             normalized = _reconcile_unsupported_compact_verdict(
                 normalized,
                 output_language=output_language,
@@ -269,6 +274,10 @@ def _reconcile_unsupported_compact_verdict(value: dict, *, output_language: str 
     if isinstance(existing_gaps, list):
         normalized["data_gaps"] = [gap, *existing_gaps][:7]
     return normalized
+
+
+def _list_length(value: Any) -> int | None:
+    return len(value) if isinstance(value, list) else None
 
 
 def _schema_option_matches_value(schema: dict, value: Any, root_schema: dict) -> bool:
