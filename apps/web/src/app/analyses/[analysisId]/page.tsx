@@ -7,6 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { NewSummaryReportView } from "@/components/new-summary/NewSummaryReport";
 import { StatusBadge } from "@/components/StatusBadge";
+import { me } from "@/lib/api/auth";
 import {
   createAnalysisDetails,
   deleteAnalysis,
@@ -35,6 +36,7 @@ import {
   type SourceTrace,
   type SummaryLocalizationsRecord,
 } from "@/lib/api/documents";
+import type { Role } from "@/lib/api/types";
 import { submitFeedback } from "@/lib/api/feedback";
 import { createIcReviewRun, icReviewArtifactUrl } from "@/lib/api/ic-review";
 import type { NewSummaryReport } from "@/lib/newSummary";
@@ -75,7 +77,7 @@ import {
 import { buildAgentVerdicts, buildFinalVerdict } from "./resultDisplay";
 
 type AnalysisTopTab = "executiveSummary" | "fullReport";
-type FullReportTab = "mainOutput" | "documentComments" | "icReview" | "fullOutput";
+type FullReportTab = "newSummary" | "mainOutput" | "documentComments" | "icReview" | "fullOutput";
 
 type EvidenceItem = {
   id: string;
@@ -92,6 +94,7 @@ const analysisTabs: Array<{ id: AnalysisTopTab; label: string }> = [
 ];
 
 const fullReportTabs: Array<{ id: FullReportTab; label: string }> = [
+  { id: "newSummary", label: "New Summary" },
   { id: "mainOutput", label: "Product Analysis" },
   { id: "icReview", label: "Financial Analysis" },
   { id: "documentComments", label: "Document comments" },
@@ -126,6 +129,7 @@ export default function AnalysisDetailPage() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [activeTopTab, setActiveTopTab] = useState<AnalysisTopTab>("executiveSummary");
   const [activeFullReportTab, setActiveFullReportTab] = useState<FullReportTab>("mainOutput");
+  const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null);
   const [runDetailsOpen, setRunDetailsOpen] = useState(false);
   const [isRefreshingAnalysis, setIsRefreshingAnalysis] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
@@ -144,6 +148,37 @@ export default function AnalysisDetailPage() {
   const [summaryLocalizationError, setSummaryLocalizationError] = useState("");
   const [newSummary, setNewSummary] = useState<NewSummaryRecord | null>(null);
   const [newSummaryError, setNewSummaryError] = useState("");
+  const canViewFullReport = currentUserRole === "admin";
+  const visibleAnalysisTabs = useMemo(
+    () => (canViewFullReport ? analysisTabs : analysisTabs.filter((tab) => tab.id !== "fullReport")),
+    [canViewFullReport],
+  );
+
+  useEffect(() => {
+    let ignore = false;
+
+    me()
+      .then((user) => {
+        if (!ignore) {
+          setCurrentUserRole(user.role);
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          setCurrentUserRole(null);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canViewFullReport && activeTopTab === "fullReport") {
+      setActiveTopTab("executiveSummary");
+    }
+  }, [activeTopTab, canViewFullReport]);
 
   useEffect(() => {
     let ignore = false;
@@ -212,7 +247,7 @@ export default function AnalysisDetailPage() {
   }, [analysis?.id, analysis?.status, analysis?.ic_review_run?.id, analysis?.ic_review_run?.status, params.analysisId]);
 
   useEffect(() => {
-    if (analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed") {
+    if (!canViewFullReport || analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed") {
       setNewSummary(null);
       setNewSummaryError("");
       return;
@@ -252,7 +287,7 @@ export default function AnalysisDetailPage() {
         window.clearTimeout(timer);
       }
     };
-  }, [analysis?.id, analysis?.status, analysis?.ic_review_run?.id, analysis?.ic_review_run?.status, params.analysisId]);
+  }, [analysis?.id, analysis?.status, analysis?.ic_review_run?.id, analysis?.ic_review_run?.status, canViewFullReport, params.analysisId]);
 
   useEffect(() => {
     let ignore = false;
@@ -618,7 +653,7 @@ export default function AnalysisDetailPage() {
             <div className="analysis-layout">
               <section className="analysis-main stack">
                 <nav className="analysis-tabs" aria-label="Analysis output sections">
-                  {analysisTabs.map((tab) => (
+                  {visibleAnalysisTabs.map((tab) => (
                     <button
                       aria-pressed={activeTopTab === tab.id}
                       className={activeTopTab === tab.id ? "analysis-tab analysis-tab--active" : "analysis-tab"}
@@ -637,12 +672,10 @@ export default function AnalysisDetailPage() {
                     language={summaryLanguage}
                     localizations={summaryLocalizations}
                     localizationError={summaryLocalizationError}
-                    newSummary={newSummary}
-                    newSummaryError={newSummaryError}
                     onLanguageChange={setSummaryLanguage}
                   />
                 ) : null}
-                {activeTopTab === "fullReport" ? (
+                {activeTopTab === "fullReport" && canViewFullReport ? (
                   <>
                     <nav className="analysis-tabs" aria-label="Full report sections">
                       {fullReportTabs.map((tab) => (
@@ -658,6 +691,9 @@ export default function AnalysisDetailPage() {
                       ))}
                     </nav>
 
+                    {activeFullReportTab === "newSummary" ? (
+                      <NewSummaryPanel analysis={analysis} newSummary={newSummary} newSummaryError={newSummaryError} />
+                    ) : null}
                     {activeFullReportTab === "mainOutput" ? <MainSkillMarkdownPanel analysis={analysis} /> : null}
                     {activeFullReportTab === "documentComments" ? (
                       <DocumentCommentsPanel
@@ -965,45 +1001,14 @@ function ResultPanel({
   language,
   localizations,
   localizationError,
-  newSummary,
-  newSummaryError,
   onLanguageChange,
 }: {
   analysis: AnalysisRecord;
   language: OutputLanguage;
   localizations: SummaryLocalizationsRecord | null;
   localizationError: string;
-  newSummary: NewSummaryRecord | null;
-  newSummaryError: string;
   onLanguageChange: (language: OutputLanguage) => void;
 }) {
-  const newSummaryReady =
-    newSummary?.available === true
-    && newSummary.ru.status === "completed"
-    && newSummary.en.status === "completed"
-    && newSummary.ru.payload !== null
-    && newSummary.en.payload !== null;
-  const newSummaryRequested = newSummary?.available === true;
-  const newSummaryFailed =
-    newSummaryRequested && [newSummary.ru.status, newSummary.en.status].some((status) => status === "failed");
-  const newSummaryPending =
-    newSummaryRequested
-    && !newSummaryReady
-    && [newSummary.ru.status, newSummary.en.status].some((status) => status === "queued" || status === "running");
-  const newSummaryRu = newSummaryReady ? newSummary.ru.payload : null;
-  const newSummaryEn = newSummaryReady ? newSummary.en.payload : null;
-  if (newSummaryRu && newSummaryEn) {
-    const report: NewSummaryReport = {
-      analysis_id: analysis.id,
-      created_at: analysis.completed_at ?? analysis.created_at,
-      pdf_path: null,
-      route: null,
-      ru: newSummaryRu,
-      en: newSummaryEn,
-    };
-    return <NewSummaryReportView embedded report={report} />;
-  }
-
   const verdict = buildFinalVerdict(analysis);
   const agentVerdicts = buildAgentVerdicts(analysis);
   const nativeLanguage: OutputLanguage = analysis.run_parameters?.output_language === "en" ? "en" : "ru";
@@ -1036,16 +1041,6 @@ function ResultPanel({
 
   return (
     <section className="analysis-result-surface" aria-label={labels.summaryReport}>
-      {newSummaryPending ? (
-        <div className="analysis-summary-language-loading" aria-live="polite">
-          Готовим Summary в новом формате. Старый Summary пока остаётся доступен.
-        </div>
-      ) : null}
-      {newSummaryError || newSummaryFailed ? (
-        <div className="analysis-alert">
-          Новый формат Summary пока не удалось подготовить. Ниже показан прежний Summary.
-        </div>
-      ) : null}
       {bilingualReady ? <div className="analysis-summary-language-switch" aria-label={labels.languageSelector}>
         <button
           aria-pressed={language === "ru"}
@@ -1108,6 +1103,68 @@ function ResultPanel({
         </section>
         </>
       </div>
+    </section>
+  );
+}
+
+function NewSummaryPanel({
+  analysis,
+  newSummary,
+  newSummaryError,
+}: {
+  analysis: AnalysisRecord;
+  newSummary: NewSummaryRecord | null;
+  newSummaryError: string;
+}) {
+  const newSummaryReady =
+    newSummary?.available === true
+    && newSummary.ru.status === "completed"
+    && newSummary.en.status === "completed"
+    && newSummary.ru.payload !== null
+    && newSummary.en.payload !== null;
+  const newSummaryRequested = newSummary?.available === true;
+  const newSummaryFailed =
+    newSummaryRequested && [newSummary.ru.status, newSummary.en.status].some((status) => status === "failed");
+  const newSummaryPending =
+    newSummaryRequested
+    && !newSummaryReady
+    && [newSummary.ru.status, newSummary.en.status].some((status) => status === "waiting" || status === "queued" || status === "running");
+  const newSummaryRu = newSummaryReady ? newSummary.ru.payload : null;
+  const newSummaryEn = newSummaryReady ? newSummary.en.payload : null;
+
+  if (newSummaryRu && newSummaryEn) {
+    const report: NewSummaryReport = {
+      analysis_id: analysis.id,
+      created_at: analysis.completed_at ?? analysis.created_at,
+      pdf_path: null,
+      route: null,
+      ru: newSummaryRu,
+      en: newSummaryEn,
+    };
+    return <NewSummaryReportView embedded report={report} />;
+  }
+
+  return (
+    <section className="analysis-card stack" aria-label="New Summary">
+      <div className="analysis-section-heading">
+        <div>
+          <h2>New Summary</h2>
+          <p className="analysis-muted">Summary from skills/new-summary/SKILL.md will appear here when both language variants are ready.</p>
+        </div>
+      </div>
+      {newSummaryPending ? (
+        <div className="analysis-summary-language-loading" aria-live="polite">
+          Готовим новый формат Summary. Старый Summary остаётся во вкладке Summary.
+        </div>
+      ) : null}
+      {newSummaryError || newSummaryFailed ? (
+        <div className="analysis-alert">
+          Новый формат Summary пока не удалось подготовить. Данные старого отчёта доступны в остальных подвкладках Full Report.
+        </div>
+      ) : null}
+      {!newSummaryRequested && !newSummaryError ? (
+        <p className="analysis-muted">New Summary is available after Gate Challenger and IC Review are completed.</p>
+      ) : null}
     </section>
   );
 }

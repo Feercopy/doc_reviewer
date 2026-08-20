@@ -2489,3 +2489,10 @@ Exit criteria:
   enqueue and persisted `new_summary_generation_queue_unavailable` before the
   worker or model could run. Changed the deterministic Summary localization job
   ID to use only RQ-safe characters and added focused enqueue coverage.
+- 2026-08-20: Adjusted the analysis result UI so the Summary tab renders the
+  legacy report again. The repository new-summary output now lives in a
+  dedicated `New Summary` subtab inside `Full Report`, and `Full Report` is
+  shown only for admin users; non-admin users no longer trigger new-summary
+  generation from the result page. Verified focused analysis page coverage
+  (`27 passed`) and `git diff --check`; full web TypeScript compile still fails
+  on pre-existing test fixture/type drift unrelated to this change.

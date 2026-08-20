@@ -66,17 +66,23 @@ describe("analysis result page", () => {
     expect(topTabsSource).toContain('{ id: "fullReport", label: "Full Report" }');
     expect(topTabsSource).not.toContain("Gate Challenger");
     expect(topTabsSource).not.toContain("Document comments");
+    expect(fullReportTabsSource).toContain('{ id: "newSummary", label: "New Summary" }');
     expect(fullReportTabsSource).toContain('{ id: "mainOutput", label: "Product Analysis" }');
     expect(fullReportTabsSource).toContain('{ id: "icReview", label: "Financial Analysis" }');
     expect(fullReportTabsSource).toContain('{ id: "documentComments", label: "Document comments" }');
     expect(fullReportTabsSource).toContain('{ id: "fullOutput", label: "Full Output" }');
+    expect(fullReportTabsSource.indexOf("New Summary")).toBeLessThan(fullReportTabsSource.indexOf("Product Analysis"));
     expect(fullReportTabsSource.indexOf("Product Analysis")).toBeLessThan(fullReportTabsSource.indexOf("Financial Analysis"));
     expect(fullReportTabsSource.indexOf("Financial Analysis")).toBeLessThan(fullReportTabsSource.indexOf("Document comments"));
     expect(fullReportTabsSource.indexOf("Document comments")).toBeLessThan(fullReportTabsSource.indexOf("Full Output"));
     expect(fullReportTabsSource).not.toContain('id: "devilsAdvocate"');
     expect(pageSource).toContain('const [activeTopTab, setActiveTopTab] = useState<AnalysisTopTab>("executiveSummary")');
     expect(pageSource).toContain('const [activeFullReportTab, setActiveFullReportTab] = useState<FullReportTab>("mainOutput")');
+    expect(pageSource).toContain('const canViewFullReport = currentUserRole === "admin"');
+    expect(pageSource).toContain("visibleAnalysisTabs.map");
+    expect(pageSource).toContain('activeTopTab === "fullReport" && canViewFullReport');
     expect(pageSource).toContain("function ResultPanel");
+    expect(pageSource).toContain("function NewSummaryPanel");
     expect(pageSource).toContain('activeTopTab === "executiveSummary"');
     expect(pageSource).toContain('activeTopTab === "fullReport"');
     expect(pageSource).toContain("fallbackToNative ? analysisShortSummary(analysis) : null");
@@ -418,21 +424,29 @@ describe("analysis result page", () => {
     expect(resultPanelSource).not.toContain("window.location.reload");
   });
 
-  it("replaces the Summary tab with the repository new-summary report when both variants are ready", () => {
+  it("keeps Summary in the legacy report format and renders repository new-summary inside admin Full Report", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const resultPanelSource = pageSource.slice(
       pageSource.indexOf("function ResultPanel"),
-      pageSource.indexOf("function MainSkillMarkdownPanel"),
+      pageSource.indexOf("function NewSummaryPanel"),
+    );
+    const newSummaryPanelSource = pageSource.slice(
+      pageSource.indexOf("function NewSummaryPanel"),
+      pageSource.indexOf("function ResultReportSection"),
     );
 
     expect(pageSource).toContain("ensureNewSummary(params.analysisId)");
     expect(pageSource).toContain("getNewSummary(params.analysisId)");
+    expect(pageSource).toContain('if (!canViewFullReport || analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed")');
+    expect(pageSource).toContain('activeFullReportTab === "newSummary"');
     expect(pageSource).toContain('import { NewSummaryReportView } from "@/components/new-summary/NewSummaryReport";');
-    expect(resultPanelSource).toContain('newSummary?.available === true');
-    expect(resultPanelSource).toContain('newSummary.ru.status === "completed"');
-    expect(resultPanelSource).toContain('newSummary.en.status === "completed"');
-    expect(resultPanelSource).toContain("return <NewSummaryReportView embedded report={report} />");
-    expect(resultPanelSource).toContain("Старый Summary пока остаётся доступен");
+    expect(resultPanelSource).not.toContain("NewSummaryReportView");
+    expect(resultPanelSource).toContain("<ResultReportSection title={labels.productAnalysis}>");
+    expect(newSummaryPanelSource).toContain('newSummary?.available === true');
+    expect(newSummaryPanelSource).toContain('newSummary.ru.status === "completed"');
+    expect(newSummaryPanelSource).toContain('newSummary.en.status === "completed"');
+    expect(newSummaryPanelSource).toContain("return <NewSummaryReportView embedded report={report} />");
+    expect(newSummaryPanelSource).toContain("Старый Summary остаётся во вкладке Summary");
   });
 
   it("renders the stage checklist as a red and green traffic-light block above Summary product analysis", () => {
