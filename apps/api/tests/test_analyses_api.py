@@ -1144,6 +1144,7 @@ def test_new_summary_endpoint_queues_repository_skill_summary_once(client, db_se
     from app.routers import analyses as analyses_router
 
     user = create_user(db_session, "author", "secret")
+    admin = create_user(db_session, "new-summary-admin", "secret", role=Role.ADMIN)
     skills = seed_baseline_skills(db_session)
     document_id = _create_completed_document(client, db_session, user)
     analysis = Analysis(
@@ -1177,7 +1178,7 @@ def test_new_summary_endpoint_queues_repository_skill_summary_once(client, db_se
     db_session.add(check_run)
     db_session.commit()
 
-    login(client, "author", "secret")
+    login(client, admin.login, "secret")
     enqueued: list[str] = []
     app.dependency_overrides[analyses_router.get_run_summary_localizations_enqueue] = (
         lambda: lambda analysis_id: enqueued.append(str(analysis_id))
@@ -1201,8 +1202,48 @@ def test_new_summary_endpoint_queues_repository_skill_summary_once(client, db_se
     assert second.json() == read.json()
 
 
+def test_new_summary_endpoint_requires_admin_and_does_not_enqueue_for_owner(client, db_session):
+    from app.main import app
+    from app.routers import analyses as analyses_router
+
+    user = create_user(db_session, "new-summary-owner", "secret")
+    skills = seed_baseline_skills(db_session)
+    document_id = _create_completed_document(client, db_session, user)
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=user.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="need_evidence",
+        summary="Нужны подтверждения",
+        structured_output={"result": {"short_summary": "Нужны подтверждения"}},
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.commit()
+
+    login(client, user.login, "secret")
+    enqueued: list[str] = []
+    app.dependency_overrides[analyses_router.get_run_summary_localizations_enqueue] = (
+        lambda: lambda analysis_id: enqueued.append(str(analysis_id))
+    )
+    try:
+        read = client.get(f"/analyses/{analysis.id}/new-summary")
+        created = client.post(f"/analyses/{analysis.id}/new-summary")
+    finally:
+        app.dependency_overrides.pop(analyses_router.get_run_summary_localizations_enqueue, None)
+
+    assert read.status_code == 403
+    assert created.status_code == 403
+    assert enqueued == []
+
+
 def test_new_summary_endpoint_waits_for_ic_postprocessing(client, db_session):
     user = create_user(db_session, "postprocessing-author", "secret")
+    admin = create_user(db_session, "postprocessing-admin", "secret", role=Role.ADMIN)
     skills = seed_baseline_skills(db_session)
     document_id = _create_completed_document(client, db_session, user)
     analysis = Analysis(
@@ -1236,7 +1277,7 @@ def test_new_summary_endpoint_waits_for_ic_postprocessing(client, db_session):
     db_session.add(check_run)
     db_session.commit()
 
-    login(client, "postprocessing-author", "secret")
+    login(client, admin.login, "secret")
     response = client.post(f"/analyses/{analysis.id}/new-summary")
 
     assert response.status_code == 200
