@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.dependencies.auth import require_current_user
+from app.dependencies.auth import require_admin, require_current_user
 from app.models.analysis import Analysis
 from app.models.user import User
 from app.schemas.analyses import (
@@ -192,7 +192,7 @@ def ensure_analysis_summary_localizations(
 def get_analysis_new_summary(
     analysis_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_admin),
     enqueue: RunSummaryLocalizationsEnqueue = Depends(get_run_summary_localizations_enqueue),
 ) -> NewSummaryRead:
     try:
@@ -217,7 +217,7 @@ def get_analysis_new_summary(
 def ensure_analysis_new_summary(
     analysis_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_current_user),
+    current_user: User = Depends(require_admin),
     enqueue: RunSummaryLocalizationsEnqueue = Depends(get_run_summary_localizations_enqueue),
 ) -> NewSummaryRead:
     try:

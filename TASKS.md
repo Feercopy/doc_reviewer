@@ -2493,6 +2493,8 @@ Exit criteria:
   legacy report again. The repository new-summary output now lives in a
   dedicated `New Summary` subtab inside `Full Report`, and `Full Report` is
   shown only for admin users; non-admin users no longer trigger new-summary
-  generation from the result page. Verified focused analysis page coverage
-  (`27 passed`) and `git diff --check`; full web TypeScript compile still fails
-  on pre-existing test fixture/type drift unrelated to this change.
+  generation from the result page. Tightened the `/analyses/{id}/new-summary`
+  API boundary to require admin as well, so the hidden UI cannot be bypassed by
+  direct GET/POST calls. Verified focused analysis page coverage (`27 passed`)
+  and `git diff --check`; full web TypeScript compile still fails on
+  pre-existing test fixture/type drift unrelated to this change.
