@@ -28,10 +28,19 @@ def normalize_schema_bounded_strings(value: Any, schema: dict, root_schema: dict
 
     expected_type = resolved_schema.get("type")
     if expected_type == "string" and isinstance(value, str):
+        if "const" in resolved_schema or "enum" in resolved_schema:
+            return value
+        normalized = value.strip()
+        min_length = resolved_schema.get("minLength")
         max_length = resolved_schema.get("maxLength")
-        if isinstance(max_length, int) and len(value) > max_length:
-            return value[:max_length]
-        return value
+        if isinstance(min_length, int) and len(normalized) < min_length:
+            normalized = _min_length_fallback(
+                min_length=min_length,
+                max_length=max_length if isinstance(max_length, int) else None,
+            )
+        if isinstance(max_length, int) and len(normalized) > max_length:
+            return normalized[:max_length]
+        return normalized
 
     if expected_type == "object" and isinstance(value, dict):
         properties = resolved_schema.get("properties")
@@ -50,6 +59,21 @@ def normalize_schema_bounded_strings(value: Any, schema: dict, root_schema: dict
         return value
 
     return value
+
+
+def _min_length_fallback(*, min_length: int, max_length: int | None) -> str:
+    base = "Not provided in source materials."
+    if max_length is not None and max_length < len(base):
+        return base[:max(max_length, 0)]
+    if min_length <= len(base):
+        return base
+    target_length = min_length
+    if max_length is not None:
+        target_length = min(min_length, max_length)
+    parts = []
+    while len(" ".join(parts)) < target_length:
+        parts.append(base)
+    return " ".join(parts)[:target_length]
 
 
 def _schema_option_matches_value(schema: dict, value: Any, root_schema: dict) -> bool:
