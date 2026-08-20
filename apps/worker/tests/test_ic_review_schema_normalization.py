@@ -138,6 +138,64 @@ def test_drops_findings_without_evidence_instead_of_fabricating_evidence():
     assert normalized["findings"][0]["title"] == "Measured proof"
 
 
+def test_reconciles_compact_verdict_when_all_top_findings_lack_evidence():
+    schema = {
+        "type": "object",
+        "required": ["verdict", "confidence", "top_findings", "data_gaps"],
+        "properties": {
+            "verdict": {"type": "string", "enum": ["NO-GO", "UNKNOWN"]},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "top_findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["title", "severity", "summary", "evidence", "recommendation"],
+                    "properties": {
+                        "title": {"type": "string", "minLength": 1, "maxLength": 80},
+                        "severity": {"type": "string", "enum": ["critical", "data_gap"]},
+                        "summary": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "evidence": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "recommendation": {"type": "string", "minLength": 1, "maxLength": 120},
+                    },
+                },
+            },
+            "data_gaps": {
+                "type": "array",
+                "maxItems": 7,
+                "items": {"type": "string", "minLength": 1, "maxLength": 200},
+            },
+        },
+    }
+
+    normalized = normalize_schema_bounded_strings(
+        {
+            "verdict": "NO-GO",
+            "confidence": 0.8,
+            "top_findings": [
+                {
+                    "title": "Missing proof",
+                    "severity": "critical",
+                    "summary": "The claim is not supported.",
+                    "evidence": "",
+                    "recommendation": "Do not approve.",
+                }
+            ],
+            "data_gaps": [],
+        },
+        schema,
+        schema,
+        output_language="ru",
+    )
+
+    validate(instance=normalized, schema=schema)
+    assert normalized["verdict"] == "UNKNOWN"
+    assert normalized["confidence"] == 0.1
+    assert normalized["top_findings"] == []
+    assert normalized["data_gaps"] == [
+        "Неподтвержденные выводы IC Review отброшены: в них не было evidence."
+    ]
+
+
 def test_drops_numbers_without_source_instead_of_fabricating_provenance():
     schema = {
         "type": "object",

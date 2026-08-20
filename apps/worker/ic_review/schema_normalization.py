@@ -116,6 +116,7 @@ def _normalize_schema_bounded_strings(
         properties = resolved_schema.get("properties")
         if not isinstance(properties, dict):
             return value
+        had_top_findings = bool(value.get("top_findings"))
         normalized = dict(value)
         for key, child_schema in properties.items():
             if key in normalized and isinstance(child_schema, dict):
@@ -126,6 +127,11 @@ def _normalize_schema_bounded_strings(
                     property_name=key,
                     output_language=output_language,
                 )
+        if had_top_findings and normalized.get("top_findings") == []:
+            normalized = _reconcile_unsupported_compact_verdict(
+                normalized,
+                output_language=output_language,
+            )
         return normalized
 
     if expected_type == "array" and isinstance(value, list):
@@ -245,6 +251,24 @@ def _array_items_are_report_items(item_schema: Any, root_schema: dict) -> bool:
         and {"title", "detail"}.issubset(set(required))
         and {"title", "detail"}.issubset(properties)
     )
+
+
+def _reconcile_unsupported_compact_verdict(value: dict, *, output_language: str | None) -> dict:
+    if "verdict" not in value:
+        return value
+    normalized = dict(value)
+    normalized["verdict"] = "UNKNOWN"
+    if isinstance(normalized.get("confidence"), int | float):
+        normalized["confidence"] = min(float(normalized["confidence"]), 0.1)
+    gap = (
+        "Неподтвержденные выводы IC Review отброшены: в них не было evidence."
+        if str(output_language or "").lower().startswith("ru")
+        else "Unsupported IC Review findings were dropped because they did not include evidence."
+    )
+    existing_gaps = normalized.get("data_gaps")
+    if isinstance(existing_gaps, list):
+        normalized["data_gaps"] = [gap, *existing_gaps][:7]
+    return normalized
 
 
 def _schema_option_matches_value(schema: dict, value: Any, root_schema: dict) -> bool:
