@@ -148,12 +148,15 @@ def _normalize_schema_bounded_strings(
                 item for item in value if not (isinstance(item, str) and not item.strip())
             ]
         if isinstance(item_schema, dict):
+            item_property_name = (
+                None if property_name in _CATEGORICAL_TEXT_ARRAY_PROPERTIES else property_name
+            )
             return [
                 _normalize_schema_bounded_strings(
                     item,
                     item_schema,
                     root_schema,
-                    property_name=property_name,
+                    property_name=item_property_name,
                     output_language=output_language,
                 )
                 for item in normalized_items
