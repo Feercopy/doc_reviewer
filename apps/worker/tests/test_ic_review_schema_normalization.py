@@ -13,23 +13,23 @@ def test_normalizes_empty_required_strings_inside_nested_objects():
             "summary": {"type": "string", "minLength": 1, "maxLength": 80},
             "finding": {
                 "type": "object",
-                "required": ["evidence"],
+                "required": ["detail"],
                 "properties": {
-                    "evidence": {"type": "string", "minLength": 1, "maxLength": 80},
+                    "detail": {"type": "string", "minLength": 1, "maxLength": 80},
                 },
             },
         },
     }
 
     normalized = normalize_schema_bounded_strings(
-        {"summary": "   ", "finding": {"evidence": ""}},
+        {"summary": "   ", "finding": {"detail": ""}},
         schema,
         schema,
     )
 
     validate(instance=normalized, schema=schema)
     assert normalized["summary"] == "Not provided in source materials."
-    assert normalized["finding"]["evidence"] == "Not provided in source materials."
+    assert normalized["finding"]["detail"] == "Not provided in source materials."
 
 
 def test_extends_short_strings_to_schema_min_length_without_exceeding_max_length():
@@ -89,6 +89,53 @@ def test_drops_empty_reference_ids_instead_of_fabricating_evidence():
 
     validate(instance=normalized, schema=schema)
     assert normalized["evidence_ids"] == ["doc-1"]
+
+
+def test_drops_findings_without_evidence_instead_of_fabricating_evidence():
+    schema = {
+        "type": "object",
+        "required": ["findings"],
+        "properties": {
+            "findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["title", "severity", "evidence", "recommendation"],
+                    "properties": {
+                        "title": {"type": "string", "minLength": 1, "maxLength": 80},
+                        "severity": {"type": "string", "enum": ["critical", "data_gap"]},
+                        "evidence": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "recommendation": {"type": "string", "minLength": 1, "maxLength": 120},
+                    },
+                },
+            },
+        },
+    }
+
+    normalized = normalize_schema_bounded_strings(
+        {
+            "findings": [
+                {
+                    "title": "Missing proof",
+                    "severity": "critical",
+                    "evidence": "",
+                    "recommendation": "Close the gap.",
+                },
+                {
+                    "title": "Measured proof",
+                    "severity": "critical",
+                    "evidence": "Document page 4 contains measured proof.",
+                    "recommendation": "Keep the proof in the package.",
+                },
+            ]
+        },
+        schema,
+        schema,
+    )
+
+    validate(instance=normalized, schema=schema)
+    assert len(normalized["findings"]) == 1
+    assert normalized["findings"][0]["title"] == "Measured proof"
 
 
 def test_keeps_enum_and_const_values_strict():

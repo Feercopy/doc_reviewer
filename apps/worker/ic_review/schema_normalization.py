@@ -10,7 +10,6 @@ _NARRATIVE_STRING_PROPERTIES = {
     "critical_risks",
     "data_gaps",
     "detail",
-    "evidence",
     "executive_brief",
     "issue",
     "markdown",
@@ -23,6 +22,7 @@ _NARRATIVE_STRING_PROPERTIES = {
     "title",
 }
 _REFERENCE_ARRAY_PROPERTIES = {"evidence_ids", "section_keys"}
+_FINDING_ARRAY_PROPERTIES = {"findings", "top_findings"}
 
 
 def normalize_schema_bounded_strings(
@@ -128,6 +128,10 @@ def _normalize_schema_bounded_strings(
             normalized_items = [
                 item for item in value if not (isinstance(item, str) and not item.strip())
             ]
+        elif property_name in _FINDING_ARRAY_PROPERTIES:
+            normalized_items = [
+                item for item in value if not _finding_lacks_evidence(item)
+            ]
         if isinstance(item_schema, dict):
             return [
                 _normalize_schema_bounded_strings(
@@ -173,6 +177,13 @@ def _source_gap_marker(output_language: str | None) -> str:
     if str(output_language or "").lower().startswith("ru"):
         return "Не указано в исходных материалах."
     return "Not provided in source materials."
+
+
+def _finding_lacks_evidence(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    evidence = item.get("evidence")
+    return isinstance(evidence, str) and not evidence.strip()
 
 
 def _schema_option_matches_value(schema: dict, value: Any, root_schema: dict) -> bool:
