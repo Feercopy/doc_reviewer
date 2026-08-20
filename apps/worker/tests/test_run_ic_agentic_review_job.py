@@ -1117,6 +1117,25 @@ def test_legacy_kpis_are_pairs_for_original_excel_audit():
     ]
 
 
+def test_compact_fallback_findings_ignore_source_gap_marker_summaries():
+    findings = job._compact_findings_from_roles(
+        {
+            "ic-financial-auditor": {
+                "summary": "Не указано в исходных материалах.",
+                "findings": [],
+            },
+            "ic-product-analyst": {
+                "summary": "The product role found a grounded readiness gap.",
+                "findings": [],
+            },
+        }
+    )
+
+    assert len(findings) == 1
+    assert findings[0]["title"] == "ic-product-analyst finding summary"
+    assert findings[0]["evidence"] == "The product role found a grounded readiness gap."
+
+
 def _create_session():
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",

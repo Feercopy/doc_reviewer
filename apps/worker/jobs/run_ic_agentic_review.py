@@ -1156,7 +1156,7 @@ def _compact_findings_from_roles(role_outputs: dict[str, dict]) -> list[dict[str
         if not isinstance(role_output, dict):
             continue
         summary = str(role_output.get("summary") or "").strip()
-        if not summary:
+        if not summary or _is_source_gap_marker_text(summary):
             continue
         findings.append(
             {
@@ -1170,6 +1170,14 @@ def _compact_findings_from_roles(role_outputs: dict[str, dict]) -> list[dict[str
         if len(findings) >= 3:
             break
     return findings
+
+
+def _is_source_gap_marker_text(value: str) -> bool:
+    normalized = value.strip().lower()
+    return normalized in {
+        "not provided in source materials.",
+        "не указано в исходных материалах.",
+    }
 
 
 def _compact_data_gaps_from_roles(role_outputs: dict[str, dict]) -> list[str]:
