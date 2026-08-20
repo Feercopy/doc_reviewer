@@ -3,7 +3,52 @@ from __future__ import annotations
 from typing import Any
 
 
-def normalize_schema_bounded_strings(value: Any, schema: dict, root_schema: dict) -> Any:
+_NARRATIVE_STRING_PROPERTIES = {
+    "body",
+    "comment",
+    "content",
+    "critical_risks",
+    "data_gaps",
+    "detail",
+    "evidence",
+    "executive_brief",
+    "issue",
+    "markdown",
+    "primary_verify_notes",
+    "questions_for_team",
+    "recommendation",
+    "required_actions",
+    "source",
+    "summary",
+    "title",
+}
+_REFERENCE_ARRAY_PROPERTIES = {"evidence_ids", "section_keys"}
+
+
+def normalize_schema_bounded_strings(
+    value: Any,
+    schema: dict,
+    root_schema: dict,
+    *,
+    output_language: str | None = None,
+) -> Any:
+    return _normalize_schema_bounded_strings(
+        value,
+        schema,
+        root_schema,
+        property_name=None,
+        output_language=output_language,
+    )
+
+
+def _normalize_schema_bounded_strings(
+    value: Any,
+    schema: dict,
+    root_schema: dict,
+    *,
+    property_name: str | None,
+    output_language: str | None,
+) -> Any:
     resolved_schema = schema
     if "$ref" in resolved_schema:
         resolved = _resolve_local_schema_ref(str(resolved_schema["$ref"]), root_schema)
@@ -15,7 +60,13 @@ def normalize_schema_bounded_strings(value: Any, schema: dict, root_schema: dict
         if isinstance(options, list):
             for option in options:
                 if isinstance(option, dict) and _schema_option_matches_value(option, value, root_schema):
-                    return normalize_schema_bounded_strings(value, option, root_schema)
+                    return _normalize_schema_bounded_strings(
+                        value,
+                        option,
+                        root_schema,
+                        property_name=property_name,
+                        output_language=output_language,
+                    )
             return value
 
     all_of = resolved_schema.get("allOf")
@@ -23,7 +74,13 @@ def normalize_schema_bounded_strings(value: Any, schema: dict, root_schema: dict
         normalized = value
         for option in all_of:
             if isinstance(option, dict):
-                normalized = normalize_schema_bounded_strings(normalized, option, root_schema)
+                normalized = _normalize_schema_bounded_strings(
+                    normalized,
+                    option,
+                    root_schema,
+                    property_name=property_name,
+                    output_language=output_language,
+                )
         return normalized
 
     expected_type = resolved_schema.get("type")
@@ -33,10 +90,16 @@ def normalize_schema_bounded_strings(value: Any, schema: dict, root_schema: dict
         normalized = value.strip()
         min_length = resolved_schema.get("minLength")
         max_length = resolved_schema.get("maxLength")
-        if isinstance(min_length, int) and len(normalized) < min_length:
+        if (
+            isinstance(min_length, int)
+            and len(normalized) < min_length
+            and property_name in _NARRATIVE_STRING_PROPERTIES
+        ):
             normalized = _min_length_fallback(
+                value=normalized,
                 min_length=min_length,
                 max_length=max_length if isinstance(max_length, int) else None,
+                output_language=output_language,
             )
         if isinstance(max_length, int) and len(normalized) > max_length:
             return normalized[:max_length]
@@ -49,20 +112,50 @@ def normalize_schema_bounded_strings(value: Any, schema: dict, root_schema: dict
         normalized = dict(value)
         for key, child_schema in properties.items():
             if key in normalized and isinstance(child_schema, dict):
-                normalized[key] = normalize_schema_bounded_strings(normalized[key], child_schema, root_schema)
+                normalized[key] = _normalize_schema_bounded_strings(
+                    normalized[key],
+                    child_schema,
+                    root_schema,
+                    property_name=key,
+                    output_language=output_language,
+                )
         return normalized
 
     if expected_type == "array" and isinstance(value, list):
         item_schema = resolved_schema.get("items")
+        normalized_items = value
+        if property_name in _REFERENCE_ARRAY_PROPERTIES:
+            normalized_items = [
+                item for item in value if not (isinstance(item, str) and not item.strip())
+            ]
         if isinstance(item_schema, dict):
-            return [normalize_schema_bounded_strings(item, item_schema, root_schema) for item in value]
-        return value
+            return [
+                _normalize_schema_bounded_strings(
+                    item,
+                    item_schema,
+                    root_schema,
+                    property_name=property_name,
+                    output_language=output_language,
+                )
+                for item in normalized_items
+            ]
+        return normalized_items
 
     return value
 
 
-def _min_length_fallback(*, min_length: int, max_length: int | None) -> str:
-    base = "Not provided in source materials."
+def _min_length_fallback(
+    *,
+    value: str,
+    min_length: int,
+    max_length: int | None,
+    output_language: str | None,
+) -> str:
+    marker = _source_gap_marker(output_language)
+    if value:
+        base = f"{value} [{marker}]"
+    else:
+        base = marker
     if max_length is not None and max_length < len(base):
         return base[:max(max_length, 0)]
     if min_length <= len(base):
@@ -72,8 +165,14 @@ def _min_length_fallback(*, min_length: int, max_length: int | None) -> str:
         target_length = min(min_length, max_length)
     parts = []
     while len(" ".join(parts)) < target_length:
-        parts.append(base)
+        parts.append(base if not parts else marker)
     return " ".join(parts)[:target_length]
+
+
+def _source_gap_marker(output_language: str | None) -> str:
+    if str(output_language or "").lower().startswith("ru"):
+        return "Не указано в исходных материалах."
+    return "Not provided in source materials."
 
 
 def _schema_option_matches_value(schema: dict, value: Any, root_schema: dict) -> bool:

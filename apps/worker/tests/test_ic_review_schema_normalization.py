@@ -44,8 +44,51 @@ def test_extends_short_strings_to_schema_min_length_without_exceeding_max_length
     normalized = normalize_schema_bounded_strings({"executive_brief": "Too short."}, schema, schema)
 
     validate(instance=normalized, schema=schema)
+    assert normalized["executive_brief"].startswith("Too short.")
     assert len(normalized["executive_brief"]) >= 120
     assert len(normalized["executive_brief"]) <= 140
+
+
+def test_uses_russian_source_gap_marker_for_russian_reviews():
+    schema = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {
+            "summary": {"type": "string", "minLength": 40, "maxLength": 120},
+        },
+    }
+
+    normalized = normalize_schema_bounded_strings(
+        {"summary": ""},
+        schema,
+        schema,
+        output_language="ru",
+    )
+
+    validate(instance=normalized, schema=schema)
+    assert normalized["summary"].startswith("Не указано в исходных материалах.")
+
+
+def test_drops_empty_reference_ids_instead_of_fabricating_evidence():
+    schema = {
+        "type": "object",
+        "required": ["evidence_ids"],
+        "properties": {
+            "evidence_ids": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1, "maxLength": 80},
+            },
+        },
+    }
+
+    normalized = normalize_schema_bounded_strings(
+        {"evidence_ids": ["doc-1", " ", ""]},
+        schema,
+        schema,
+    )
+
+    validate(instance=normalized, schema=schema)
+    assert normalized["evidence_ids"] == ["doc-1"]
 
 
 def test_keeps_enum_and_const_values_strict():

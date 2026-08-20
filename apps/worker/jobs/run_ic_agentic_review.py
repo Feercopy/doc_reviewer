@@ -275,13 +275,21 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         _raise_if_cancelled(session=session, check_run=check_run)
 
         try:
-            compact_result = _parse_synthesis_compact(result.structured_text, review_schema)
+            compact_result = _parse_synthesis_compact(
+                result.structured_text,
+                review_schema,
+                output_language=(check_run.run_parameters or {}).get("output_language"),
+            )
             compact_result = deanonymize_model_value(
                 compact_result,
                 metadata=(check_run.run_parameters or {}).get(RUN_PARAMETER_KEY),
             )
         except json.JSONDecodeError as exc:
-            compact_result = _fallback_compact_result_from_roles(role_outputs=role_outputs, review_schema=review_schema)
+            compact_result = _fallback_compact_result_from_roles(
+                role_outputs=role_outputs,
+                review_schema=review_schema,
+                output_language=(check_run.run_parameters or {}).get("output_language"),
+            )
             run_parameters = dict(check_run.run_parameters or {})
             run_parameters["synthesis_fallback"] = {
                 "reason": f"invalid_json:{exc.msg}",
@@ -892,7 +900,11 @@ def _run_synthesis_with_json_retry(
         run_parameters=run_parameters,
     )
     try:
-        _parse_synthesis_compact(result.structured_text, review_schema)
+        _parse_synthesis_compact(
+            result.structured_text,
+            review_schema,
+            output_language=run_parameters.get("output_language"),
+        )
     except json.JSONDecodeError as exc:
         retry_parameters = _synthesis_json_retry_run_parameters(run_parameters)
         retry_result = _call_synthesis_provider(
@@ -993,7 +1005,12 @@ def _synthesis_wrapper_schema(review_schema: dict) -> dict:
     }
 
 
-def _parse_synthesis_wrapper(structured_text: str, review_schema: dict) -> tuple[dict, dict]:
+def _parse_synthesis_wrapper(
+    structured_text: str,
+    review_schema: dict,
+    *,
+    output_language: str | None = None,
+) -> tuple[dict, dict]:
     payload = json.loads(_extract_json_text(structured_text))
     if not isinstance(payload, dict) or set(payload.keys()) != {"compact_result", "legacy_report_json"}:
         raise RuntimeError("invalid_synthesis_wrapper")
@@ -1001,7 +1018,12 @@ def _parse_synthesis_wrapper(structured_text: str, review_schema: dict) -> tuple
     legacy_report_json = payload["legacy_report_json"]
     if not isinstance(compact_result, dict) or not isinstance(legacy_report_json, dict):
         raise RuntimeError("invalid_synthesis_wrapper")
-    compact_result = normalize_schema_bounded_strings(compact_result, review_schema, review_schema)
+    compact_result = normalize_schema_bounded_strings(
+        compact_result,
+        review_schema,
+        review_schema,
+        output_language=output_language,
+    )
     legacy_report_json = _normalize_legacy_report_json(legacy_report_json, compact_result=compact_result)
     normalized_payload = {
         "compact_result": compact_result,
@@ -1014,7 +1036,12 @@ def _parse_synthesis_wrapper(structured_text: str, review_schema: dict) -> tuple
     return compact_result, legacy_report_json
 
 
-def _parse_synthesis_compact(structured_text: str, review_schema: dict) -> dict:
+def _parse_synthesis_compact(
+    structured_text: str,
+    review_schema: dict,
+    *,
+    output_language: str | None = None,
+) -> dict:
     payload = json.loads(_extract_json_text(structured_text))
     if isinstance(payload, dict) and isinstance(payload.get("compact_result"), dict):
         compact_result = payload["compact_result"]
@@ -1022,7 +1049,12 @@ def _parse_synthesis_compact(structured_text: str, review_schema: dict) -> dict:
         compact_result = payload
     else:
         raise RuntimeError("invalid_synthesis_compact")
-    compact_result = normalize_schema_bounded_strings(compact_result, review_schema, review_schema)
+    compact_result = normalize_schema_bounded_strings(
+        compact_result,
+        review_schema,
+        review_schema,
+        output_language=output_language,
+    )
     try:
         validate(instance=compact_result, schema=review_schema)
     except ValidationError as exc:
@@ -1030,7 +1062,12 @@ def _parse_synthesis_compact(structured_text: str, review_schema: dict) -> dict:
     return compact_result
 
 
-def _fallback_compact_result_from_roles(*, role_outputs: dict[str, dict], review_schema: dict) -> dict:
+def _fallback_compact_result_from_roles(
+    *,
+    role_outputs: dict[str, dict],
+    review_schema: dict,
+    output_language: str | None = None,
+) -> dict:
     findings = _compact_findings_from_roles(role_outputs)
     critical_risks = _compact_report_item_texts(role_outputs, "risks", severities={"blocker", "critical", "high"})
     data_gaps = _compact_data_gaps_from_roles(role_outputs)
@@ -1079,7 +1116,12 @@ def _fallback_compact_result_from_roles(*, role_outputs: dict[str, dict], review
         },
         "artifacts": [],
     }
-    compact_result = normalize_schema_bounded_strings(compact_result, review_schema, review_schema)
+    compact_result = normalize_schema_bounded_strings(
+        compact_result,
+        review_schema,
+        review_schema,
+        output_language=output_language,
+    )
     validate(instance=compact_result, schema=review_schema)
     return compact_result
 
