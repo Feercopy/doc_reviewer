@@ -932,6 +932,37 @@ def test_overlong_compact_strings_are_trimmed_before_validation(tmp_path, monkey
         db.close()
 
 
+def test_short_compact_strings_are_repaired_before_validation(tmp_path, monkeypatch):
+    db = _create_session()
+    calls: dict[str, object] = {}
+    try:
+        compact_result = _compact_result(workbook=False)
+        compact_result["executive_brief"] = "Too short."
+        compact_result["role_summaries"][0]["summary"] = ""
+        compact_result["critical_risks"] = [""]
+        records = _seed_run(
+            db,
+            tmp_path,
+            monkeypatch=monkeypatch,
+            workbook=False,
+            compact_result=compact_result,
+        )
+        _patch_script_pipeline(monkeypatch, calls, validation_text="validation ok\n")
+
+        run_ic_agentic_review(str(records["check_run"].id), db=db)
+
+        db.refresh(records["check_run"])
+        structured = records["check_run"].structured_output
+        assert records["check_run"].status == RunStatus.COMPLETED.value
+        assert structured["executive_brief"].startswith("Too short.")
+        assert len(structured["executive_brief"]) >= 400
+        assert len(structured["role_summaries"][0]["summary"]) >= 120
+        assert structured["critical_risks"] == []
+        assert records["check_run"].error_message is None
+    finally:
+        db.close()
+
+
 def test_synthesis_invalid_json_retries_once_without_rerunning_roles(tmp_path, monkeypatch):
     db = _create_session()
     calls: dict[str, object] = {}
@@ -1084,6 +1115,25 @@ def test_legacy_kpis_are_pairs_for_original_excel_audit():
         ["NPV", "12.3 m RUB | Source: model"],
         ["IRR", "24%"],
     ]
+
+
+def test_compact_fallback_findings_ignore_source_gap_marker_summaries():
+    findings = job._compact_findings_from_roles(
+        {
+            "ic-financial-auditor": {
+                "summary": "Не указано в исходных материалах.",
+                "findings": [],
+            },
+            "ic-product-analyst": {
+                "summary": "The product role found a grounded readiness gap.",
+                "findings": [],
+            },
+        }
+    )
+
+    assert len(findings) == 1
+    assert findings[0]["title"] == "ic-product-analyst finding summary"
+    assert findings[0]["evidence"] == "The product role found a grounded readiness gap."
 
 
 def _create_session():

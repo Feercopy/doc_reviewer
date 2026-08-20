@@ -148,7 +148,12 @@ def run_role_step(
             step.completed_at = utc_now()
             session.commit()
             return structured
-        structured = normalize_schema_bounded_strings(payload, schema, schema)
+        structured = normalize_schema_bounded_strings(
+            payload,
+            schema,
+            schema,
+            output_language=context.output_language,
+        )
         validate(instance=structured, schema=schema)
         structured = deanonymize_model_value(
             structured,
@@ -495,7 +500,12 @@ def _provider_timeout_role_fallback(
             "primary_verify_notes": [gap],
         },
     }
-    structured = normalize_schema_bounded_strings(structured, schema, schema)
+    structured = normalize_schema_bounded_strings(
+        structured,
+        schema,
+        schema,
+        output_language=output_language,
+    )
     validate(instance=structured, schema=schema)
     return structured
 

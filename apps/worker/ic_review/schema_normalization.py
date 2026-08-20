@@ -3,7 +3,59 @@ from __future__ import annotations
 from typing import Any
 
 
-def normalize_schema_bounded_strings(value: Any, schema: dict, root_schema: dict) -> Any:
+_NARRATIVE_STRING_PROPERTIES = {
+    "body",
+    "comment",
+    "content",
+    "critical_risks",
+    "data_gaps",
+    "detail",
+    "executive_brief",
+    "issue",
+    "markdown",
+    "primary_verify_notes",
+    "questions_for_team",
+    "recommendation",
+    "required_actions",
+    "summary",
+    "title",
+}
+_REFERENCE_ARRAY_PROPERTIES = {"evidence_ids", "section_keys"}
+_FINDING_ARRAY_PROPERTIES = {"findings", "top_findings"}
+_NUMBER_ARRAY_PROPERTIES = {"key_numbers", "numbers_used"}
+_CATEGORICAL_TEXT_ARRAY_PROPERTIES = {
+    "critical_risks",
+    "data_gaps",
+    "primary_verify_notes",
+    "questions_for_team",
+    "required_actions",
+}
+
+
+def normalize_schema_bounded_strings(
+    value: Any,
+    schema: dict,
+    root_schema: dict,
+    *,
+    output_language: str | None = None,
+) -> Any:
+    return _normalize_schema_bounded_strings(
+        value,
+        schema,
+        root_schema,
+        property_name=None,
+        output_language=output_language,
+    )
+
+
+def _normalize_schema_bounded_strings(
+    value: Any,
+    schema: dict,
+    root_schema: dict,
+    *,
+    property_name: str | None,
+    output_language: str | None,
+) -> Any:
     resolved_schema = schema
     if "$ref" in resolved_schema:
         resolved = _resolve_local_schema_ref(str(resolved_schema["$ref"]), root_schema)
@@ -15,7 +67,13 @@ def normalize_schema_bounded_strings(value: Any, schema: dict, root_schema: dict
         if isinstance(options, list):
             for option in options:
                 if isinstance(option, dict) and _schema_option_matches_value(option, value, root_schema):
-                    return normalize_schema_bounded_strings(value, option, root_schema)
+                    return _normalize_schema_bounded_strings(
+                        value,
+                        option,
+                        root_schema,
+                        property_name=property_name,
+                        output_language=output_language,
+                    )
             return value
 
     all_of = resolved_schema.get("allOf")
@@ -23,33 +81,203 @@ def normalize_schema_bounded_strings(value: Any, schema: dict, root_schema: dict
         normalized = value
         for option in all_of:
             if isinstance(option, dict):
-                normalized = normalize_schema_bounded_strings(normalized, option, root_schema)
+                normalized = _normalize_schema_bounded_strings(
+                    normalized,
+                    option,
+                    root_schema,
+                    property_name=property_name,
+                    output_language=output_language,
+                )
         return normalized
 
     expected_type = resolved_schema.get("type")
     if expected_type == "string" and isinstance(value, str):
+        if "const" in resolved_schema or "enum" in resolved_schema:
+            return value
+        normalized = value.strip()
+        min_length = resolved_schema.get("minLength")
         max_length = resolved_schema.get("maxLength")
-        if isinstance(max_length, int) and len(value) > max_length:
-            return value[:max_length]
-        return value
+        if (
+            isinstance(min_length, int)
+            and len(normalized) < min_length
+            and property_name in _NARRATIVE_STRING_PROPERTIES
+        ):
+            normalized = _min_length_fallback(
+                value=normalized,
+                min_length=min_length,
+                max_length=max_length if isinstance(max_length, int) else None,
+                output_language=output_language,
+            )
+        if isinstance(max_length, int) and len(normalized) > max_length:
+            return normalized[:max_length]
+        return normalized
 
     if expected_type == "object" and isinstance(value, dict):
         properties = resolved_schema.get("properties")
         if not isinstance(properties, dict):
             return value
+        original_top_findings_count = _list_length(value.get("top_findings"))
         normalized = dict(value)
         for key, child_schema in properties.items():
             if key in normalized and isinstance(child_schema, dict):
-                normalized[key] = normalize_schema_bounded_strings(normalized[key], child_schema, root_schema)
+                normalized[key] = _normalize_schema_bounded_strings(
+                    normalized[key],
+                    child_schema,
+                    root_schema,
+                    property_name=key,
+                    output_language=output_language,
+                )
+        normalized_top_findings_count = _list_length(normalized.get("top_findings"))
+        if (
+            original_top_findings_count is not None
+            and normalized_top_findings_count is not None
+            and normalized_top_findings_count < original_top_findings_count
+        ):
+            normalized = _reconcile_unsupported_compact_verdict(
+                normalized,
+                output_language=output_language,
+            )
         return normalized
 
     if expected_type == "array" and isinstance(value, list):
         item_schema = resolved_schema.get("items")
+        normalized_items = value
+        if _array_items_are_structured_narrative_objects(item_schema, root_schema):
+            normalized_items = [
+                item for item in value if not _structured_narrative_object_lacks_substance(item)
+            ]
+        elif property_name in _REFERENCE_ARRAY_PROPERTIES:
+            normalized_items = [
+                item for item in value if not (isinstance(item, str) and not item.strip())
+            ]
+        elif property_name in _FINDING_ARRAY_PROPERTIES:
+            normalized_items = [
+                item for item in value if not _finding_lacks_evidence(item)
+            ]
+        elif property_name in _NUMBER_ARRAY_PROPERTIES:
+            normalized_items = [
+                item for item in value if not _number_lacks_source(item)
+            ]
+        elif property_name in _CATEGORICAL_TEXT_ARRAY_PROPERTIES:
+            normalized_items = [
+                item for item in value if not (isinstance(item, str) and not item.strip())
+            ]
         if isinstance(item_schema, dict):
-            return [normalize_schema_bounded_strings(item, item_schema, root_schema) for item in value]
-        return value
+            item_property_name = (
+                None if property_name in _CATEGORICAL_TEXT_ARRAY_PROPERTIES else property_name
+            )
+            return [
+                _normalize_schema_bounded_strings(
+                    item,
+                    item_schema,
+                    root_schema,
+                    property_name=item_property_name,
+                    output_language=output_language,
+                )
+                for item in normalized_items
+            ]
+        return normalized_items
 
     return value
+
+
+def _min_length_fallback(
+    *,
+    value: str,
+    min_length: int,
+    max_length: int | None,
+    output_language: str | None,
+) -> str:
+    marker = _source_gap_marker(output_language)
+    if value:
+        base = f"{value} [{marker}]"
+    else:
+        base = marker
+    if max_length is not None and max_length < len(base):
+        return base[:max(max_length, 0)]
+    if min_length <= len(base):
+        return base
+    target_length = min_length
+    if max_length is not None:
+        target_length = min(min_length, max_length)
+    parts = []
+    while len(" ".join(parts)) < target_length:
+        parts.append(base if not parts else marker)
+    return " ".join(parts)[:target_length]
+
+
+def _source_gap_marker(output_language: str | None) -> str:
+    if str(output_language or "").lower().startswith("ru"):
+        return "Не указано в исходных материалах."
+    return "Not provided in source materials."
+
+
+def _finding_lacks_evidence(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    evidence = item.get("evidence")
+    return isinstance(evidence, str) and not evidence.strip()
+
+
+def _number_lacks_source(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    source = item.get("source")
+    return isinstance(source, str) and not source.strip()
+
+
+def _structured_narrative_object_lacks_substance(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    title = item.get("title")
+    body = item.get("detail")
+    if body is None:
+        body = item.get("content")
+    if body is None:
+        body = item.get("markdown")
+    return isinstance(title, str) and not title.strip() and isinstance(body, str) and not body.strip()
+
+
+def _array_items_are_structured_narrative_objects(item_schema: Any, root_schema: dict) -> bool:
+    if not isinstance(item_schema, dict):
+        return False
+    resolved_schema = item_schema
+    if "$ref" in resolved_schema:
+        resolved = _resolve_local_schema_ref(str(resolved_schema["$ref"]), root_schema)
+        if resolved is not None:
+            resolved_schema = resolved
+    properties = resolved_schema.get("properties")
+    required = resolved_schema.get("required")
+    if resolved_schema.get("type") != "object" or not isinstance(properties, dict) or not isinstance(required, list):
+        return False
+    required_set = set(required)
+    property_set = set(properties)
+    return any(
+        {"title", body_field}.issubset(required_set) and {"title", body_field}.issubset(property_set)
+        for body_field in ("detail", "content", "markdown")
+    )
+
+
+def _reconcile_unsupported_compact_verdict(value: dict, *, output_language: str | None) -> dict:
+    if "verdict" not in value:
+        return value
+    normalized = dict(value)
+    normalized["verdict"] = "UNKNOWN"
+    if isinstance(normalized.get("confidence"), int | float) and not isinstance(normalized.get("confidence"), bool):
+        normalized["confidence"] = min(float(normalized["confidence"]), 0.1)
+    gap = (
+        "Неподтвержденные выводы IC Review отброшены: в них не было evidence."
+        if str(output_language or "").lower().startswith("ru")
+        else "Unsupported IC Review findings were dropped because they did not include evidence."
+    )
+    existing_gaps = normalized.get("data_gaps")
+    if isinstance(existing_gaps, list):
+        normalized["data_gaps"] = [gap, *existing_gaps] if len(existing_gaps) < 7 else existing_gaps
+    return normalized
+
+
+def _list_length(value: Any) -> int | None:
+    return len(value) if isinstance(value, list) else None
 
 
 def _schema_option_matches_value(schema: dict, value: Any, root_schema: dict) -> bool:
