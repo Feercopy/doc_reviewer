@@ -131,7 +131,11 @@ def _normalize_schema_bounded_strings(
     if expected_type == "array" and isinstance(value, list):
         item_schema = resolved_schema.get("items")
         normalized_items = value
-        if property_name in _REFERENCE_ARRAY_PROPERTIES:
+        if _array_items_are_report_items(item_schema, root_schema):
+            normalized_items = [
+                item for item in value if not _report_item_lacks_substance(item)
+            ]
+        elif property_name in _REFERENCE_ARRAY_PROPERTIES:
             normalized_items = [
                 item for item in value if not (isinstance(item, str) and not item.strip())
             ]
@@ -209,6 +213,38 @@ def _number_lacks_source(item: Any) -> bool:
         return False
     source = item.get("source")
     return isinstance(source, str) and not source.strip()
+
+
+def _report_item_lacks_substance(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    title = item.get("title")
+    detail = item.get("detail")
+    return (
+        isinstance(title, str)
+        and not title.strip()
+        and isinstance(detail, str)
+        and not detail.strip()
+    )
+
+
+def _array_items_are_report_items(item_schema: Any, root_schema: dict) -> bool:
+    if not isinstance(item_schema, dict):
+        return False
+    resolved_schema = item_schema
+    if "$ref" in resolved_schema:
+        resolved = _resolve_local_schema_ref(str(resolved_schema["$ref"]), root_schema)
+        if resolved is not None:
+            resolved_schema = resolved
+    properties = resolved_schema.get("properties")
+    required = resolved_schema.get("required")
+    return (
+        resolved_schema.get("type") == "object"
+        and isinstance(properties, dict)
+        and isinstance(required, list)
+        and {"title", "detail"}.issubset(set(required))
+        and {"title", "detail"}.issubset(properties)
+    )
 
 
 def _schema_option_matches_value(schema: dict, value: Any, root_schema: dict) -> bool:

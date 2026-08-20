@@ -197,6 +197,54 @@ def test_drops_blank_categorical_list_items_instead_of_fabricating_risks():
     assert normalized["critical_risks"] == ["Margin sensitivity is not quantified."]
 
 
+def test_drops_blank_report_items_instead_of_fabricating_structured_risks():
+    schema = {
+        "type": "object",
+        "required": ["risks"],
+        "properties": {
+            "risks": {
+                "type": "array",
+                "items": {"$ref": "#/$defs/report_item"},
+            },
+        },
+        "$defs": {
+            "report_item": {
+                "type": "object",
+                "required": ["title", "detail"],
+                "properties": {
+                    "title": {"type": "string", "minLength": 1, "maxLength": 80},
+                    "detail": {"type": "string", "minLength": 1, "maxLength": 120},
+                    "severity": {"type": "string", "maxLength": 80},
+                },
+            },
+        },
+    }
+
+    normalized = normalize_schema_bounded_strings(
+        {
+            "risks": [
+                {"title": "", "detail": "", "severity": "critical"},
+                {
+                    "title": "Margin sensitivity",
+                    "detail": "Downside scenario is not quantified.",
+                    "severity": "critical",
+                },
+            ]
+        },
+        schema,
+        schema,
+    )
+
+    validate(instance=normalized, schema=schema)
+    assert normalized["risks"] == [
+        {
+            "title": "Margin sensitivity",
+            "detail": "Downside scenario is not quantified.",
+            "severity": "critical",
+        }
+    ]
+
+
 def test_keeps_enum_and_const_values_strict():
     schema = {
         "type": "object",
