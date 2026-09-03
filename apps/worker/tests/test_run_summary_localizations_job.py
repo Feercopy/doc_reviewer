@@ -330,6 +330,32 @@ def test_new_summary_schema_retry_handles_empty_critical_problems(tmp_path, monk
         get_settings.cache_clear()
 
 
+def test_new_summary_traction_summary_filters_blank_period_values_together():
+    normalized = new_summary_generation._normalize_traction_summary(
+        {
+            "metric_label": "DTB",
+            "periods": ["2025", "", "2027"],
+            "rows": [{"label": "Total", "values": ["1", "2", "3"]}],
+        },
+        language="en",
+    )
+
+    assert normalized == {
+        "metric_label": "DTB",
+        "periods": ["2025", "2027"],
+        "rows": [{"label": "Total", "values": ["1", "3"]}],
+    }
+
+
+def test_new_summary_solution_validation_detail_ignores_non_list_items():
+    assert (
+        new_summary_generation._normalized_required_detail(
+            {"type": "solution_validation", "items": None}
+        )
+        is None
+    )
+
+
 def test_english_generation_uses_original_evidence_not_russian_variant(tmp_path, monkeypatch):
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
     get_settings.cache_clear()

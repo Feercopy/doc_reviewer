@@ -602,11 +602,21 @@ def _normalize_traction_summary(value: Any, *, language: str) -> dict[str, Any]:
         periods = value.get("periods")
         rows = value.get("rows")
         if isinstance(metric_label, str) and metric_label.strip() and isinstance(periods, list) and isinstance(rows, list):
-            normalized_periods = [str(period).strip() for period in periods if str(period).strip()]
+            period_pairs = [
+                (index, str(period).strip())
+                for index, period in enumerate(periods)
+                if str(period).strip()
+            ]
+            normalized_periods = [period for _, period in period_pairs]
             normalized_rows = [
                 {
                     "label": str(row.get("label") or "").strip(),
-                    "values": [str(item) for item in row.get("values", [])] if isinstance(row.get("values"), list) else [],
+                    "values": [
+                        str(row.get("values", [])[index])
+                        if isinstance(row.get("values"), list) and index < len(row.get("values", []))
+                        else ""
+                        for index, _ in period_pairs
+                    ],
                 }
                 for row in rows
                 if isinstance(row, dict) and str(row.get("label") or "").strip()
@@ -697,9 +707,12 @@ def _normalized_required_detail(detail: Any) -> dict[str, Any] | None:
         return None
     detail_type = detail.get("type")
     if detail_type == "solution_validation":
+        detail_items = detail.get("items")
+        if not isinstance(detail_items, list):
+            return None
         items = [
             {"text": text, "verdict": verdict}
-            for item in detail.get("items", [])
+            for item in detail_items
             if isinstance(item, dict)
             for text in [_non_empty_string(item.get("text"))]
             for verdict in [_enum_value(item.get("verdict"), {"confirmed", "insufficient"})]
