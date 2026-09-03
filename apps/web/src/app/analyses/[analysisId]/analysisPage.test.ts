@@ -424,6 +424,21 @@ describe("analysis result page", () => {
     expect(pageSource).toContain("Модель собирает RU/EN Summary");
   });
 
+  it("keeps embedded AI Summary aligned to the analysis tab content width", () => {
+    const newSummarySource = readFileSync(
+      new URL("../../../components/new-summary/NewSummaryReport.tsx", import.meta.url),
+      "utf8",
+    );
+    const embeddedStyles = newSummarySource.slice(
+      newSummarySource.indexOf(".new-summary-shell--embedded {"),
+      newSummarySource.indexOf(".new-summary-toolbar {"),
+    );
+
+    expect(embeddedStyles).toContain("width: 100%;");
+    expect(embeddedStyles).toContain("max-width: none;");
+    expect(embeddedStyles).toContain("margin: 0;");
+  });
+
   it("renders the stage checklist as a red and green traffic-light block above Summary product analysis", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const resultPanelSource = pageSource.slice(

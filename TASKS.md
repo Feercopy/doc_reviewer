@@ -21,6 +21,11 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Align embedded AI Summary width with Product Analysis and Financial
+  Analysis tabs. The production analysis page now keeps `NewSummaryReportView`
+  full-width only in embedded mode, while standalone concept pages retain their
+  own constrained report width. No skill, API, worker, table data, or
+  generation logic changed.
 - [x] Add AI Summary generation observability without exposing technical logs
   in the product UI. The New Summary API now returns a safe public progress
   state, the analysis page renders a stage progress bar while RU/EN Summary is
