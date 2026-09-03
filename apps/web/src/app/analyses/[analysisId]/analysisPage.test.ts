@@ -51,59 +51,38 @@ describe("analysis result page", () => {
     expect(layer2Source).not.toContain("evidenceDisplayLabel");
   });
 
-  it("splits analysis output into AI Summary and nested admin Full Report tabs", () => {
+  it("renders AI Summary, Product Analysis, and Financial Analysis as top-level tabs for all users", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const topTabsSource = pageSource.slice(
       pageSource.indexOf("const analysisTabs"),
-      pageSource.indexOf("const fullReportTabs"),
-    );
-    const fullReportTabsSource = pageSource.slice(
-      pageSource.indexOf("const fullReportTabs"),
       pageSource.indexOf("const feedbackRatings"),
     );
 
     expect(topTabsSource).toContain('{ id: "executiveSummary", label: "AI Summary" }');
-    expect(topTabsSource).toContain('{ id: "fullReport", label: "Full Report" }');
-    expect(topTabsSource).not.toContain("Gate Challenger");
+    expect(topTabsSource).toContain('{ id: "mainOutput", label: "Product Analysis" }');
+    expect(topTabsSource).toContain('{ id: "icReview", label: "Financial Analysis" }');
+    expect(topTabsSource.indexOf("AI Summary")).toBeLessThan(topTabsSource.indexOf("Product Analysis"));
+    expect(topTabsSource.indexOf("Product Analysis")).toBeLessThan(topTabsSource.indexOf("Financial Analysis"));
+    expect(topTabsSource).not.toContain("Full Report");
+    expect(topTabsSource).not.toContain("Legacy Summary");
     expect(topTabsSource).not.toContain("Document comments");
-    expect(fullReportTabsSource).toContain('{ id: "legacySummary", label: "Legacy Summary" }');
-    expect(fullReportTabsSource).toContain('{ id: "mainOutput", label: "Product Analysis" }');
-    expect(fullReportTabsSource).toContain('{ id: "icReview", label: "Financial Analysis" }');
-    expect(fullReportTabsSource).toContain('{ id: "documentComments", label: "Document comments" }');
-    expect(fullReportTabsSource).toContain('{ id: "fullOutput", label: "Full Output" }');
-    expect(fullReportTabsSource.indexOf("Legacy Summary")).toBeLessThan(fullReportTabsSource.indexOf("Product Analysis"));
-    expect(fullReportTabsSource.indexOf("Product Analysis")).toBeLessThan(fullReportTabsSource.indexOf("Financial Analysis"));
-    expect(fullReportTabsSource.indexOf("Financial Analysis")).toBeLessThan(fullReportTabsSource.indexOf("Document comments"));
-    expect(fullReportTabsSource.indexOf("Document comments")).toBeLessThan(fullReportTabsSource.indexOf("Full Output"));
-    expect(fullReportTabsSource).not.toContain('id: "devilsAdvocate"');
+    expect(topTabsSource).not.toContain("Full Output");
+    expect(pageSource).not.toContain("const fullReportTabs");
+    expect(pageSource).not.toContain("visibleAnalysisTabs.map");
+    expect(pageSource).not.toContain("canViewFullReport");
     expect(pageSource).toContain('const [activeTopTab, setActiveTopTab] = useState<AnalysisTopTab>("executiveSummary")');
-    expect(pageSource).toContain('const [activeFullReportTab, setActiveFullReportTab] = useState<FullReportTab>("mainOutput")');
-    expect(pageSource).toContain('const canViewFullReport = currentUserRole === "admin"');
-    expect(pageSource).toContain("visibleAnalysisTabs.map");
-    expect(pageSource).toContain('activeTopTab === "fullReport" && canViewFullReport');
     expect(pageSource).toContain("function NewSummaryPanel");
-    expect(pageSource).toContain("function ResultPanel");
     expect(pageSource).toContain('activeTopTab === "executiveSummary"');
-    expect(pageSource).toContain('activeTopTab === "fullReport"');
+    expect(pageSource).toContain('activeTopTab === "mainOutput"');
+    expect(pageSource).toContain('activeTopTab === "icReview"');
     expect(pageSource).toContain('<NewSummaryPanel analysis={analysis} newSummary={newSummary} newSummaryError={newSummaryError} />');
-    expect(pageSource).toContain('activeFullReportTab === "legacySummary"');
-    expect(pageSource).toContain("fallbackToNative ? analysisShortSummary(analysis) : null");
-    expect(pageSource).toContain("fallbackToNative ? analysisStageChecklist(analysis) : []");
-    expect(pageSource).toContain("const agentVerdicts = buildAgentVerdicts(analysis)");
-    expect(pageSource).toContain('className="analysis-result-agent-verdicts"');
-    expect(pageSource).toContain("analysis-result-agent-verdict__marker");
-    expect(pageSource).toContain("<h2>{labels.shortSummary}</h2>");
-    expect(pageSource).toContain("analysis-result-summary");
-    expect(pageSource).toContain("analysis-result-report");
-    expect(pageSource).toContain("function ResultReportSection");
-    expect(pageSource).toContain("title={labels.productAnalysis}");
-    expect(pageSource).toContain("title={labels.financialAnalysis}");
+    expect(pageSource).toContain("{activeTopTab === \"mainOutput\" ? <MainSkillMarkdownPanel analysis={analysis} /> : null}");
+    expect(pageSource).toContain('{activeTopTab === "icReview" ? (');
     expect(pageSource).toContain("resultProductAnalysisMarkdown(analysis)");
     expect(pageSource).toContain("truncateGateMarkdownBeforeIcRecommendations");
-    expect(pageSource).toContain("function IcReviewTextOutput");
-    expect(pageSource).toContain("function DocumentCommentsPanel");
     expect(pageSource).toContain("function IcReviewPanel");
-    expect(pageSource).toContain('activeFullReportTab === "icReview"');
+    expect(pageSource).not.toContain('activeTopTab === "fullReport"');
+    expect(pageSource).not.toContain("activeFullReportTab");
     expect(pageSource).not.toContain("Show in document");
     expect(pageSource).not.toContain("Copy anchor");
     expect(pageSource).not.toContain("All severity");
@@ -301,15 +280,16 @@ describe("analysis result page", () => {
     expect(pageSource).toContain('analysis.status === "running"');
   });
 
-  it("loads lazy Gate Challenger details from Full Output", () => {
+  it("keeps lazy Gate Challenger detail rendering out of the visible top-level tabs", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const fullOutputSource = pageSource.slice(
       pageSource.indexOf("function FullOutputPanel"),
       pageSource.indexOf("function TracePanel"),
     );
 
-    expect(pageSource).toContain("createAnalysisDetails");
-    expect(pageSource).toContain("async function loadAnalysisDetails");
+    expect(pageSource).not.toContain("createAnalysisDetails");
+    expect(pageSource).not.toContain("async function loadAnalysisDetails");
+    expect(pageSource).not.toContain('label: "Full Output"');
     expect(fullOutputSource).toContain("Load detailed Layer 1 / Layer 2");
     expect(fullOutputSource).not.toContain("isAnalysisDetailsResponseIdMissing(analysis)");
     expect(fullOutputSource).not.toContain("Gate Challenger response id was not saved");
@@ -319,7 +299,7 @@ describe("analysis result page", () => {
     expect(pageSource).not.toContain("!analysis.run_parameters?.gate_challenger_response_id");
   });
 
-  it("lets analysis tabs wrap on narrow screens without clipping Full Output", () => {
+  it("lets analysis tabs wrap on narrow screens without clipping Financial Analysis", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const tabStyles = pageSource.slice(
       pageSource.indexOf(".analysis-tabs {", pageSource.indexOf("const paperAnalysisOverrides")),
@@ -399,34 +379,25 @@ describe("analysis result page", () => {
     expect(pageSource).toContain(".analysis-result-report-section__body > .gc-markdown-preview");
   });
 
-  it("shows instant RU and EN switching only for independently generated new Summary variants", () => {
+  it("shows instant RU and EN switching through generated AI Summary variants without legacy localization requests", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    const resultPanelSource = pageSource.slice(
-      pageSource.indexOf("function ResultPanel"),
-      pageSource.indexOf("function MainSkillMarkdownPanel"),
+    const newSummaryPanelSource = pageSource.slice(
+      pageSource.indexOf("function NewSummaryPanel"),
+      pageSource.indexOf("function ResultReportSection"),
     );
 
-    expect(pageSource).toContain("ensureSummaryLocalizations(params.analysisId)");
-    expect(pageSource).toContain("refreshLocalizations(hasWaitingVariant(loaded))");
-    expect(pageSource).toContain("getSummaryLocalizations(params.analysisId)");
+    expect(pageSource).not.toContain("ensureSummaryLocalizations(params.analysisId)");
+    expect(pageSource).not.toContain("getSummaryLocalizations(params.analysisId)");
+    expect(pageSource).toContain("ensureNewSummary(params.analysisId)");
+    expect(pageSource).toContain("getNewSummary(params.analysisId)");
+    expect(newSummaryPanelSource).toContain('newSummary.ru.status === "completed"');
+    expect(newSummaryPanelSource).toContain('newSummary.en.status === "completed"');
+    expect(newSummaryPanelSource).toContain("return <NewSummaryReportView embedded report={report} />");
     expect(pageSource).toContain('useState<OutputLanguage>("ru")');
-    expect(resultPanelSource).toContain('localizations?.available === true');
-    expect(resultPanelSource).toContain('localizations.generation_mode === "independent"');
-    expect(resultPanelSource).toContain('localizations.ru.status === "completed"');
-    expect(resultPanelSource).toContain('localizations.en.status === "completed"');
-    expect(resultPanelSource).toContain('localizations.ru.payload !== null');
-    expect(resultPanelSource).toContain('localizations.en.payload !== null');
-    expect(resultPanelSource).toContain('bilingualReady ? <div className="analysis-summary-language-switch"');
-    expect(resultPanelSource).toContain('const displayLanguage = bilingualReady ? language : nativeLanguage');
-    expect(resultPanelSource).toContain("labels.preparingBoth");
-    expect(resultPanelSource).toContain("onLanguageChange(\"ru\")");
-    expect(resultPanelSource).toContain("onLanguageChange(\"en\")");
-    expect(resultPanelSource).toContain("РУС");
-    expect(resultPanelSource).toContain("ENG");
-    expect(resultPanelSource).not.toContain("window.location.reload");
+    expect(pageSource).not.toContain("window.location.reload");
   });
 
-  it("renders repository AI Summary as the primary tab and keeps legacy Summary inside admin Full Report", () => {
+  it("renders repository AI Summary as the primary tab for every analysis viewer", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const resultPanelSource = pageSource.slice(
       pageSource.indexOf("function ResultPanel"),
@@ -440,7 +411,8 @@ describe("analysis result page", () => {
     expect(pageSource).toContain("ensureNewSummary(params.analysisId)");
     expect(pageSource).toContain("getNewSummary(params.analysisId)");
     expect(pageSource).toContain('if (analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed")');
-    expect(pageSource).toContain('activeFullReportTab === "legacySummary"');
+    expect(pageSource).not.toContain('activeFullReportTab === "legacySummary"');
+    expect(pageSource).not.toContain('activeTopTab === "fullReport"');
     expect(pageSource).toContain('import { NewSummaryReportView } from "@/components/new-summary/NewSummaryReport";');
     expect(resultPanelSource).not.toContain("NewSummaryReportView");
     expect(resultPanelSource).toContain("<ResultReportSection title={labels.productAnalysis}>");

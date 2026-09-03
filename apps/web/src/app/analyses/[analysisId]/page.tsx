@@ -7,18 +7,13 @@ import { AppShell } from "@/components/AppShell";
 import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { NewSummaryReportView } from "@/components/new-summary/NewSummaryReport";
 import { StatusBadge } from "@/components/StatusBadge";
-import { me } from "@/lib/api/auth";
 import {
-  createAnalysisDetails,
   deleteAnalysis,
   ensureNewSummary,
-  ensureSummaryLocalizations,
   getAnalysis,
   getAnalysisStatus,
   getDocument,
   getNewSummary,
-  getParsedText,
-  getSummaryLocalizations,
   type AnalysisCheckRunStatusRecord,
   type AnalysisCheckStepRecord,
   type AnalysisCheckStepStatusRecord,
@@ -36,7 +31,6 @@ import {
   type SourceTrace,
   type SummaryLocalizationsRecord,
 } from "@/lib/api/documents";
-import type { Role } from "@/lib/api/types";
 import { submitFeedback } from "@/lib/api/feedback";
 import { createIcReviewRun, icReviewArtifactUrl } from "@/lib/api/ic-review";
 import type { NewSummaryReport } from "@/lib/newSummary";
@@ -76,8 +70,7 @@ import {
 } from "./icReviewDisplay";
 import { buildAgentVerdicts, buildFinalVerdict } from "./resultDisplay";
 
-type AnalysisTopTab = "executiveSummary" | "fullReport";
-type FullReportTab = "legacySummary" | "mainOutput" | "documentComments" | "icReview" | "fullOutput";
+type AnalysisTopTab = "executiveSummary" | "mainOutput" | "icReview";
 
 type EvidenceItem = {
   id: string;
@@ -90,15 +83,8 @@ type EvidenceItem = {
 
 const analysisTabs: Array<{ id: AnalysisTopTab; label: string }> = [
   { id: "executiveSummary", label: "AI Summary" },
-  { id: "fullReport", label: "Full Report" },
-];
-
-const fullReportTabs: Array<{ id: FullReportTab; label: string }> = [
-  { id: "legacySummary", label: "Legacy Summary" },
   { id: "mainOutput", label: "Product Analysis" },
   { id: "icReview", label: "Financial Analysis" },
-  { id: "documentComments", label: "Document comments" },
-  { id: "fullOutput", label: "Full Output" },
 ];
 
 const outputLanguageOptions: readonly OutputLanguage[] = ["ru", "en"];
@@ -120,19 +106,14 @@ export default function AnalysisDetailPage() {
   const params = useParams<{ analysisId: string }>();
   const [analysis, setAnalysis] = useState<AnalysisRecord | null>(null);
   const [analysisDocument, setAnalysisDocument] = useState<DocumentRecord | null>(null);
-  const [parsedDocumentText, setParsedDocumentText] = useState<string | null>(null);
-  const [parsedDocumentError, setParsedDocumentError] = useState("");
   const [error, setError] = useState("");
   const [feedbackStatus, setFeedbackStatus] = useState("");
   const [feedbackComment, setFeedbackComment] = useState("");
   const [feedbackRating, setFeedbackRating] = useState<FeedbackRating>(4);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [activeTopTab, setActiveTopTab] = useState<AnalysisTopTab>("executiveSummary");
-  const [activeFullReportTab, setActiveFullReportTab] = useState<FullReportTab>("mainOutput");
-  const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null);
   const [runDetailsOpen, setRunDetailsOpen] = useState(false);
   const [isRefreshingAnalysis, setIsRefreshingAnalysis] = useState(false);
-  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [isDeletingAnalysis, setIsDeletingAnalysis] = useState(false);
   const [providerModels, setProviderModels] = useState<ProviderModelOptions[]>([]);
   const [icReviewProvider, setIcReviewProvider] = useState<Provider>("openai_compatible");
@@ -143,42 +124,8 @@ export default function AnalysisDetailPage() {
   const [icReviewWorkbookInputKey, setIcReviewWorkbookInputKey] = useState(0);
   const [icReviewWorkbookError, setIcReviewWorkbookError] = useState("");
   const [isLaunchingIcReview, setIsLaunchingIcReview] = useState(false);
-  const [summaryLanguage, setSummaryLanguage] = useState<OutputLanguage>("ru");
-  const [summaryLocalizations, setSummaryLocalizations] = useState<SummaryLocalizationsRecord | null>(null);
-  const [summaryLocalizationError, setSummaryLocalizationError] = useState("");
   const [newSummary, setNewSummary] = useState<NewSummaryRecord | null>(null);
   const [newSummaryError, setNewSummaryError] = useState("");
-  const canViewFullReport = currentUserRole === "admin";
-  const visibleAnalysisTabs = useMemo(
-    () => (canViewFullReport ? analysisTabs : analysisTabs.filter((tab) => tab.id !== "fullReport")),
-    [canViewFullReport],
-  );
-
-  useEffect(() => {
-    let ignore = false;
-
-    me()
-      .then((user) => {
-        if (!ignore) {
-          setCurrentUserRole(user.role);
-        }
-      })
-      .catch(() => {
-        if (!ignore) {
-          setCurrentUserRole(null);
-        }
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!canViewFullReport && activeTopTab === "fullReport") {
-      setActiveTopTab("executiveSummary");
-    }
-  }, [activeTopTab, canViewFullReport]);
 
   useEffect(() => {
     let ignore = false;
@@ -201,50 +148,6 @@ export default function AnalysisDetailPage() {
       ignore = true;
     };
   }, [params.analysisId]);
-
-  useEffect(() => {
-    if (!canViewFullReport || analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed") {
-      setSummaryLocalizations(null);
-      setSummaryLocalizationError("");
-      return;
-    }
-
-    let cancelled = false;
-    let timer: number | undefined;
-    const hasPendingVariant = (value: SummaryLocalizationsRecord) =>
-      value.available
-      && [value.ru.status, value.en.status].some((status) => status === "waiting" || status === "queued" || status === "running");
-    const hasWaitingVariant = (value: SummaryLocalizationsRecord) =>
-      value.available && [value.ru.status, value.en.status].some((status) => status === "waiting");
-
-    async function refreshLocalizations(ensure: boolean) {
-      try {
-        const loaded = ensure
-          ? await ensureSummaryLocalizations(params.analysisId)
-          : await getSummaryLocalizations(params.analysisId);
-        if (cancelled) {
-          return;
-        }
-        setSummaryLocalizations(loaded);
-        setSummaryLocalizationError("");
-        if (hasPendingVariant(loaded)) {
-          timer = window.setTimeout(() => refreshLocalizations(hasWaitingVariant(loaded)), 2000);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setSummaryLocalizationError(err instanceof Error ? err.message : "Failed to prepare Summary language versions");
-        }
-      }
-    }
-
-    void refreshLocalizations(true);
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) {
-        window.clearTimeout(timer);
-      }
-    };
-  }, [analysis?.id, analysis?.status, analysis?.ic_review_run?.id, analysis?.ic_review_run?.status, canViewFullReport, params.analysisId]);
 
   useEffect(() => {
     if (analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed") {
@@ -379,15 +282,11 @@ export default function AnalysisDetailPage() {
   useEffect(() => {
     if (!analysis?.document_id) {
       setAnalysisDocument(null);
-      setParsedDocumentText(null);
-      setParsedDocumentError("");
       return;
     }
 
     let ignore = false;
     setAnalysisDocument(null);
-    setParsedDocumentText(null);
-    setParsedDocumentError("");
     getDocument(analysis.document_id)
       .then((document) => {
         if (!ignore) {
@@ -404,35 +303,6 @@ export default function AnalysisDetailPage() {
       ignore = true;
     };
   }, [analysis?.document_id]);
-
-  useEffect(() => {
-    if (
-      activeTopTab !== "fullReport" ||
-      activeFullReportTab !== "documentComments" ||
-      !analysis?.document_id ||
-      parsedDocumentText !== null ||
-      parsedDocumentError
-    ) {
-      return;
-    }
-
-    let ignore = false;
-    getParsedText(analysis.document_id)
-      .then((text) => {
-        if (!ignore) {
-          setParsedDocumentText(text);
-        }
-      })
-      .catch((err) => {
-        if (!ignore) {
-          setParsedDocumentError(err instanceof Error ? err.message : "Failed to load parsed document text");
-        }
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, [activeFullReportTab, activeTopTab, analysis?.document_id, parsedDocumentError, parsedDocumentText]);
 
   const configuredProviderModels = useMemo(() => providerModels.filter((item) => item.has_key), [providerModels]);
   const selectedProviderModel = useMemo(
@@ -497,8 +367,7 @@ export default function AnalysisDetailPage() {
         ...(icReviewWorkbook ? { financial_model: icReviewWorkbook } : {}),
       });
       setAnalysis((current) => (current?.id === analysis.id ? { ...current, ic_review_run: run } : current));
-      setActiveTopTab("fullReport");
-      setActiveFullReportTab("icReview");
+      setActiveTopTab("icReview");
       setIcReviewWorkbook(null);
       setIcReviewWorkbookInputKey((current) => current + 1);
       setIcReviewWorkbookError("");
@@ -529,26 +398,6 @@ export default function AnalysisDetailPage() {
       setFeedbackOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit feedback");
-    }
-  }
-
-  async function loadAnalysisDetails() {
-    if (!analysis) {
-      return;
-    }
-    setIsLoadingDetails(true);
-    setError("");
-    try {
-      const detailRun = await createAnalysisDetails(analysis.id);
-      setAnalysis((current) => (current?.id === analysis.id ? { ...current, detail_run: detailRun } : current));
-      if (isActiveRunStatus(detailRun.status)) {
-        setActiveTopTab("fullReport");
-        setActiveFullReportTab("fullOutput");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load analysis details");
-    } finally {
-      setIsLoadingDetails(false);
     }
   }
 
@@ -653,7 +502,7 @@ export default function AnalysisDetailPage() {
             <div className="analysis-layout">
               <section className="analysis-main stack">
                 <nav className="analysis-tabs" aria-label="Analysis output sections">
-                  {visibleAnalysisTabs.map((tab) => (
+                  {analysisTabs.map((tab) => (
                     <button
                       aria-pressed={activeTopTab === tab.id}
                       className={activeTopTab === tab.id ? "analysis-tab analysis-tab--active" : "analysis-tab"}
@@ -669,66 +518,24 @@ export default function AnalysisDetailPage() {
                 {activeTopTab === "executiveSummary" ? (
                   <NewSummaryPanel analysis={analysis} newSummary={newSummary} newSummaryError={newSummaryError} />
                 ) : null}
-                {activeTopTab === "fullReport" && canViewFullReport ? (
-                  <>
-                    <nav className="analysis-tabs" aria-label="Full report sections">
-                      {fullReportTabs.map((tab) => (
-                        <button
-                          aria-pressed={activeFullReportTab === tab.id}
-                          className={activeFullReportTab === tab.id ? "analysis-tab analysis-tab--active" : "analysis-tab"}
-                          key={tab.id}
-                          type="button"
-                          onClick={() => setActiveFullReportTab(tab.id)}
-                        >
-                          {tab.label}
-                        </button>
-                      ))}
-                    </nav>
-
-                    {activeFullReportTab === "legacySummary" ? (
-                      <ResultPanel
-                        analysis={analysis}
-                        language={summaryLanguage}
-                        localizations={summaryLocalizations}
-                        localizationError={summaryLocalizationError}
-                        onLanguageChange={setSummaryLanguage}
-                      />
-                    ) : null}
-                    {activeFullReportTab === "mainOutput" ? <MainSkillMarkdownPanel analysis={analysis} /> : null}
-                    {activeFullReportTab === "documentComments" ? (
-                      <DocumentCommentsPanel
-                        documentTitle={analysisDocument?.title || "Source document"}
-                        parsedText={parsedDocumentText}
-                        parsedTextError={parsedDocumentError}
-                        run={analysis.predicted_comment_run}
-                      />
-                    ) : null}
-                    {activeFullReportTab === "icReview" ? (
-                      <IcReviewPanel
-                        analysis={analysis}
-                        providerModels={providerModels}
-                        provider={icReviewProvider}
-                        model={icReviewModel}
-                        outputLanguage={icReviewOutputLanguage}
-                        selectedProviderModel={selectedProviderModel}
-                        workbook={icReviewWorkbook}
-                        workbookInputKey={icReviewWorkbookInputKey}
-                        workbookError={icReviewWorkbookError}
-                        isLaunching={isLaunchingIcReview}
-                        onChangeModel={changeIcReviewModel}
-                        onChangeOutputLanguage={setIcReviewOutputLanguage}
-                        onChangeWorkbook={changeIcReviewWorkbook}
-                        onLaunch={launchIcReview}
-                      />
-                    ) : null}
-                    {activeFullReportTab === "fullOutput" ? (
-                      <FullOutputPanel
-                        analysis={analysis}
-                        isLoadingDetails={isLoadingDetails}
-                        onLoadDetails={loadAnalysisDetails}
-                      />
-                    ) : null}
-                  </>
+                {activeTopTab === "mainOutput" ? <MainSkillMarkdownPanel analysis={analysis} /> : null}
+                {activeTopTab === "icReview" ? (
+                  <IcReviewPanel
+                    analysis={analysis}
+                    providerModels={providerModels}
+                    provider={icReviewProvider}
+                    model={icReviewModel}
+                    outputLanguage={icReviewOutputLanguage}
+                    selectedProviderModel={selectedProviderModel}
+                    workbook={icReviewWorkbook}
+                    workbookInputKey={icReviewWorkbookInputKey}
+                    workbookError={icReviewWorkbookError}
+                    isLaunching={isLaunchingIcReview}
+                    onChangeModel={changeIcReviewModel}
+                    onChangeOutputLanguage={setIcReviewOutputLanguage}
+                    onChangeWorkbook={changeIcReviewWorkbook}
+                    onLaunch={launchIcReview}
+                  />
                 ) : null}
               </section>
             </div>
