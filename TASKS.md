@@ -21,6 +21,14 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Hide IC Review full-report downloads from analysis result pages without
+  removing stored artifacts or backend download support. The visible
+  `Скачать полный отчет`, `Скачать PDF`, and `Скачать MD` controls were removed
+  from the frontend Financial Analysis panel only; IC Review artifacts,
+  schemas, and API download helpers remain intact for traceability and future
+  re-enablement. Updated the IC Review canonical plan and plan index so the
+  documented product contract is compact UI output plus retained internal
+  full-report artifacts, not user-visible full-report downloads.
 - [x] Diagnose and fix AI Summary generation for historical analyses such as
   `283a2039-d479-4673-85c1-bec12d129738`. Production state showed both
   `new_summary` variants failing with `unhashable type: 'dict'`; the failing

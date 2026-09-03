@@ -32,7 +32,7 @@ import {
   type SummaryLocalizationsRecord,
 } from "@/lib/api/documents";
 import { submitFeedback } from "@/lib/api/feedback";
-import { createIcReviewRun, icReviewArtifactUrl } from "@/lib/api/ic-review";
+import { createIcReviewRun } from "@/lib/api/ic-review";
 import type { NewSummaryReport } from "@/lib/newSummary";
 import {
   getProviderDefaultModel,
@@ -1971,7 +1971,7 @@ function IcReviewRunSummary({
         </div>
       ) : null}
 
-      {run.status === "completed" && compactDisplay ? <IcReviewCompletedResult display={compactDisplay} run={run} /> : null}
+      {run.status === "completed" && compactDisplay ? <IcReviewCompletedResult display={compactDisplay} /> : null}
       {run.status === "completed" && !compactDisplay ? (
         <div className="analysis-alert">IC review completed, but compact result is unavailable.</div>
       ) : null}
@@ -1979,43 +1979,10 @@ function IcReviewRunSummary({
   );
 }
 
-function IcReviewFullReportDownloads({ run }: { run: AnalysisCheckRunRecord }) {
-  const pdf = findIcReviewArtifact(run, "artifact:legacy_report_pdf");
-  const markdown = findIcReviewArtifact(run, "artifact:legacy_report_markdown");
-
-  if (!pdf && !markdown) {
-    return null;
-  }
-
-  return (
-    <section className="analysis-ic-section analysis-ic-downloads" aria-label="IC review full report downloads">
-      <h3>Скачать полный отчет</h3>
-      <div className="analysis-ic-download-actions">
-        {pdf ? (
-          <a className="analysis-ic-download" href={icReviewArtifactUrl(run.id, "artifact:legacy_report_pdf")}>
-            Скачать PDF
-          </a>
-        ) : null}
-        {markdown ? (
-          <a className="analysis-ic-download" href={icReviewArtifactUrl(run.id, "artifact:legacy_report_markdown")}>
-            Скачать MD
-          </a>
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
-function findIcReviewArtifact(run: AnalysisCheckRunRecord, key: string) {
-  return run.artifacts.find((artifact) => artifact.key === key) ?? null;
-}
-
 function IcReviewCompletedResult({
   display,
-  run,
 }: {
   display: ReturnType<typeof buildIcReviewCompactDisplay>;
-  run: AnalysisCheckRunRecord;
 }) {
   return (
     <div className="analysis-ic-result stack">
@@ -2023,7 +1990,6 @@ function IcReviewCompletedResult({
         <span className={`analysis-verdict analysis-verdict--${icReviewVerdictTone(display.verdict)}`}>{display.verdict}</span>
         <span>{display.confidence}</span>
       </div>
-      <IcReviewFullReportDownloads run={run} />
       <section className="analysis-short-summary">
         <h3>Executive brief</h3>
         <p>{display.executiveBrief}</p>
@@ -3982,32 +3948,6 @@ const analysisStyles = `
   overflow-wrap: anywhere;
 }
 
-.analysis-ic-download-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.analysis-ic-download {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 44px;
-  border: 1px solid rgba(94, 234, 212, 0.32);
-  border-radius: 8px;
-  background: rgba(20, 184, 166, 0.16);
-  color: #e2e8f0;
-  padding: 0 16px;
-  font-size: 13px;
-  font-weight: 800;
-  text-decoration: none;
-}
-
-.analysis-ic-download:hover {
-  border-color: rgba(94, 234, 212, 0.52);
-  background: rgba(20, 184, 166, 0.24);
-}
-
 .analysis-empty {
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 8px;
@@ -4859,17 +4799,6 @@ const paperAnalysisOverrides = `
 
 .analysis-ic-section {
   border-top-color: #e5eaf0;
-}
-
-.analysis-ic-download {
-  border-color: #d6dee8;
-  background: #ffffff;
-  color: #075e45;
-}
-
-.analysis-ic-download:hover {
-  border-color: #9bdac7;
-  background: #eaf8f2;
 }
 
 .analysis-card {
