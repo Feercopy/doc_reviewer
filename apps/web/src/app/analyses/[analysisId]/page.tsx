@@ -77,7 +77,7 @@ import {
 import { buildAgentVerdicts, buildFinalVerdict } from "./resultDisplay";
 
 type AnalysisTopTab = "executiveSummary" | "fullReport";
-type FullReportTab = "newSummary" | "mainOutput" | "documentComments" | "icReview" | "fullOutput";
+type FullReportTab = "legacySummary" | "mainOutput" | "documentComments" | "icReview" | "fullOutput";
 
 type EvidenceItem = {
   id: string;
@@ -89,12 +89,12 @@ type EvidenceItem = {
 };
 
 const analysisTabs: Array<{ id: AnalysisTopTab; label: string }> = [
-  { id: "executiveSummary", label: "Summary" },
+  { id: "executiveSummary", label: "AI Summary" },
   { id: "fullReport", label: "Full Report" },
 ];
 
 const fullReportTabs: Array<{ id: FullReportTab; label: string }> = [
-  { id: "newSummary", label: "New Summary" },
+  { id: "legacySummary", label: "Legacy Summary" },
   { id: "mainOutput", label: "Product Analysis" },
   { id: "icReview", label: "Financial Analysis" },
   { id: "documentComments", label: "Document comments" },
@@ -203,7 +203,7 @@ export default function AnalysisDetailPage() {
   }, [params.analysisId]);
 
   useEffect(() => {
-    if (analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed") {
+    if (!canViewFullReport || analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed") {
       setSummaryLocalizations(null);
       setSummaryLocalizationError("");
       return;
@@ -244,10 +244,10 @@ export default function AnalysisDetailPage() {
         window.clearTimeout(timer);
       }
     };
-  }, [analysis?.id, analysis?.status, analysis?.ic_review_run?.id, analysis?.ic_review_run?.status, params.analysisId]);
+  }, [analysis?.id, analysis?.status, analysis?.ic_review_run?.id, analysis?.ic_review_run?.status, canViewFullReport, params.analysisId]);
 
   useEffect(() => {
-    if (!canViewFullReport || analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed") {
+    if (analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed") {
       setNewSummary(null);
       setNewSummaryError("");
       return;
@@ -287,7 +287,7 @@ export default function AnalysisDetailPage() {
         window.clearTimeout(timer);
       }
     };
-  }, [analysis?.id, analysis?.status, analysis?.ic_review_run?.id, analysis?.ic_review_run?.status, canViewFullReport, params.analysisId]);
+  }, [analysis?.id, analysis?.status, analysis?.ic_review_run?.id, analysis?.ic_review_run?.status, params.analysisId]);
 
   useEffect(() => {
     let ignore = false;
@@ -667,13 +667,7 @@ export default function AnalysisDetailPage() {
                 </nav>
 
                 {activeTopTab === "executiveSummary" ? (
-                  <ResultPanel
-                    analysis={analysis}
-                    language={summaryLanguage}
-                    localizations={summaryLocalizations}
-                    localizationError={summaryLocalizationError}
-                    onLanguageChange={setSummaryLanguage}
-                  />
+                  <NewSummaryPanel analysis={analysis} newSummary={newSummary} newSummaryError={newSummaryError} />
                 ) : null}
                 {activeTopTab === "fullReport" && canViewFullReport ? (
                   <>
@@ -691,8 +685,14 @@ export default function AnalysisDetailPage() {
                       ))}
                     </nav>
 
-                    {activeFullReportTab === "newSummary" ? (
-                      <NewSummaryPanel analysis={analysis} newSummary={newSummary} newSummaryError={newSummaryError} />
+                    {activeFullReportTab === "legacySummary" ? (
+                      <ResultPanel
+                        analysis={analysis}
+                        language={summaryLanguage}
+                        localizations={summaryLocalizations}
+                        localizationError={summaryLocalizationError}
+                        onLanguageChange={setSummaryLanguage}
+                      />
                     ) : null}
                     {activeFullReportTab === "mainOutput" ? <MainSkillMarkdownPanel analysis={analysis} /> : null}
                     {activeFullReportTab === "documentComments" ? (
@@ -1145,21 +1145,21 @@ function NewSummaryPanel({
   }
 
   return (
-    <section className="analysis-card stack" aria-label="New Summary">
+    <section className="analysis-card stack" aria-label="AI Summary">
       <div className="analysis-section-heading">
         <div>
-          <h2>New Summary</h2>
+          <h2>AI Summary</h2>
           <p className="analysis-muted">Summary from skills/new-summary/SKILL.md will appear here when both language variants are ready.</p>
         </div>
       </div>
       {newSummaryPending ? (
         <div className="analysis-summary-language-loading" aria-live="polite">
-          Готовим новый формат Summary. Старый Summary остаётся во вкладке Summary.
+          Готовим AI Summary по skills/new-summary/SKILL.md.
         </div>
       ) : null}
       {newSummaryError || newSummaryFailed ? (
         <div className="analysis-alert">
-          Новый формат Summary пока не удалось подготовить. Данные старого отчёта доступны в остальных подвкладках Full Report.
+          AI Summary пока не удалось подготовить. Старый отчет доступен администраторам во вкладке Full Report.
         </div>
       ) : null}
       {!newSummaryRequested && !newSummaryError ? (

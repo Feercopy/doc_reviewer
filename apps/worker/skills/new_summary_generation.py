@@ -41,6 +41,7 @@ from skills.result_synthesis_trace import (
 
 LANGUAGES = ("ru", "en")
 MAX_OUTPUT_TOKENS = 12000
+SOURCE_DOCUMENT_MAX_CHARS = 16000
 SCHEMA_PATH = "contracts/schemas/new-summary.schema.json"
 SKILL_PATH = "skills/new-summary/SKILL.md"
 CHECKLIST_PATH = "contracts/new-summary-stage-checklists.json"
@@ -50,26 +51,22 @@ STAGE_LABELS = {
     "gate_2": "Gate 2",
     "gate_3": "Gate 3",
     "stream_review_1": "Stream Review 1",
-    "stream_review_2_plus": "Stream Review 2+ / Progress Review",
-    "progress_review": "Stream Review 2+ / Progress Review",
+    "stream_review_2_plus": "Stream Review 2+",
+    "progress_review": "Progress Review",
 }
 
 
-def generate_and_persist_new_summary_variant(
+def generate_and_persist_new_summary_report(
     *,
     session: Session,
     analysis: Analysis,
     check_run: AnalysisCheckRun,
     source_payload: dict[str, Any],
-    target_language: str,
     provider: Provider,
     model: str,
     api_key: str | None,
     base_url: str | None,
 ) -> dict[str, Any]:
-    if target_language not in LANGUAGES:
-        raise ValueError(f"unsupported_new_summary_language:{target_language}")
-
     response_schema = _new_summary_schema()
     anonymization = anonymize_value_for_model(
         source_payload,
@@ -81,17 +78,16 @@ def generate_and_persist_new_summary_variant(
     )
     prompt = _generation_prompt(
         source_payload=anonymized_source_payload,
-        target_language=target_language,
         response_schema=response_schema,
     )
     run_parameters = dict(check_run.run_parameters or {})
-    mock_results = run_parameters.get("new_summary_mock_provider_results")
-    if isinstance(mock_results, dict) and isinstance(mock_results.get(target_language), dict):
-        run_parameters["mock_provider_result"] = mock_results[target_language]
+    mock_result = run_parameters.get("new_summary_mock_provider_result")
+    if isinstance(mock_result, dict):
+        run_parameters["mock_provider_result"] = mock_result
     apply_ic_review_provider_defaults(run_parameters)
     run_parameters["max_output_tokens"] = MAX_OUTPUT_TOKENS
     run_parameters["max_retries"] = max(1, int(run_parameters.get("max_retries") or 0))
-    run_parameters["new_summary_language"] = target_language
+    run_parameters["new_summary_language"] = "bilingual"
     run_parameters["new_summary_provider"] = provider.value
     run_parameters["new_summary_model"] = model
     run_parameters["new_summary_generation_mode"] = NEW_SUMMARY_GENERATION_MODE
@@ -100,7 +96,7 @@ def generate_and_persist_new_summary_variant(
     step = start_result_synthesis_step(
         session=session,
         check_run=check_run,
-        step_name=f"new_summary_{target_language}",
+        step_name="new_summary_bilingual",
         prompt=prompt,
         run_parameters=run_parameters,
         skill=None,
@@ -113,7 +109,8 @@ def generate_and_persist_new_summary_variant(
         },
     )
     revision = str(check_run.id)
-    mark_new_summary_running(analysis=analysis, revision=revision, language=target_language)
+    for language in LANGUAGES:
+        mark_new_summary_running(analysis=analysis, revision=revision, language=language)
     session.commit()
 
     provider_results: list[AnalysisProviderResult] = []
@@ -130,10 +127,9 @@ def generate_and_persist_new_summary_variant(
         )
         payload = deanonymize_model_value(payload, metadata=run_parameters.get(RUN_PARAMETER_KEY))
         validate(instance=payload, schema=response_schema)
-        payload = _validated_source_dependent_payload(
+        payload = _validated_source_dependent_report(
             payload=payload,
             source_payload=source_payload,
-            target_language=target_language,
             response_schema=response_schema,
         )
     except Exception as exc:
@@ -147,20 +143,29 @@ def generate_and_persist_new_summary_variant(
         mark_new_summary_failed(
             analysis=analysis,
             revision=revision,
-            language=target_language,
+            language="ru",
+            error_message=str(exc),
+        )
+        mark_new_summary_failed(
+            analysis=analysis,
+            revision=revision,
+            language="en",
             error_message=str(exc),
         )
         session.commit()
         raise
 
-    persist_new_summary_variant(
-        analysis=analysis,
-        revision=revision,
-        language=target_language,
-        payload=payload,
-        source_fingerprint=new_summary_source_fingerprint(source_payload),
-        trace_step_id=str(step.id),
-    )
+    variants = _split_bilingual_report(payload)
+    source_fingerprint = new_summary_source_fingerprint(source_payload)
+    for language in LANGUAGES:
+        persist_new_summary_variant(
+            analysis=analysis,
+            revision=revision,
+            language=language,
+            payload=variants[language],
+            source_fingerprint=source_fingerprint,
+            trace_step_id=str(step.id),
+        )
     complete_result_synthesis_step(
         session=session,
         step=step,
@@ -192,6 +197,7 @@ def build_new_summary_source(
         "initiative_title": _initiative_title(analysis=analysis, document=document),
         "document_stage": stage,
         "document_type": document_type,
+        "source_document": _source_document_payload(document),
         "gate_challenger": _gate_challenger_source(analysis.structured_output),
         "gate_challenger_detail": _latest_detail_source(session=session, analysis=analysis),
         "ic_review": _ic_review_source(check_run.structured_output),
@@ -319,10 +325,31 @@ def _ic_review_source(value: dict[str, Any] | None) -> dict[str, Any]:
         "spreadsheet_audit",
         "critical_risks",
         "data_gaps",
-        "questions_for_team",
+        "required_actions",
         "validation",
     )
     return {key: _copy_jsonish(value.get(key)) for key in keys if key in value}
+
+
+def _source_document_payload(document: Document) -> dict[str, Any]:
+    parsed_text = document.parsed_text.strip() if isinstance(document.parsed_text, str) else ""
+    return {
+        "title": document.title,
+        "original_filename": document.original_filename,
+        "detected_document_type": document.detected_document_type,
+        "manual_document_type": document.manual_document_type,
+        "parsed_text_excerpt": _bounded_source_text(parsed_text),
+    }
+
+
+def _bounded_source_text(value: str) -> str:
+    if len(value) <= SOURCE_DOCUMENT_MAX_CHARS:
+        return value
+    excerpt = value[:SOURCE_DOCUMENT_MAX_CHARS]
+    boundary = excerpt.rfind("\n")
+    if boundary > SOURCE_DOCUMENT_MAX_CHARS // 2:
+        excerpt = excerpt[:boundary]
+    return excerpt.rstrip() + "\n\n[TRUNCATED: source document excerpt was shortened for Summary generation.]"
 
 
 def _copy_jsonish(value: Any) -> Any:
@@ -332,14 +359,15 @@ def _copy_jsonish(value: Any) -> Any:
 def _generation_prompt(
     *,
     source_payload: dict[str, Any],
-    target_language: str,
     response_schema: dict[str, Any],
 ) -> str:
     return "\n\n".join(
         [
             _skill_text().strip(),
             "## Runtime instruction",
-            f"Собери ровно один JSON-объект для output_language={target_language}.",
+            "Собери ровно один bilingual JSON-объект по схеме ниже.",
+            "Первая версия в `versions[]` должна быть английской, вторая — русской.",
+            "Если в источниках нет Traction Summary с числами, не выдумывай значения: используй один период `Not provided`/`Не указано`, одну строку и пустые значения.",
             "Не добавляй Markdown вокруг JSON. Не добавляй пояснения вне JSON.",
             "## JSON Schema",
             json.dumps(response_schema, ensure_ascii=False, indent=2),
@@ -423,27 +451,55 @@ def _validated_new_summary(
     return payload
 
 
-def _validated_source_dependent_payload(
+def _validated_source_dependent_report(
     *,
     payload: dict[str, Any],
     source_payload: dict[str, Any],
-    target_language: str,
     response_schema: dict[str, Any],
 ) -> dict[str, Any]:
-    if payload.get("language") != target_language:
+    if payload.get("language") != "en":
         raise ValueError("new_summary_language_mismatch")
     expected_stage = source_payload.get("document_stage")
-    if isinstance(expected_stage, str) and payload.get("stage") != expected_stage:
-        raise ValueError("new_summary_stage_mismatch")
-
     normalized = dict(payload)
-    normalized["required_elements"] = _required_elements_from_source(
-        source_payload=source_payload,
-        target_language=target_language,
-        generated_payload=payload,
-    )
+    versions = normalized.get("versions")
+    if not isinstance(versions, list) or len(versions) != 2:
+        raise ValueError("new_summary_versions_mismatch")
+    normalized_versions: list[dict[str, Any]] = []
+    for expected_language, version in zip(("en", "ru"), versions, strict=True):
+        if not isinstance(version, dict) or version.get("language") != expected_language:
+            raise ValueError("new_summary_version_language_mismatch")
+        if isinstance(expected_stage, str) and version.get("stage") != expected_stage:
+            raise ValueError("new_summary_stage_mismatch")
+        normalized_version = dict(version)
+        normalized_version["required_elements"] = _required_elements_from_source(
+            source_payload=source_payload,
+            target_language=expected_language,
+            generated_payload=version,
+        )
+        normalized_version["required_details"] = _normalized_required_details(version)
+        normalized_versions.append(normalized_version)
+    normalized["versions"] = normalized_versions
     validate(instance=normalized, schema=response_schema)
     return normalized
+
+
+def _split_bilingual_report(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    title = str(payload.get("title") or "").strip()
+    variants: dict[str, dict[str, Any]] = {}
+    for version in payload.get("versions") or []:
+        if not isinstance(version, dict):
+            continue
+        language = version.get("language")
+        if language not in LANGUAGES:
+            continue
+        variants[language] = {
+            "schema_version": payload["schema_version"],
+            "title": title,
+            **deepcopy(version),
+        }
+    if set(variants) != set(LANGUAGES):
+        raise ValueError("new_summary_split_failed")
+    return variants
 
 
 def _required_elements_from_source(
@@ -472,6 +528,18 @@ def _required_elements_from_source(
         }
         for item_id, label in expected
     ]
+
+
+def _normalized_required_details(payload: dict[str, Any]) -> dict[str, Any]:
+    details = payload.get("required_details")
+    if not isinstance(details, dict):
+        return {}
+    normalized: dict[str, Any] = {}
+    for item_id, detail in details.items():
+        if not isinstance(item_id, str):
+            continue
+        normalized[_canonical_required_element_id(item_id)] = _copy_jsonish(detail)
+    return normalized
 
 
 def _latest_detail_source(*, session: Session, analysis: Analysis) -> Any:
@@ -507,6 +575,9 @@ def _gate_stage_checklist_by_id(source_payload: dict[str, Any]) -> dict[str, dic
     for item in checklist:
         if isinstance(item, dict) and isinstance(item.get("id"), str):
             result[item["id"]] = item
+            canonical_id = _canonical_required_element_id(item["id"])
+            if canonical_id != item["id"]:
+                result[canonical_id] = item
     return result
 
 
@@ -516,14 +587,17 @@ def _generated_required_elements_by_id(payload: dict[str, Any]) -> dict[str, dic
     for item in items:
         if isinstance(item, dict) and isinstance(item.get("id"), str):
             result[item["id"]] = item
+            canonical_id = _canonical_required_element_id(item["id"])
+            if canonical_id != item["id"]:
+                result[canonical_id] = item
     return result
 
 
 def _required_element_status(item: dict[str, Any] | None) -> str:
     status = str((item or {}).get("status") or "").lower()
-    if status in {"present", "green", "true", "yes"}:
-        return "present"
-    return "missing"
+    if status in {"present", "green", "true", "yes", "есть"}:
+        return "есть"
+    return "нет"
 
 
 def _required_element_evidence(
@@ -539,6 +613,23 @@ def _required_element_evidence(
     if target_language == "ru" and isinstance(evidence, str) and evidence.strip():
         return evidence.strip()
     return "Не найдено в чеклисте Gate Challenger." if target_language == "ru" else "Not found in the Gate Challenger checklist."
+
+
+def _canonical_required_element_id(item_id: str) -> str:
+    aliases = {
+        "gate1_primary_traction": "gate1_initial_traction",
+        "gate1_hypotheses_metrics_thresholds": "gate1_hypotheses_with_metrics",
+        "gate2_unique_value_proposition": "gate2_value_proposition",
+        "gate2_mvp_or_target_product": "gate2_target_product",
+        "gate2_metric_linkage_to_product": "gate2_metric_linkage",
+        "gate2_mockups_or_user_flow": "gate2_user_flow",
+        "gate2_gate3_commitments": "gate2_commitments",
+        "stream_review_1_metric_linkage_to_problem": "stream_review_1_input_output_metric_link",
+        "stream_review_2_plus_next_half_year_plan": "progress_review_next_half_year_plan",
+        "stream_review_2_plus_stop_criteria": "progress_review_stop_criteria",
+        "stream_review_2_plus_plan_fact_last_half_year": "progress_review_plan_fact_last_half_year",
+    }
+    return aliases.get(item_id, item_id)
 
 
 def _skill_text() -> str:

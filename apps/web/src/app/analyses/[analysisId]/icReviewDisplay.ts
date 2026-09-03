@@ -104,8 +104,8 @@ export function getIcReviewSpreadsheetAuditText(
 
 export function buildIcReviewCompactDisplay(result: IcReviewCompactResult, language: "ru" | "en" = "en"): IcReviewCompactDisplay {
   const labels = language === "ru"
-    ? ["Ключевые выводы", "Ключевые цифры", "Критические риски", "Пробелы в данных", "Обязательные действия", "Вопросы команде"]
-    : ["Top findings", "Key numbers", "Critical risks", "Data gaps", "Required actions", "Questions for team"];
+    ? ["Ключевые выводы", "Ключевые цифры", "Критические риски", "Пробелы в данных", "Обязательные действия"]
+    : ["Top findings", "Key numbers", "Critical risks", "Data gaps", "Required actions"];
   return {
     verdict: result.verdict,
     executiveBrief: result.executive_brief,
@@ -118,7 +118,6 @@ export function buildIcReviewCompactDisplay(result: IcReviewCompactResult, langu
       { title: labels[2], items: result.critical_risks },
       { title: labels[3], items: result.data_gaps },
       { title: labels[4], items: result.required_actions },
-      { title: labels[5], items: result.questions_for_team },
     ],
   };
 }

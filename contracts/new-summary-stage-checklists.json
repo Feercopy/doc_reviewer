@@ -6,21 +6,21 @@
       "label_en": "Market/opportunity sizing through benchmarks or market data"
     },
     {
-      "id": "gate1_hypotheses_metrics_thresholds",
-      "label_ru": "Набор гипотез для проверки до Gate 2, с метриками и thresholds",
-      "label_en": "Hypotheses to validate before Gate 2, with metrics and thresholds"
-    },
-    {
-      "id": "gate1_primary_traction",
+      "id": "gate1_initial_traction",
       "label_ru": "Хотя бы первичный traction, пусть с низкой confidence",
       "label_en": "At least initial traction, even with low confidence"
+    },
+    {
+      "id": "gate1_hypotheses_with_metrics",
+      "label_ru": "Набор гипотез для проверки до Gate 2, с метриками и thresholds",
+      "label_en": "Hypotheses to validate before Gate 2, with metrics and thresholds"
     }
   ],
   "gate_2": [
     {
-      "id": "gate2_unique_value_proposition",
-      "label_ru": "Уникальное товарное предложение (УТП): в чем представленный продукт лучше имеющихся на рынке и почему",
-      "label_en": "Unique value proposition: why the product is better than existing market alternatives"
+      "id": "gate2_value_proposition",
+      "label_ru": "Уникальное товарное предложение (УТП)",
+      "label_en": "Unique value proposition"
     },
     {
       "id": "gate2_hypothesis_results",
@@ -28,28 +28,28 @@
       "label_en": "Gate 1 hypothesis validation results"
     },
     {
-      "id": "gate2_mvp_or_target_product",
+      "id": "gate2_target_product",
       "label_ru": "Описание MVP/целевого продукта",
       "label_en": "MVP or target product description"
     },
     {
-      "id": "gate2_metric_linkage_to_product",
-      "label_ru": "Связь Input/Output метрик продукта с сутью продукта и его УТП",
-      "label_en": "Link between input/output metrics and the product essence and value proposition"
+      "id": "gate2_metric_linkage",
+      "label_ru": "Связь Input/Output метрик продукта с самой сутью продукта и его УТП",
+      "label_en": "Link between product input/output metrics and the product essence and value proposition"
     },
     {
-      "id": "gate2_mockups_or_user_flow",
+      "id": "gate2_user_flow",
       "label_ru": "Mockups или видео пользовательского flow",
       "label_en": "User-flow mockups or video"
     },
     {
-      "id": "gate2_gate3_commitments",
-      "label_ru": "Commitments к Gate 3: сроки, expected performance, метрики",
-      "label_en": "Gate 3 commitments: timeline, expected performance, and metrics"
+      "id": "gate2_commitments",
+      "label_ru": "Commitments к Gate 3: список функционала и метрики",
+      "label_en": "Gate 3 commitments: feature scope and metrics"
     },
     {
       "id": "gate2_stop_criteria",
-      "label_ru": "Stop-критерии: в каких случаях мы останавливаем работу над продуктом",
+      "label_ru": "Stop-критерии - в каких случаях мы останавливаем работу над продуктом",
       "label_en": "Stop criteria: when work on the product should stop"
     }
   ],
@@ -61,13 +61,8 @@
     },
     {
       "id": "gate3_solution_hypothesis_validation",
-      "label_ru": "Подтверждает ли MVP гипотезу решения: уточнили ли core assumptions трекшн-модели",
+      "label_ru": "Подтверждает ли MVP гипотезу решения: уточнили ли core-assumptions трекшн-модели",
       "label_en": "Whether the MVP validates the solution hypothesis and refines the traction-model core assumptions"
-    },
-    {
-      "id": "gate3_performance_vs_gate2_plan",
-      "label_ru": "Performance/results по сравнению с планом Gate 2",
-      "label_en": "Performance/results versus the Gate 2 plan"
     },
     {
       "id": "gate3_pmf_criteria",
@@ -76,8 +71,13 @@
     },
     {
       "id": "gate3_stop_criteria",
-      "label_ru": "Stop-критерии: в каких случаях мы останавливаем работу над продуктом",
+      "label_ru": "Stop-критерии - в каких случаях мы останавливаем работу над продуктом",
       "label_en": "Stop criteria: when work on the product should stop"
+    },
+    {
+      "id": "gate3_performance_vs_gate2_plan",
+      "label_ru": "Performance/results по сравнению с планом Gate 2",
+      "label_en": "Performance/results versus the Gate 2 plan"
     }
   ],
   "stream_review_1": [
@@ -87,14 +87,14 @@
       "label_en": "Confirmed problem"
     },
     {
-      "id": "stream_review_1_metric_linkage_to_problem",
-      "label_ru": "Связь Input/Output метрик продукта с обозначенной проблематикой",
-      "label_en": "Link between product input/output metrics and the stated problem"
-    },
-    {
       "id": "stream_review_1_solution_validation",
       "label_ru": "Подтверждение решения через количественники, прототипы или фейкдоры",
       "label_en": "Solution validation through quantitative tests, prototypes, or fake doors"
+    },
+    {
+      "id": "stream_review_1_input_output_metric_link",
+      "label_ru": "Связь Input/Output метрик продукта с обозначенной проблематикой",
+      "label_en": "Link between product input/output metrics and the stated problem"
     },
     {
       "id": "stream_review_1_half_year_plan_with_metrics",
@@ -103,41 +103,41 @@
     },
     {
       "id": "stream_review_1_stop_criteria",
-      "label_ru": "Stop-критерии: в каких случаях мы останавливаем работу над стримом",
-      "label_en": "Stop criteria: when work on the stream should stop"
-    }
-  ],
-  "stream_review_2_plus": [
-    {
-      "id": "stream_review_2_plus_plan_fact_last_half_year",
-      "label_ru": "План-факт за прошедшие полгода по запускам и метрикам",
-      "label_en": "Plan versus actuals for the past six months of launches and metrics"
-    },
-    {
-      "id": "stream_review_2_plus_next_half_year_plan",
-      "label_ru": "План на следующие полгода по запускам и метрикам",
-      "label_en": "Plan for the next six months of launches and metrics"
-    },
-    {
-      "id": "stream_review_2_plus_stop_criteria",
-      "label_ru": "Stop-критерии: в каких случаях мы останавливаем работу над стримом",
+      "label_ru": "Stop-критерии - в каких случаях мы останавливаем работу над стримом",
       "label_en": "Stop criteria: when work on the stream should stop"
     }
   ],
   "progress_review": [
     {
-      "id": "stream_review_2_plus_plan_fact_last_half_year",
+      "id": "progress_review_next_half_year_plan",
+      "label_ru": "План на следующие полгода по запускам и метрикам",
+      "label_en": "Plan for the next six months of launches and metrics"
+    },
+    {
+      "id": "progress_review_stop_criteria",
+      "label_ru": "Stop-критерии - в каких случаях мы останавливаем работу над стримом",
+      "label_en": "Stop criteria: when work on the stream should stop"
+    },
+    {
+      "id": "progress_review_plan_fact_last_half_year",
       "label_ru": "План-факт за прошедшие полгода по запускам и метрикам",
       "label_en": "Plan versus actuals for the past six months of launches and metrics"
-    },
+    }
+  ],
+  "stream_review_2_plus": [
     {
       "id": "stream_review_2_plus_next_half_year_plan",
       "label_ru": "План на следующие полгода по запускам и метрикам",
       "label_en": "Plan for the next six months of launches and metrics"
     },
     {
+      "id": "stream_review_2_plus_plan_fact_last_half_year",
+      "label_ru": "План-факт за прошедшие полгода по запускам и метрикам",
+      "label_en": "Plan versus actuals for the past six months of launches and metrics"
+    },
+    {
       "id": "stream_review_2_plus_stop_criteria",
-      "label_ru": "Stop-критерии: в каких случаях мы останавливаем работу над стримом",
+      "label_ru": "Stop-критерии - в каких случаях мы останавливаем работу над стримом",
       "label_en": "Stop criteria: when work on the stream should stop"
     }
   ]

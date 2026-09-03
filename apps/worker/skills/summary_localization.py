@@ -39,6 +39,7 @@ from skills.result_summary_synthesis import (
 
 
 SCHEMA_PATH = "contracts/schemas/summary-localization.schema.json"
+FIN_SUMMARY_SKILL_PATH = "skills/fin-summary/SKILL.md"
 MAX_OUTPUT_TOKENS = 8000
 MAX_SEGMENT_CHARS = 4000
 MAX_BATCH_CHARS = 12000
@@ -133,6 +134,7 @@ def generate_and_persist_summary_variant(
     run_parameters["summary_generation_batch_count"] = len(batches)
     run_parameters["summary_generation_provider"] = provider.value
     run_parameters["summary_generation_model"] = model
+    run_parameters["fin_summary_skill_path"] = FIN_SUMMARY_SKILL_PATH
     run_parameters[RUN_PARAMETER_KEY] = db_safe_anonymization_metadata(anonymization.metadata) or {"enabled": False}
     step = start_result_synthesis_step(
         session=session,
@@ -302,7 +304,6 @@ def _financial_analysis(value: dict[str, Any] | None) -> dict[str, Any] | None:
         "critical_risks",
         "data_gaps",
         "required_actions",
-        "questions_for_team",
         "validation",
     )
     return {key: deepcopy(value[key]) for key in keys if key in value}
@@ -365,7 +366,7 @@ def _translatable_paths(payload: dict[str, Any]) -> list[tuple[str | int, ...]]:
         paths.extend(("financial_analysis", "key_numbers", index, key) for key in ("label", "unit", "source"))
     paths.append(("financial_analysis", "spreadsheet_audit", "summary"))
     paths.append(("financial_analysis", "validation", "summary"))
-    for key in ("critical_risks", "data_gaps", "required_actions", "questions_for_team"):
+    for key in ("critical_risks", "data_gaps", "required_actions"):
         paths.extend(("financial_analysis", key, index) for index, _ in enumerate(financial.get(key) or []))
     return [path for path in paths if isinstance(_get_path(payload, path), str)]
 
@@ -638,11 +639,20 @@ def _generation_prompt(
         if target_language == "en"
         else "Write the entire response in natural Russian. Preserve anonymization placeholders exactly."
     )
+    financial_context_present = any(str(context).startswith("financial_analysis") for context in segment_contexts.values())
+    financial_instruction = (
+        "For target fields under financial_analysis, apply these Fin Summary skill rules while preserving "
+        "the JSON segment contract and the existing web layout:\n\n"
+        + _fin_summary_skill_excerpt()
+        if financial_context_present
+        else "No financial_analysis fields are present in this batch."
+    )
     return "\n\n".join(
         [
             f"Create fresh Summary content in natural {target_name} from the evidence segments below.",
             "This is an independent synthesis task, not a translation task. Read the evidence for meaning and write each target field as a native business reviewer would formulate it. Do not mirror sentence structure or translate word for word.",
             language_quality_instruction,
+            financial_instruction,
             f"This is batch {batch_index + 1} of {batch_count}. Generate only the target fields represented by segments in this batch.",
             "Do not add facts, conclusions, scores, or evidence. Preserve all numbers, formulas, Markdown structure, and placeholders. Handle confirmed product names and proper nouns according to the language-specific instruction above. For short_summary, combine the Gate Challenger recommendation and IC Review brief into a concise decision-oriented summary. Return every segment exactly once.",
             "Return one JSON object matching this schema, without Markdown fences:",
@@ -653,6 +663,40 @@ def _generation_prompt(
             json.dumps(segments, ensure_ascii=False, sort_keys=True),
         ]
     )
+
+
+def _fin_summary_skill_excerpt() -> str:
+    path = _repo_root() / FIN_SUMMARY_SKILL_PATH
+    if not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    headings = (
+        "## Главное правило компактности",
+        "## Обязательный состав блоков",
+        "## Правила языка",
+        "## Правила заполнения блоков",
+        "## Пустые значения",
+        "## Ограничения",
+    )
+    sections: list[str] = []
+    for heading in headings:
+        section = _markdown_section(text, heading)
+        if section:
+            sections.append(section)
+    return "\n\n".join(sections)
+
+
+def _markdown_section(text: str, heading: str) -> str | None:
+    start = text.find(heading)
+    if start < 0:
+        return None
+    next_heading = re.search(r"^##\s+", text[start + len(heading) :], re.MULTILINE)
+    end = len(text) if next_heading is None else start + len(heading) + next_heading.start()
+    return text[start:end].strip()
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
 
 
 def _english_cyrillic_retry_prompt(

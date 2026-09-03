@@ -180,20 +180,17 @@ def test_new_summary_variants_are_generated_from_repository_skill(tmp_path, monk
         }
         output["result"] = result
         analysis.structured_output = output
-        payloads = {
-            "ru": _new_summary_payload(language="ru", title="Кейс", context="Команда проверяет новый продукт."),
-            "en": _new_summary_payload(language="en", title="Case", context="The team is validating a new product."),
-        }
+        payload = _new_summary_report_payload(
+            ru_context="Команда проверяет новый продукт.",
+            en_context="The team is validating a new product.",
+        )
         check_run.run_parameters = {
-            "new_summary_mock_provider_results": {
-                language: {
-                    "structured_text": json.dumps(payload, ensure_ascii=False),
-                    "raw_output": f"raw new summary {language}",
-                    "input_tokens": 11,
-                    "output_tokens": 22,
-                    "latency_ms": 33,
-                }
-                for language, payload in payloads.items()
+            "new_summary_mock_provider_result": {
+                "structured_text": json.dumps(payload, ensure_ascii=False),
+                "raw_output": "raw new summary bilingual",
+                "input_tokens": 11,
+                "output_tokens": 22,
+                "latency_ms": 33,
             }
         }
         db.commit()
@@ -208,6 +205,8 @@ def test_new_summary_variants_are_generated_from_repository_skill(tmp_path, monk
         assert state["en"]["payload"]["schema_version"] == "new-summary-v1"
         assert state["ru"]["payload"]["context"] == "Команда проверяет новый продукт."
         assert state["en"]["payload"]["context"] == "The team is validating a new product."
+        assert state["ru"]["payload"]["required_elements"][0]["status"] == "нет"
+        assert state["en"]["payload"]["required_elements"][0]["status"] == "нет"
         assert state["ru"]["source_fingerprint"] == new_summary_generation.new_summary_source_fingerprint(
             new_summary_generation.build_new_summary_source(session=db, analysis=analysis, check_run=check_run)
         )
@@ -215,9 +214,10 @@ def test_new_summary_variants_are_generated_from_repository_skill(tmp_path, monk
             step.step_name: step
             for step in db.query(AnalysisCheckStep).filter_by(check_run_id=check_run.id).all()
         }
-        assert "new_summary_ru" in steps
-        assert "new_summary_en" in steps
-        skill_artifact = next(item for item in steps["new_summary_ru"].artifacts if item["key"] == "skill")
+        assert "new_summary_bilingual" in steps
+        assert "new_summary_ru" not in steps
+        assert "new_summary_en" not in steps
+        skill_artifact = next(item for item in steps["new_summary_bilingual"].artifacts if item["key"] == "skill")
         assert skill_artifact["skill"]["source_path"] == "skills/new-summary/SKILL.md"
     finally:
         db.close()
@@ -643,36 +643,56 @@ def _session():
     return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
 
 
-def _new_summary_payload(*, language: str, title: str, context: str) -> dict:
+def _new_summary_report_payload(*, ru_context: str, en_context: str) -> dict:
     return {
         "schema_version": "new-summary-v1",
+        "language": "en",
+        "title": "AI Summary Case",
+        "versions": [
+            _new_summary_payload(language="en", context=en_context),
+            _new_summary_payload(language="ru", context=ru_context),
+        ],
+    }
+
+
+def _new_summary_payload(*, language: str, context: str) -> dict:
+    return {
         "language": language,
-        "title": title,
         "stage": "Gate 2",
+        "traction_summary": {
+            "metric_label": "Revenue" if language == "en" else "Revenue",
+            "periods": ["Not provided" if language == "en" else "Не указано"],
+            "rows": [
+                {
+                    "label": "Total incremental output uplifts",
+                    "values": [""],
+                }
+            ],
+        },
         "context": context,
         "required_elements": [
             {
                 "id": "gate2_hypothesis_results",
                 "label": "Результаты проверки гипотез из Gate 1" if language == "ru" else "Gate 1 hypothesis validation results",
-                "status": "present",
+                "status": "есть",
                 "evidence": "Раздел есть." if language == "ru" else "The section is present.",
             },
             {
-                "id": "gate2_mvp_or_target_product",
+                "id": "gate2_target_product",
                 "label": "Описание MVP/целевого продукта" if language == "ru" else "MVP or target product description",
-                "status": "missing",
+                "status": "нет",
                 "evidence": "Нет данных." if language == "ru" else "No evidence is provided.",
             },
             {
-                "id": "gate2_mockups_or_user_flow",
+                "id": "gate2_user_flow",
                 "label": "Mockups или видео пользовательского flow" if language == "ru" else "User-flow mockups or video",
-                "status": "present",
+                "status": "есть",
                 "evidence": "Раздел есть." if language == "ru" else "The section is present.",
             },
             {
-                "id": "gate2_gate3_commitments",
+                "id": "gate2_commitments",
                 "label": "Commitments к Gate 3: сроки, expected performance, метрики" if language == "ru" else "Gate 3 commitments: timeline, expected performance, and metrics",
-                "status": "missing",
+                "status": "нет",
                 "evidence": "Нет данных." if language == "ru" else "No evidence is provided.",
             },
         ],

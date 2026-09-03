@@ -315,10 +315,10 @@ export type IcReviewCompactResult = {
   critical_risks: string[];
   data_gaps: string[];
   required_actions: string[];
-  questions_for_team: string[];
-  role_summaries: IcReviewRoleSummary[];
+  questions_for_team?: string[];
+  role_summaries?: IcReviewRoleSummary[];
   validation: IcReviewValidationSummary;
-  artifacts: IcReviewResultArtifact[];
+  artifacts?: IcReviewResultArtifact[];
 };
 
 export type IcReviewRoleResult = {

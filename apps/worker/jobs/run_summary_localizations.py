@@ -32,7 +32,7 @@ from skills.summary_localization import (
 from skills.new_summary_generation import (
     LANGUAGES as NEW_SUMMARY_LANGUAGES,
     build_new_summary_source,
-    generate_and_persist_new_summary_variant,
+    generate_and_persist_new_summary_report,
     new_summary_source_fingerprint,
 )
 
@@ -151,37 +151,39 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
                 session.commit()
                 failed_languages.extend(f"new_summary:{language}" for language in NEW_SUMMARY_LANGUAGES)
             else:
+                needs_new_summary = False
                 for target_language in NEW_SUMMARY_LANGUAGES:
                     new_summary_state = ((analysis.structured_output or {}).get("result") or {}).get("new_summary") or {}
                     target = new_summary_state.get(target_language) or {}
                     if target.get("status") == "completed" and target.get("source_fingerprint") == new_summary_fingerprint:
                         continue
-                    if target.get("status") not in runnable_statuses:
-                        continue
+                    if target.get("status") in runnable_statuses:
+                        needs_new_summary = True
+                if needs_new_summary:
                     if generation_provider is None:
                         generation_provider = _resolve_summary_provider(session=session, check_run=check_run)
                     provider, model, api_key, base_url = generation_provider
                     try:
-                        generate_and_persist_new_summary_variant(
+                        generate_and_persist_new_summary_report(
                             session=session,
                             analysis=analysis,
                             check_run=check_run,
                             source_payload=new_summary_source,
-                            target_language=target_language,
                             provider=provider,
                             model=model,
                             api_key=api_key,
                             base_url=base_url,
                         )
                     except Exception as exc:
-                        mark_new_summary_failed(
-                            analysis=analysis,
-                            revision=str(check_run.id),
-                            language=target_language,
-                            error_message=str(exc),
-                        )
+                        for target_language in NEW_SUMMARY_LANGUAGES:
+                            mark_new_summary_failed(
+                                analysis=analysis,
+                                revision=str(check_run.id),
+                                language=target_language,
+                                error_message=str(exc),
+                            )
                         session.commit()
-                        failed_languages.append(f"new_summary:{target_language}")
+                        failed_languages.extend(f"new_summary:{language}" for language in NEW_SUMMARY_LANGUAGES)
         worker_logger.info(
             "worker_job_completed",
             extra={
