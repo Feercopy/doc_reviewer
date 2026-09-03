@@ -21,6 +21,13 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Flatten the Analysis results navigation for all users: hide the visible
+  `Full Report` tab, keep `AI Summary` as the primary tab backed by
+  `skills/new-summary/SKILL.md`, and lift the existing `Product Analysis` and
+  `Financial Analysis` panels to the same top-level tab row without changing
+  their data sources or rendering rules. IC Review launches now return the
+  viewer to the top-level `Financial Analysis` tab instead of a hidden nested
+  report.
 - [x] Switch the analysis result page primary tab to `AI Summary` backed by
   repository `skills/new-summary/SKILL.md` from the Stash skillset shape while
   keeping the legacy Summary inside admin-only Full Report. New Summary
