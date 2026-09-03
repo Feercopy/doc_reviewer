@@ -172,7 +172,7 @@ def test_new_summary_variants_are_generated_from_repository_skill(tmp_path, monk
             "en": {"status": "completed", "payload": {"language": "en"}, "source_fingerprint": "legacy"},
         }
         result["new_summary"] = {
-            "version": 1,
+            "version": 2,
             "generation_mode": "new_summary_skill",
             "source_revision": str(check_run.id),
             "ru": {"status": "queued", "payload": None, "error_message": None},
@@ -219,6 +219,112 @@ def test_new_summary_variants_are_generated_from_repository_skill(tmp_path, monk
         assert "new_summary_en" not in steps
         skill_artifact = next(item for item in steps["new_summary_bilingual"].artifacts if item["key"] == "skill")
         assert skill_artifact["skill"]["source_path"] == "skills/new-summary/SKILL.md"
+    finally:
+        db.close()
+        get_settings.cache_clear()
+
+
+def test_new_summary_generation_tolerates_optional_sections_and_stray_appendices(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
+    db = _session()
+    try:
+        analysis, check_run = _seed(db)
+        output = dict(analysis.structured_output)
+        result = dict(output["result"])
+        result["new_summary"] = {
+            "version": 2,
+            "generation_mode": "new_summary_skill",
+            "source_revision": str(check_run.id),
+            "ru": {"status": "queued", "payload": None, "error_message": None},
+            "en": {"status": "queued", "payload": None, "error_message": None},
+        }
+        output["result"] = result
+        analysis.structured_output = output
+        payload = _new_summary_report_payload(
+            ru_context="Команда проверяет новый продукт.",
+            en_context="The team is validating a new product.",
+        )
+        payload["appendices"] = {"ignored": True}
+        payload["versions"][1].pop("language")
+        for version in payload["versions"]:
+            version.pop("confirmed")
+            version.pop("insufficiently_confirmed")
+            version["appendices"] = [{"title": "Appendix 1", "body": "legacy free-form appendix"}]
+        check_run.run_parameters = {
+            "new_summary_mock_provider_result": {
+                "structured_text": json.dumps(payload, ensure_ascii=False),
+                "raw_output": "raw new summary with optional sections omitted",
+                "latency_ms": 1,
+            }
+        }
+        db.commit()
+
+        run_summary_localizations(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        state = analysis.structured_output["result"]["new_summary"]
+        assert state["ru"]["status"] == "completed", state["ru"]
+        assert state["en"]["status"] == "completed", state["en"]
+        assert state["ru"]["payload"]["confirmed"] == []
+        assert state["ru"]["payload"]["context"] == "Команда проверяет новый продукт."
+        assert state["en"]["payload"]["insufficiently_confirmed"] == []
+        assert "appendices" not in state["ru"]["payload"]
+        assert "appendices" not in state["en"]["payload"]
+    finally:
+        db.close()
+        get_settings.cache_clear()
+
+
+def test_new_summary_schema_retry_handles_empty_critical_problems(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
+    db = _session()
+    try:
+        analysis, check_run = _seed(db)
+        output = dict(analysis.structured_output)
+        result = dict(output["result"])
+        result["new_summary"] = {
+            "version": 2,
+            "generation_mode": "new_summary_skill",
+            "source_revision": str(check_run.id),
+            "ru": {"status": "queued", "payload": None, "error_message": None},
+            "en": {"status": "queued", "payload": None, "error_message": None},
+        }
+        output["result"] = result
+        analysis.structured_output = output
+        invalid_payload = _new_summary_report_payload(
+            ru_context="Команда проверяет новый продукт.",
+            en_context="The team is validating a new product.",
+        )
+        for version in invalid_payload["versions"]:
+            version["critical_problems"] = []
+        retry_payload = _new_summary_report_payload(
+            ru_context="Команда проверяет новый продукт после retry.",
+            en_context="The team is validating a new product after retry.",
+        )
+        check_run.run_parameters = {
+            "new_summary_mock_provider_result": {
+                "structured_text": json.dumps(invalid_payload, ensure_ascii=False),
+                "raw_output": "raw new summary with empty critical problems",
+                "latency_ms": 1,
+            },
+            "new_summary_json_retry_mock_provider_result": {
+                "structured_text": json.dumps(retry_payload, ensure_ascii=False),
+                "raw_output": "raw new summary retry",
+                "latency_ms": 2,
+            },
+        }
+        db.commit()
+
+        run_summary_localizations(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        state = analysis.structured_output["result"]["new_summary"]
+        assert state["ru"]["status"] == "completed", state["ru"]
+        assert state["en"]["status"] == "completed", state["en"]
+        assert state["ru"]["payload"]["context"] == "Команда проверяет новый продукт после retry."
+        assert state["en"]["payload"]["critical_problems"] == ["Stop criteria are missing."]
     finally:
         db.close()
         get_settings.cache_clear()

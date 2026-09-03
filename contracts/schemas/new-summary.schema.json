@@ -98,11 +98,11 @@
           "description": "Structured appendix/details payload used for required elements that point to an Appendix."
         },
         "confirmed": {
-          "$ref": "#/$defs/finding_list",
+          "$ref": "#/$defs/optional_finding_list",
           "description": "What is confirmed. Do not duplicate facts that already belong in required elements or critical problems."
         },
         "insufficiently_confirmed": {
-          "$ref": "#/$defs/finding_list",
+          "$ref": "#/$defs/optional_finding_list",
           "description": "What is not sufficiently confirmed. Do not duplicate required elements or identified problems."
         },
         "critical_problems": {
@@ -315,6 +315,12 @@
     "finding_list": {
       "type": "array",
       "minItems": 1,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/non_empty_string" }
+    },
+    "optional_finding_list": {
+      "type": "array",
+      "minItems": 0,
       "maxItems": 5,
       "items": { "$ref": "#/$defs/non_empty_string" }
     },

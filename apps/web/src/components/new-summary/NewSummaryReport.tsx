@@ -239,6 +239,10 @@ function SummarySection({
   items: string[];
   title: string;
 }) {
+  if (!items.length) {
+    return null;
+  }
+
   return (
     <section className={`new-summary-list-section ${className}`.trim()}>
       <h2>{title}</h2>

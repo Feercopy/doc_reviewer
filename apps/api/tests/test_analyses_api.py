@@ -1284,6 +1284,60 @@ def test_new_summary_endpoint_waits_for_ic_postprocessing(client, db_session):
     assert response.json()["en"]["status"] == "waiting"
 
 
+def test_new_summary_endpoint_queues_legacy_completed_ic_review_without_postprocessing_marker(client, db_session):
+    from app.main import app
+    from app.routers import analyses as analyses_router
+
+    user = create_user(db_session, "legacy-new-summary-author", "secret")
+    skills = seed_baseline_skills(db_session)
+    document_id = _create_completed_document(client, db_session, user)
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=user.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="need_evidence",
+        summary="Нужны подтверждения",
+        structured_output={"result": {"short_summary": "Нужны подтверждения"}},
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.flush()
+    check_run = AnalysisCheckRun(
+        analysis_id=analysis.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        check_type="ic_agentic_review",
+        provider=analysis.provider,
+        model=analysis.model,
+        status=RunStatus.COMPLETED.value,
+        structured_output={"run_mode": "ic_agentic_review_compact"},
+        run_parameters={},
+        artifacts=[],
+        uploaded_workbook_metadata={},
+    )
+    db_session.add(check_run)
+    db_session.commit()
+
+    login(client, user.login, "secret")
+    enqueued: list[str] = []
+    app.dependency_overrides[analyses_router.get_run_summary_localizations_enqueue] = (
+        lambda: lambda analysis_id: enqueued.append(str(analysis_id))
+    )
+    try:
+        response = client.post(f"/analyses/{analysis.id}/new-summary")
+    finally:
+        app.dependency_overrides.pop(analyses_router.get_run_summary_localizations_enqueue, None)
+
+    assert response.status_code == 200
+    assert enqueued == [str(analysis.id)]
+    assert response.json()["ru"]["status"] == "queued"
+    assert response.json()["en"]["status"] == "queued"
+
+
 def test_cancel_analysis_preserves_completed_gate_result_and_cancels_downstream_runs(client, db_session):
     user = create_user(db_session, "author", "secret")
     skills = seed_baseline_skills(db_session)

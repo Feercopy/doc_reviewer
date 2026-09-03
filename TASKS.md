@@ -21,6 +21,14 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Fix AI Summary preparation for old and new analyses after the new
+  `skills/new-summary/SKILL.md` format became stricter than the persisted JSON
+  contract. Legacy completed IC Review runs without the postprocessing marker
+  are now eligible for Summary generation, provider output is normalized before
+  strict schema validation so omitted optional sections and stray `appendices`
+  fields do not fail the whole report, empty optional finding sections are
+  schema-valid and hidden in the UI, and the skill's technical JSON contract now
+  clarifies where Appendix payloads belong without changing the content rules.
 - [x] Flatten the Analysis results navigation for all users: hide the visible
   `Full Report` tab, keep `AI Summary` as the primary tab backed by
   `skills/new-summary/SKILL.md`, and lift the existing `Product Analysis` and
@@ -2534,3 +2542,9 @@ Exit criteria:
   direct GET/POST calls. Verified focused analysis page coverage (`27 passed`)
   and `git diff --check`; full web TypeScript compile still fails on
   pre-existing test fixture/type drift unrelated to this change.
+- 2026-09-03: Hardened New Summary preparation after PR review. Final
+  source-dependent schema validation now participates in the provider retry
+  path, missing language tags preserve the generated version content instead of
+  replacing it with placeholders, critical problems stay non-empty while
+  confirmed/insufficient sections may be empty, and New Summary state version is
+  bumped to regenerate summaries produced under the previous technical contract.
