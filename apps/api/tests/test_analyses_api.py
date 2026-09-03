@@ -1144,7 +1144,6 @@ def test_new_summary_endpoint_queues_repository_skill_summary_once(client, db_se
     from app.routers import analyses as analyses_router
 
     user = create_user(db_session, "author", "secret")
-    admin = create_user(db_session, "new-summary-admin", "secret", role=Role.ADMIN)
     skills = seed_baseline_skills(db_session)
     document_id = _create_completed_document(client, db_session, user)
     analysis = Analysis(
@@ -1178,7 +1177,7 @@ def test_new_summary_endpoint_queues_repository_skill_summary_once(client, db_se
     db_session.add(check_run)
     db_session.commit()
 
-    login(client, admin.login, "secret")
+    login(client, user.login, "secret")
     enqueued: list[str] = []
     app.dependency_overrides[analyses_router.get_run_summary_localizations_enqueue] = (
         lambda: lambda analysis_id: enqueued.append(str(analysis_id))
@@ -1202,7 +1201,7 @@ def test_new_summary_endpoint_queues_repository_skill_summary_once(client, db_se
     assert second.json() == read.json()
 
 
-def test_new_summary_endpoint_requires_admin_and_does_not_enqueue_for_owner(client, db_session):
+def test_new_summary_endpoint_is_available_to_document_owner(client, db_session):
     from app.main import app
     from app.routers import analyses as analyses_router
 
@@ -1236,14 +1235,13 @@ def test_new_summary_endpoint_requires_admin_and_does_not_enqueue_for_owner(clie
     finally:
         app.dependency_overrides.pop(analyses_router.get_run_summary_localizations_enqueue, None)
 
-    assert read.status_code == 403
-    assert created.status_code == 403
+    assert read.status_code == 200
+    assert created.status_code == 200
     assert enqueued == []
 
 
 def test_new_summary_endpoint_waits_for_ic_postprocessing(client, db_session):
     user = create_user(db_session, "postprocessing-author", "secret")
-    admin = create_user(db_session, "postprocessing-admin", "secret", role=Role.ADMIN)
     skills = seed_baseline_skills(db_session)
     document_id = _create_completed_document(client, db_session, user)
     analysis = Analysis(
@@ -1277,7 +1275,7 @@ def test_new_summary_endpoint_waits_for_ic_postprocessing(client, db_session):
     db_session.add(check_run)
     db_session.commit()
 
-    login(client, admin.login, "secret")
+    login(client, user.login, "secret")
     response = client.post(f"/analyses/{analysis.id}/new-summary")
 
     assert response.status_code == 200

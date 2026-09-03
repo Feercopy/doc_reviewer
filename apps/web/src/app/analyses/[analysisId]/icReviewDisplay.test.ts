@@ -124,7 +124,6 @@ describe("icReviewDisplay", () => {
       "Critical risks",
       "Data gaps",
       "Required actions",
-      "Questions for team",
     ]);
     expect(display.sections.flatMap((section) => section.items)).toEqual([
       "Unit economics gap - high: Gross margin proof is thin. Evidence: Document page 12. Recommendation: Rebuild the cohort bridge.",
@@ -132,7 +131,6 @@ describe("icReviewDisplay", () => {
       "Pricing pressure",
       "Net revenue retention backup",
       "Validate expansion assumptions",
-      "Why does churn improve in Q4?",
     ]);
   });
 

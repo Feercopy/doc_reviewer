@@ -1,67 +1,326 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://gate-challenger.local/schemas/new-summary.schema.json",
-  "title": "New Summary localized result",
+  "title": "New Summary bilingual result",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "schema_version",
-    "language",
-    "title",
-    "stage",
-    "context",
-    "required_elements",
-    "confirmed",
-    "insufficiently_confirmed",
-    "critical_problems",
-    "other"
-  ],
+  "required": ["schema_version", "language", "title", "versions"],
   "properties": {
-    "schema_version": { "const": "new-summary-v1" },
-    "language": { "type": "string", "enum": ["ru", "en"] },
-    "title": { "type": "string", "minLength": 1 },
-    "stage": {
+    "schema_version": {
+      "const": "new-summary-v1"
+    },
+    "language": {
+      "const": "en",
+      "description": "The first Summary version is always English."
+    },
+    "title": {
       "type": "string",
-      "enum": [
-        "Gate 1",
-        "Gate 2",
-        "Gate 3",
-        "Stream Review 1",
-        "Stream Review 2+ / Progress Review"
-      ]
+      "pattern": "^AI Summary .+",
+      "description": "Document title: AI Summary <initiative title>."
     },
-    "context": { "type": "string", "minLength": 1 },
-    "required_elements": {
+    "versions": {
       "type": "array",
-      "minItems": 0,
-      "maxItems": 7,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["id", "label", "status", "evidence"],
-        "properties": {
-          "id": { "type": "string", "minLength": 1 },
-          "label": { "type": "string", "minLength": 1 },
-          "status": { "type": "string", "enum": ["present", "missing"] },
-          "evidence": { "type": "string", "minLength": 1 }
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "allOf": [
+            { "$ref": "#/$defs/version" },
+            {
+              "type": "object",
+              "properties": { "language": { "const": "en" } }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/version" },
+            {
+              "type": "object",
+              "properties": { "language": { "const": "ru" } }
+            }
+          ]
         }
-      }
-    },
-    "confirmed": { "$ref": "#/$defs/findings" },
-    "insufficiently_confirmed": { "$ref": "#/$defs/findings" },
-    "critical_problems": { "$ref": "#/$defs/findings" },
-    "other": {
-      "type": "array",
-      "maxItems": 5,
-      "items": { "type": "string", "minLength": 1 }
+      ],
+      "items": false,
+      "description": "Exactly two complete Summary versions: English first, Russian second."
     }
   },
   "$defs": {
-    "findings": {
+    "version": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "language",
+        "stage",
+        "traction_summary",
+        "context",
+        "required_elements",
+        "confirmed",
+        "insufficiently_confirmed",
+        "critical_problems",
+        "other"
+      ],
+      "properties": {
+        "language": {
+          "type": "string",
+          "enum": ["en", "ru"]
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "Gate 1",
+            "Gate 2",
+            "Gate 3",
+            "Progress Review",
+            "Stream Review 1",
+            "Stream Review 2+",
+            "Stream Review 2+ / Progress Review"
+          ]
+        },
+        "traction_summary": {
+          "$ref": "#/$defs/traction_summary"
+        },
+        "context": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Short initiative context. Use the source document only to improve readability here."
+        },
+        "required_elements": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 7,
+          "items": { "$ref": "#/$defs/required_element" },
+          "description": "The exact stage checklist, in canonical order. Do not add criteria from other stages."
+        },
+        "required_details": {
+          "$ref": "#/$defs/required_details",
+          "description": "Structured appendix/details payload used for required elements that point to an Appendix."
+        },
+        "confirmed": {
+          "$ref": "#/$defs/finding_list",
+          "description": "What is confirmed. Do not duplicate facts that already belong in required elements or critical problems."
+        },
+        "insufficiently_confirmed": {
+          "$ref": "#/$defs/finding_list",
+          "description": "What is not sufficiently confirmed. Do not duplicate required elements or identified problems."
+        },
+        "critical_problems": {
+          "$ref": "#/$defs/finding_list",
+          "description": "Decision-critical problems only; do not include recommendations or action plans."
+        },
+        "other": {
+          "type": "array",
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/non_empty_string" },
+          "description": "Optional cross-functional observations that do not belong in previous sections."
+        }
+      }
+    },
+    "traction_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric_label", "periods", "rows"],
+      "properties": {
+        "metric_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "periods": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/non_empty_string" },
+          "description": "Years, quarters and Total in output order."
+        },
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/traction_row" }
+        }
+      }
+    },
+    "traction_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "values"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "values": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Values must be in the same order as periods; use an empty string for a missing source value."
+        }
+      }
+    },
+    "required_element": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "status", "evidence"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": [
+            "gate1_market_opportunity_sizing",
+            "gate1_initial_traction",
+            "gate1_hypotheses_with_metrics",
+            "gate2_value_proposition",
+            "gate2_hypothesis_results",
+            "gate2_target_product",
+            "gate2_metric_linkage",
+            "gate2_user_flow",
+            "gate2_commitments",
+            "gate2_stop_criteria",
+            "gate3_working_mvp",
+            "gate3_pmf_criteria",
+            "gate3_stop_criteria",
+            "gate3_solution_hypothesis_validation",
+            "gate3_performance_vs_gate2_plan",
+            "stream_review_1_confirmed_problem",
+            "stream_review_1_input_output_metric_link",
+            "stream_review_1_half_year_plan_with_metrics",
+            "stream_review_1_stop_criteria",
+            "stream_review_1_solution_validation",
+            "progress_review_next_half_year_plan",
+            "progress_review_stop_criteria",
+            "progress_review_plan_fact_last_half_year",
+            "stream_review_2_plus_next_half_year_plan",
+            "stream_review_2_plus_stop_criteria",
+            "stream_review_2_plus_plan_fact_last_half_year"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": ["есть", "нет"],
+          "description": "Use only есть/нет in JSON; presentation layers may localize the displayed label."
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "required_details": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          { "$ref": "#/$defs/solution_validation_detail" },
+          { "$ref": "#/$defs/metric_binding_detail" },
+          { "$ref": "#/$defs/next_review_plan_detail" },
+          { "$ref": "#/$defs/stop_criteria_detail" }
+        ]
+      }
+    },
+    "solution_validation_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "items"],
+      "properties": {
+        "type": { "const": "solution_validation" },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/solution_validation_item" }
+        }
+      }
+    },
+    "solution_validation_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "verdict"],
+      "properties": {
+        "text": { "$ref": "#/$defs/non_empty_string" },
+        "verdict": {
+          "type": "string",
+          "enum": ["confirmed", "insufficient"]
+        }
+      }
+    },
+    "metric_binding_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "input_metrics", "output_metrics"],
+      "properties": {
+        "type": { "const": "metric_binding" },
+        "input_metrics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/metric_binding_item" }
+        },
+        "output_metrics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/metric_binding_item" }
+        }
+      }
+    },
+    "metric_binding_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "binding", "evidence"],
+      "properties": {
+        "metric": { "$ref": "#/$defs/non_empty_string" },
+        "binding": {
+          "type": "string",
+          "enum": ["confirmed", "insufficient"]
+        },
+        "evidence": { "$ref": "#/$defs/non_empty_string" }
+      }
+    },
+    "next_review_plan_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "outputs_until_next_review", "metrics_until_next_review"],
+      "properties": {
+        "type": { "const": "next_review_plan" },
+        "outputs_until_next_review": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/non_empty_string" }
+        },
+        "metrics_until_next_review": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/metric_plan_row" }
+        }
+      }
+    },
+    "metric_plan_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "current", "next_review"],
+      "properties": {
+        "metric": { "$ref": "#/$defs/non_empty_string" },
+        "current": { "$ref": "#/$defs/non_empty_string" },
+        "next_review": { "$ref": "#/$defs/non_empty_string" }
+      }
+    },
+    "stop_criteria_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "criteria"],
+      "properties": {
+        "type": { "const": "stop_criteria" },
+        "criteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/non_empty_string" }
+        }
+      }
+    },
+    "finding_list": {
       "type": "array",
-      "minItems": 0,
+      "minItems": 1,
       "maxItems": 5,
-      "items": { "type": "string", "minLength": 1 }
+      "items": { "$ref": "#/$defs/non_empty_string" }
+    },
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
     }
   }
 }

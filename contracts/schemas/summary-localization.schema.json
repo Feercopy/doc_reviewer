@@ -29,7 +29,7 @@
         { "type": "null" },
         {
           "type": "object",
-          "required": ["run_mode", "verdict", "executive_brief", "confidence", "top_findings", "key_numbers", "spreadsheet_audit", "critical_risks", "data_gaps", "required_actions", "questions_for_team", "validation"],
+          "required": ["run_mode", "verdict", "executive_brief", "confidence", "top_findings", "key_numbers", "spreadsheet_audit", "critical_risks", "data_gaps", "required_actions", "validation"],
           "additionalProperties": false,
           "properties": {
             "run_mode": { "type": "string", "const": "ic_agentic_review_compact" },
@@ -42,7 +42,6 @@
             "critical_risks": { "type": "array", "items": { "type": "string" } },
             "data_gaps": { "type": "array", "items": { "type": "string" } },
             "required_actions": { "type": "array", "items": { "type": "string" } },
-            "questions_for_team": { "type": "array", "items": { "type": "string" } },
             "validation": { "$ref": "#/$defs/validation" }
           }
         }

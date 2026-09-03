@@ -21,6 +21,22 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Switch the analysis result page primary tab to `AI Summary` backed by
+  repository `skills/new-summary/SKILL.md` from the Stash skillset shape while
+  keeping the legacy Summary inside admin-only Full Report. New Summary
+  generation now requests one bilingual JSON report, splits and persists RU/EN
+  variants for instant frontend switching, includes source-document context for
+  Traction Summary, normalizes stage checklist aliases to the current Stash
+  IDs, and renders Traction Summary plus required-element appendices with the
+  same green/orange status palette used by the PDF concept. The compact
+  Financial Analysis generation path now applies the local `skills/fin-summary`
+  compactness/block-selection rules for financial fields and excludes
+  `questions_for_team` from Summary output. Verified skill validation for
+  `skills/new-summary` and `skills/fin-summary`, JSON schema syntax, Python
+  compilation of touched worker files, focused Analysis page frontend tests
+  (`32 passed`), production `next build`, Compose config, and `git diff
+  --check`; full Python pytest could not run locally because this clean
+  worktree has no Python dev dependencies and Docker daemon is unavailable.
 - [x] Harden IC Review against provider outputs that are structurally correct
   JSON but contain empty or too-short required text fields. Schema-bounded
   string normalization now trims whitespace, repairs `minLength` failures with
