@@ -205,6 +205,8 @@ def test_new_summary_variants_are_generated_from_repository_skill(tmp_path, monk
         assert state["en"]["payload"]["schema_version"] == "new-summary-v1"
         assert state["ru"]["payload"]["context"] == "Команда проверяет новый продукт."
         assert state["en"]["payload"]["context"] == "The team is validating a new product."
+        assert state["progress"]["stage"] == "completed"
+        assert state["progress"]["percent"] == 100
         assert state["ru"]["payload"]["required_elements"][0]["status"] == "нет"
         assert state["en"]["payload"]["required_elements"][0]["status"] == "нет"
         assert state["ru"]["source_fingerprint"] == new_summary_generation.new_summary_source_fingerprint(
@@ -271,6 +273,7 @@ def test_new_summary_generation_tolerates_optional_sections_and_stray_appendices
         assert state["en"]["payload"]["insufficiently_confirmed"] == []
         assert "appendices" not in state["ru"]["payload"]
         assert "appendices" not in state["en"]["payload"]
+        assert state["progress"]["stage"] == "completed"
     finally:
         db.close()
         get_settings.cache_clear()
@@ -773,6 +776,64 @@ def test_new_run_uses_current_provider_when_original_provider_is_unavailable(tmp
         effective = next(item for item in step.artifacts if item["key"] == "effective_run_parameters")
         assert effective["run_parameters"]["summary_generation_provider"] == Provider.OPENAI_COMPATIBLE.value
         assert effective["run_parameters"]["summary_generation_model"] == "gpt-test"
+    finally:
+        db.close()
+        get_settings.cache_clear()
+
+
+def test_new_summary_failure_persists_public_error_code_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
+    db = _session()
+    try:
+        analysis, check_run = _seed(db)
+        output = dict(analysis.structured_output)
+        result = dict(output["result"])
+        result["new_summary"] = {
+            "version": 2,
+            "generation_mode": "new_summary_skill",
+            "source_revision": str(check_run.id),
+            "ru": {"status": "queued", "payload": None, "error_message": None},
+            "en": {"status": "queued", "payload": None, "error_message": None},
+        }
+        output["result"] = result
+        analysis.structured_output = output
+        invalid_payload = _new_summary_report_payload(
+            ru_context="Очень чувствительный текст не должен попасть в публичную ошибку.",
+            en_context="Sensitive text must not leak into the public error.",
+        )
+        for version in invalid_payload["versions"]:
+            version["critical_problems"] = []
+        check_run.run_parameters = {
+            "new_summary_mock_provider_result": {
+                "structured_text": json.dumps(invalid_payload, ensure_ascii=False),
+                "raw_output": "raw new summary with sensitive validation content",
+                "latency_ms": 1,
+            },
+            "new_summary_json_retry_mock_provider_result": {
+                "structured_text": json.dumps(invalid_payload, ensure_ascii=False),
+                "raw_output": "raw retry with sensitive validation content",
+                "latency_ms": 2,
+            },
+        }
+        db.commit()
+
+        run_summary_localizations(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        state = analysis.structured_output["result"]["new_summary"]
+        assert state["ru"]["status"] == "failed"
+        assert state["en"]["status"] == "failed"
+        assert state["progress"]["stage"] == "failed"
+        assert state["ru"]["error_message"].startswith("new_summary_generation_failed:")
+        assert "чувствительный" not in state["ru"]["error_message"]
+        step = db.query(AnalysisCheckStep).filter_by(
+            check_run_id=check_run.id,
+            step_name="new_summary_bilingual",
+        ).one()
+        assert step.status == RunStatus.FAILED.value
+        assert step.error_message.startswith("new_summary_generation_failed:")
+        assert "Sensitive" not in step.error_message
     finally:
         db.close()
         get_settings.cache_clear()

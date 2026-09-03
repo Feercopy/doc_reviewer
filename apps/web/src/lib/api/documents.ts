@@ -61,6 +61,13 @@ export type NewSummaryVariantRecord = {
   source_fingerprint: string | null;
 };
 
+export type NewSummaryProgressRecord = {
+  stage: string;
+  status: string;
+  percent: number;
+  updated_at: string | null;
+};
+
 export type NewSummaryRecord = {
   analysis_id: string;
   source_revision: string | null;
@@ -68,6 +75,7 @@ export type NewSummaryRecord = {
   available: boolean;
   ru: NewSummaryVariantRecord;
   en: NewSummaryVariantRecord;
+  progress: NewSummaryProgressRecord | null;
 };
 
 export type DocumentRecord = {

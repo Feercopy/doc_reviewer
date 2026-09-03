@@ -108,6 +108,13 @@ class NewSummaryVariantRead(BaseModel):
     source_fingerprint: str | None = None
 
 
+class NewSummaryProgressRead(BaseModel):
+    stage: str
+    status: str
+    percent: int
+    updated_at: datetime | None = None
+
+
 class NewSummaryRead(BaseModel):
     analysis_id: UUID
     source_revision: str | None = None
@@ -115,6 +122,7 @@ class NewSummaryRead(BaseModel):
     available: bool = False
     ru: NewSummaryVariantRead
     en: NewSummaryVariantRead
+    progress: NewSummaryProgressRead | None = None
 
 
 class AnalysisRead(BaseModel):

@@ -417,7 +417,11 @@ describe("analysis result page", () => {
     expect(newSummaryPanelSource).toContain('newSummary.ru.status === "completed"');
     expect(newSummaryPanelSource).toContain('newSummary.en.status === "completed"');
     expect(newSummaryPanelSource).toContain("return <NewSummaryReportView embedded report={report} />");
-    expect(newSummaryPanelSource).toContain("Готовим AI Summary по skills/new-summary/SKILL.md.");
+    expect(newSummaryPanelSource).toContain("<NewSummaryProgress progress={newSummary?.progress ?? fallbackNewSummaryProgress(newSummary)} />");
+    expect(newSummaryPanelSource).toContain("Повторная попытка начнётся автоматически при следующем открытии страницы.");
+    expect(pageSource).toContain("function NewSummaryProgress");
+    expect(pageSource).toContain("analysis-new-summary-progress__track");
+    expect(pageSource).toContain("Модель собирает RU/EN Summary");
   });
 
   it("renders the stage checklist as a red and green traffic-light block above Summary product analysis", () => {

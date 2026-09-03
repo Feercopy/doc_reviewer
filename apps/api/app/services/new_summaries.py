@@ -20,6 +20,17 @@ NEW_SUMMARY_KEY = "new_summary"
 NEW_SUMMARY_VERSION = 2
 NEW_SUMMARY_GENERATION_MODE = "new_summary_skill"
 STALE_NEW_SUMMARY_AFTER = timedelta(minutes=30)
+NEW_SUMMARY_PROGRESS_PERCENTS = {
+    "waiting_for_ic_review": 5,
+    "queued": 15,
+    "preparing_sources": 30,
+    "preparing_prompt": 45,
+    "generating": 70,
+    "validating": 85,
+    "saving": 95,
+    "completed": 100,
+    "failed": 100,
+}
 
 
 def request_new_summary(
@@ -119,9 +130,16 @@ def mark_new_summary_running(*, analysis: Analysis, revision: str, language: str
     _persist_state(analysis, state)
 
 
+def mark_new_summary_progress(*, analysis: Analysis, revision: str, stage: str, status: str = "running") -> None:
+    state = _state_for_revision(analysis=analysis, revision=revision)
+    state["progress"] = _progress_state(stage=stage, status=status)
+    _persist_state(analysis, state)
+
+
 def mark_new_summary_failed(*, analysis: Analysis, revision: str, language: str, error_message: str) -> None:
     state = _state_for_revision(analysis=analysis, revision=revision)
     state[language] = {"status": "failed", "payload": None, "error_message": error_message[:1000]}
+    state["progress"] = _progress_state(stage="failed", status="failed")
     _persist_state(analysis, state)
 
 
@@ -141,7 +159,10 @@ def persist_new_summary_variant(
         "error_message": None,
         "source_fingerprint": source_fingerprint,
         "trace_step_id": trace_step_id,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
     }
+    if all((state.get(item) or {}).get("status") == "completed" for item in ("ru", "en")):
+        state["progress"] = _progress_state(stage="completed", status="completed")
     _persist_state(analysis, state)
 
 
@@ -174,12 +195,14 @@ def _empty_state(revision: str | None, *, status: str = "queued") -> dict[str, A
         "error_message": None,
         "requested_at": datetime.now(timezone.utc).isoformat(),
     }
+    progress_stage = "waiting_for_ic_review" if status == "waiting" else "queued"
     return {
         "version": NEW_SUMMARY_VERSION,
         "generation_mode": NEW_SUMMARY_GENERATION_MODE,
         "source_revision": revision,
         "ru": dict(variant),
         "en": dict(variant),
+        "progress": _progress_state(stage=progress_stage, status=status),
     }
 
 
@@ -226,6 +249,7 @@ def _read_state(analysis_id: UUID, state: dict[str, Any]) -> NewSummaryRead:
         available=available,
         ru=_variant(state.get("ru") if available else None),
         en=_variant(state.get("en") if available else None),
+        progress=_progress(state) if available else None,
     )
 
 
@@ -238,3 +262,50 @@ def _variant(value: Any) -> NewSummaryVariantRead:
         error_message=item.get("error_message") if isinstance(item.get("error_message"), str) else None,
         source_fingerprint=item.get("source_fingerprint") if isinstance(item.get("source_fingerprint"), str) else None,
     )
+
+
+def _progress(state: dict[str, Any]) -> dict[str, Any]:
+    progress = state.get("progress")
+    if isinstance(progress, dict):
+        stage = progress.get("stage")
+        status = progress.get("status")
+        if isinstance(stage, str) and stage in NEW_SUMMARY_PROGRESS_PERCENTS and isinstance(status, str):
+            return {
+                "stage": stage,
+                "status": status,
+                "percent": _bounded_percent(progress.get("percent"), stage),
+                "updated_at": progress.get("updated_at") if isinstance(progress.get("updated_at"), str) else None,
+            }
+
+    statuses = [
+        (state.get(language) or {}).get("status")
+        for language in ("ru", "en")
+        if isinstance(state.get(language), dict)
+    ]
+    if statuses and all(status == "completed" for status in statuses):
+        return _progress_state(stage="completed", status="completed")
+    if any(status == "failed" for status in statuses):
+        return _progress_state(stage="failed", status="failed")
+    if any(status == "running" for status in statuses):
+        return _progress_state(stage="generating", status="running")
+    if any(status == "queued" for status in statuses):
+        return _progress_state(stage="queued", status="queued")
+    if any(status == "waiting" for status in statuses):
+        return _progress_state(stage="waiting_for_ic_review", status="waiting")
+    return _progress_state(stage="queued", status="missing")
+
+
+def _progress_state(*, stage: str, status: str) -> dict[str, Any]:
+    normalized_stage = stage if stage in NEW_SUMMARY_PROGRESS_PERCENTS else "queued"
+    return {
+        "stage": normalized_stage,
+        "status": status,
+        "percent": NEW_SUMMARY_PROGRESS_PERCENTS[normalized_stage],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _bounded_percent(value: Any, stage: str) -> int:
+    if isinstance(value, int):
+        return max(0, min(100, value))
+    return NEW_SUMMARY_PROGRESS_PERCENTS.get(stage, 0)
