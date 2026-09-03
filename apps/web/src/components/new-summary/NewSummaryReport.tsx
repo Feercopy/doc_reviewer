@@ -435,6 +435,9 @@ const newSummaryStyles = `
 }
 
 .new-summary-shell--embedded {
+  width: 100%;
+  max-width: none;
+  margin: 0;
   padding: 0;
 }
 
