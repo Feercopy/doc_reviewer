@@ -217,11 +217,13 @@ def _provider_compatible_schema(schema: dict[str, Any]) -> dict[str, Any]:
 
 def _remove_provider_unsupported_constraints(node: Any) -> None:
     if isinstance(node, dict):
-        if node.get("type") == "array" and isinstance(node.get("minItems"), int) and node["minItems"] > 1:
+        raw_schema_type = node.get("type")
+        schema_type = raw_schema_type if isinstance(raw_schema_type, str) else None
+        if schema_type == "array" and isinstance(node.get("minItems"), int) and node["minItems"] > 1:
             node.pop("minItems", None)
-        if node.get("type") == "array":
+        if schema_type == "array":
             node.pop("maxItems", None)
-        if node.get("type") in {"number", "integer"}:
+        if schema_type in {"number", "integer"}:
             node.pop("minimum", None)
             node.pop("maximum", None)
             node.pop("exclusiveMinimum", None)
