@@ -1198,6 +1198,8 @@ def test_new_summary_endpoint_queues_repository_skill_summary_once(client, db_se
     assert first.json()["source_revision"] == str(check_run.id)
     assert first.json()["ru"]["status"] == "queued"
     assert first.json()["en"]["status"] == "queued"
+    assert first.json()["progress"]["stage"] == "queued"
+    assert first.json()["progress"]["percent"] == 15
     assert second.json() == read.json()
 
 
@@ -1282,6 +1284,7 @@ def test_new_summary_endpoint_waits_for_ic_postprocessing(client, db_session):
     assert response.json()["available"] is True
     assert response.json()["ru"]["status"] == "waiting"
     assert response.json()["en"]["status"] == "waiting"
+    assert response.json()["progress"]["stage"] == "waiting_for_ic_review"
 
 
 def test_new_summary_endpoint_queues_legacy_completed_ic_review_without_postprocessing_marker(client, db_session):
@@ -1336,6 +1339,7 @@ def test_new_summary_endpoint_queues_legacy_completed_ic_review_without_postproc
     assert enqueued == [str(analysis.id)]
     assert response.json()["ru"]["status"] == "queued"
     assert response.json()["en"]["status"] == "queued"
+    assert response.json()["progress"]["stage"] == "queued"
 
 
 def test_cancel_analysis_preserves_completed_gate_result_and_cancels_downstream_runs(client, db_session):

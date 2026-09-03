@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import traceback
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
@@ -11,6 +12,7 @@ from jsonschema import ValidationError, validate
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.logging import worker_logger
 from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisDetailRun
 from app.models.document import Document
 from app.schemas.enums import Provider, RunStatus
@@ -18,6 +20,7 @@ from app.services.new_summaries import (
     NEW_SUMMARY_GENERATION_MODE,
     NEW_SUMMARY_VERSION,
     mark_new_summary_failed,
+    mark_new_summary_progress,
     mark_new_summary_running,
     persist_new_summary_variant,
 )
@@ -67,7 +70,18 @@ def generate_and_persist_new_summary_report(
     api_key: str | None,
     base_url: str | None,
 ) -> dict[str, Any]:
+    revision = str(check_run.id)
+    diagnostic_context = {
+        "analysis_id": str(analysis.id),
+        "check_run_id": str(check_run.id),
+        "provider": provider.value,
+        "model": model,
+        "document_stage": source_payload.get("document_stage"),
+        "document_type": source_payload.get("document_type"),
+    }
     response_schema = _new_summary_schema()
+    mark_new_summary_progress(analysis=analysis, revision=revision, stage="preparing_prompt")
+    session.commit()
     anonymization = anonymize_value_for_model(
         source_payload,
         existing_metadata=(check_run.run_parameters or {}).get(RUN_PARAMETER_KEY)
@@ -79,6 +93,21 @@ def generate_and_persist_new_summary_report(
     prompt = _generation_prompt(
         source_payload=anonymized_source_payload,
         response_schema=response_schema,
+    )
+    _log_new_summary_phase(
+        "preparing_prompt",
+        {
+            **diagnostic_context,
+            "prompt_chars": len(prompt),
+            "schema_path": SCHEMA_PATH,
+            "skill_path": SKILL_PATH,
+            "source_sections": sorted(source_payload.keys()),
+            "source_document_excerpt_chars": len(
+                str(((source_payload.get("source_document") or {}).get("parsed_text_excerpt") or ""))
+            )
+            if isinstance(source_payload.get("source_document"), dict)
+            else 0,
+        },
     )
     run_parameters = dict(check_run.run_parameters or {})
     mock_result = run_parameters.get("new_summary_mock_provider_result")
@@ -108,13 +137,15 @@ def generate_and_persist_new_summary_report(
             "result_schema_path": SCHEMA_PATH,
         },
     )
-    revision = str(check_run.id)
+    diagnostic_context["step_id"] = str(step.id)
     for language in LANGUAGES:
         mark_new_summary_running(analysis=analysis, revision=revision, language=language)
+    mark_new_summary_progress(analysis=analysis, revision=revision, stage="generating")
     session.commit()
 
     provider_results: list[AnalysisProviderResult] = []
     try:
+        _log_new_summary_phase("generating", diagnostic_context)
         payload = _run_generation_with_json_retry(
             provider=provider,
             model=model,
@@ -126,30 +157,44 @@ def generate_and_persist_new_summary_report(
             anonymization_metadata=run_parameters.get(RUN_PARAMETER_KEY),
             run_parameters=run_parameters,
             attempt_results=provider_results,
+            diagnostics_context=diagnostic_context,
         )
     except Exception as exc:
         session.rollback()
+        public_error = public_new_summary_error_message(exc)
+        _log_new_summary_failure(
+            exc,
+            {
+                **diagnostic_context,
+                "phase": "generation_failed",
+                "public_error": public_error,
+                "attempt_count": len(provider_results),
+                "attempts": _provider_attempt_diagnostics(provider_results),
+            },
+        )
         fail_result_synthesis_step(
             session=session,
             step=step,
-            error_message=str(exc),
+            error_message=public_error,
             raw_output=_combined_raw_output(provider_results),
         )
         mark_new_summary_failed(
             analysis=analysis,
             revision=revision,
             language="ru",
-            error_message=str(exc),
+            error_message=public_error,
         )
         mark_new_summary_failed(
             analysis=analysis,
             revision=revision,
             language="en",
-            error_message=str(exc),
+            error_message=public_error,
         )
         session.commit()
         raise
 
+    mark_new_summary_progress(analysis=analysis, revision=revision, stage="saving")
+    session.commit()
     variants = _split_bilingual_report(payload)
     source_fingerprint = new_summary_source_fingerprint(source_payload)
     for language in LANGUAGES:
@@ -161,6 +206,16 @@ def generate_and_persist_new_summary_report(
             source_fingerprint=source_fingerprint,
             trace_step_id=str(step.id),
         )
+    _log_new_summary_phase(
+        "completed",
+        {
+            **diagnostic_context,
+            "attempt_count": len(provider_results),
+            "attempts": _provider_attempt_diagnostics(provider_results),
+            "ru_payload_keys": sorted(variants["ru"].keys()),
+            "en_payload_keys": sorted(variants["en"].keys()),
+        },
+    )
     complete_result_synthesis_step(
         session=session,
         step=step,
@@ -404,6 +459,7 @@ def _run_generation_with_json_retry(
     anonymization_metadata: dict[str, Any] | None,
     run_parameters: dict[str, Any],
     attempt_results: list[AnalysisProviderResult],
+    diagnostics_context: dict[str, Any],
 ) -> dict[str, Any]:
     result = _call_provider(
         provider=provider,
@@ -416,6 +472,14 @@ def _run_generation_with_json_retry(
     )
     attempt_results.append(result)
     try:
+        _log_new_summary_phase(
+            "validating",
+            {
+                **diagnostics_context,
+                "attempt": 1,
+                "attempts": _provider_attempt_diagnostics(attempt_results),
+            },
+        )
         return _validated_new_summary(
             result,
             response_schema,
@@ -423,6 +487,16 @@ def _run_generation_with_json_retry(
             anonymization_metadata=anonymization_metadata,
         )
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+        _log_new_summary_failure(
+            exc,
+            {
+                **diagnostics_context,
+                "phase": "first_attempt_invalid",
+                "public_error": public_new_summary_error_message(exc),
+                "attempt": 1,
+                "attempts": _provider_attempt_diagnostics(attempt_results),
+            },
+        )
         retry_parameters = {**run_parameters, "new_summary_json_retry": True}
         retry_mock = run_parameters.get("new_summary_json_retry_mock_provider_result")
         if isinstance(retry_mock, dict):
@@ -441,6 +515,14 @@ def _run_generation_with_json_retry(
             run_parameters=retry_parameters,
         )
         attempt_results.append(retry_result)
+        _log_new_summary_phase(
+            "validating",
+            {
+                **diagnostics_context,
+                "attempt": 2,
+                "attempts": _provider_attempt_diagnostics(attempt_results),
+            },
+        )
         return _validated_new_summary(
             retry_result,
             response_schema,
@@ -921,3 +1003,109 @@ def _sum_optional(results: list[AnalysisProviderResult], attr: str) -> Any:
     if not values:
         return None
     return sum(values)
+
+
+def public_new_summary_error_message(exc: BaseException) -> str:
+    if isinstance(exc, json.JSONDecodeError):
+        return f"new_summary_generation_failed:invalid_json:{exc.lineno}:{exc.colno}"
+    if isinstance(exc, ValidationError):
+        return f"new_summary_generation_failed:schema_validation:{_json_path(exc.path)}"
+    return f"new_summary_generation_failed:{exc.__class__.__name__}"
+
+
+def _log_new_summary_phase(phase: str, context: dict[str, Any]) -> None:
+    worker_logger.info(
+        "new_summary_generation_phase",
+        extra={
+            "job_type": "run_summary_localizations",
+            "phase": phase,
+            **_diagnostic_safe_context(context),
+        },
+    )
+
+
+def _log_new_summary_failure(exc: BaseException, context: dict[str, Any]) -> None:
+    worker_logger.info(
+        "new_summary_generation_diagnostic",
+        extra={
+            "job_type": "run_summary_localizations",
+            "error_class": exc.__class__.__name__,
+            "public_error": public_new_summary_error_message(exc),
+            "error_message_length": len(str(exc)),
+            "error_message_sha256": hashlib.sha256(str(exc).encode("utf-8", errors="replace")).hexdigest(),
+            "json_error_line": exc.lineno if isinstance(exc, json.JSONDecodeError) else None,
+            "json_error_column": exc.colno if isinstance(exc, json.JSONDecodeError) else None,
+            "validation_path": _json_path(exc.path) if isinstance(exc, ValidationError) else None,
+            "validation_schema_path": _json_path(exc.schema_path) if isinstance(exc, ValidationError) else None,
+            "validation_validator": exc.validator if isinstance(exc, ValidationError) else None,
+            "traceback": _safe_traceback(exc),
+            **_diagnostic_safe_context(context),
+        },
+    )
+
+
+def _provider_attempt_diagnostics(results: list[AnalysisProviderResult]) -> list[dict[str, Any]]:
+    return [
+        {
+            "attempt": index,
+            "raw_output_chars": len(result.raw_output or ""),
+            "structured_text_chars": len(result.structured_text or ""),
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "latency_ms": result.latency_ms,
+            "estimated_cost": str(result.estimated_cost) if result.estimated_cost is not None else None,
+        }
+        for index, result in enumerate(results, start=1)
+    ]
+
+
+def _diagnostic_safe_context(context: dict[str, Any]) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    allowed_scalars = {
+        "analysis_id",
+        "check_run_id",
+        "step_id",
+        "provider",
+        "model",
+        "document_stage",
+        "document_type",
+        "phase",
+        "public_error",
+        "attempt",
+        "attempt_count",
+        "prompt_chars",
+        "schema_path",
+        "skill_path",
+        "source_fingerprint",
+        "source_document_excerpt_chars",
+    }
+    for key in allowed_scalars:
+        value = context.get(key)
+        if isinstance(value, str | int | float | bool) or value is None:
+            safe[key] = value
+    if isinstance(context.get("source_sections"), list):
+        safe["source_sections"] = [str(item) for item in context["source_sections"]]
+    if isinstance(context.get("attempts"), list):
+        safe["attempts"] = context["attempts"]
+    if isinstance(context.get("ru_payload_keys"), list):
+        safe["ru_payload_keys"] = [str(item) for item in context["ru_payload_keys"]]
+    if isinstance(context.get("en_payload_keys"), list):
+        safe["en_payload_keys"] = [str(item) for item in context["en_payload_keys"]]
+    return safe
+
+
+def _safe_traceback(exc: BaseException) -> list[dict[str, Any]]:
+    frames = traceback.extract_tb(exc.__traceback__ or None)
+    return [
+        {
+            "file": Path(frame.filename).name,
+            "line": frame.lineno,
+            "function": frame.name,
+        }
+        for frame in frames[-8:]
+    ]
+
+
+def _json_path(path: Any) -> str:
+    parts = [str(part) for part in path]
+    return ".".join(parts) if parts else "$"

@@ -16,6 +16,7 @@ from app.services.new_summaries import (
     NEW_SUMMARY_GENERATION_MODE,
     NEW_SUMMARY_VERSION,
     mark_new_summary_failed,
+    mark_new_summary_progress,
 )
 from app.services.summary_localizations import (
     SUMMARY_GENERATION_MODE,
@@ -34,6 +35,7 @@ from skills.new_summary_generation import (
     build_new_summary_source,
     generate_and_persist_new_summary_report,
     new_summary_source_fingerprint,
+    public_new_summary_error_message,
 )
 
 
@@ -134,6 +136,21 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
                     failed_languages.append(f"summary_localization:{target_language}")
         if new_summary_runnable:
             try:
+                mark_new_summary_progress(
+                    analysis=analysis,
+                    revision=str(check_run.id),
+                    stage="preparing_sources",
+                )
+                session.commit()
+                worker_logger.info(
+                    "new_summary_generation_phase",
+                    extra={
+                        "job_type": "run_summary_localizations",
+                        "entity_id": str(analysis_uuid),
+                        "check_run_id": str(check_run.id),
+                        "phase": "preparing_sources",
+                    },
+                )
                 new_summary_source = build_new_summary_source(
                     session=session,
                     analysis=analysis,
@@ -141,15 +158,26 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
                 )
                 new_summary_fingerprint = new_summary_source_fingerprint(new_summary_source)
             except Exception as exc:
+                public_error = public_new_summary_error_message(exc)
                 for target_language in NEW_SUMMARY_LANGUAGES:
                     mark_new_summary_failed(
                         analysis=analysis,
                         revision=str(check_run.id),
                         language=target_language,
-                        error_message=str(exc),
+                        error_message=public_error,
                     )
                 session.commit()
                 failed_languages.extend(f"new_summary:{language}" for language in NEW_SUMMARY_LANGUAGES)
+                worker_logger.info(
+                    "new_summary_source_build_failed",
+                    extra={
+                        "job_type": "run_summary_localizations",
+                        "entity_id": str(analysis_uuid),
+                        "check_run_id": str(check_run.id),
+                        "error_class": exc.__class__.__name__,
+                        "public_error": public_error,
+                    },
+                )
             else:
                 needs_new_summary = False
                 for target_language in NEW_SUMMARY_LANGUAGES:
@@ -175,12 +203,13 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
                             base_url=base_url,
                         )
                     except Exception as exc:
+                        public_error = public_new_summary_error_message(exc)
                         for target_language in NEW_SUMMARY_LANGUAGES:
                             mark_new_summary_failed(
                                 analysis=analysis,
                                 revision=str(check_run.id),
                                 language=target_language,
-                                error_message=str(exc),
+                                error_message=public_error,
                             )
                         session.commit()
                         failed_languages.extend(f"new_summary:{language}" for language in NEW_SUMMARY_LANGUAGES)
@@ -214,7 +243,7 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
                         analysis=current_analysis,
                         revision=str(current_check_run.id),
                         language=language,
-                        error_message=str(exc),
+                        error_message=public_new_summary_error_message(exc),
                     )
             session.commit()
         worker_logger.info(

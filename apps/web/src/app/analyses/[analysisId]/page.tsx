@@ -22,6 +22,7 @@ import {
   type AnalysisRecord,
   type AnalysisStatusRecord,
   type DocumentRecord,
+  type NewSummaryProgressRecord,
   type NewSummaryRecord,
   type OutputLanguage,
   type PredictedCommentRunRecord,
@@ -960,13 +961,11 @@ function NewSummaryPanel({
         </div>
       </div>
       {newSummaryPending ? (
-        <div className="analysis-summary-language-loading" aria-live="polite">
-          Готовим AI Summary по skills/new-summary/SKILL.md.
-        </div>
+        <NewSummaryProgress progress={newSummary?.progress ?? fallbackNewSummaryProgress(newSummary)} />
       ) : null}
       {newSummaryError || newSummaryFailed ? (
         <div className="analysis-alert">
-          AI Summary пока не удалось подготовить. Старый отчет доступен администраторам во вкладке Full Report.
+          AI Summary пока не удалось подготовить. Повторная попытка начнётся автоматически при следующем открытии страницы.
         </div>
       ) : null}
       {!newSummaryRequested && !newSummaryError ? (
@@ -974,6 +973,79 @@ function NewSummaryPanel({
       ) : null}
     </section>
   );
+}
+
+const newSummaryProgressSteps = [
+  { id: "waiting_for_ic_review", label: "Ждем завершения IC Review" },
+  { id: "queued", label: "В очереди на сборку" },
+  { id: "preparing_sources", label: "Собираем входные данные" },
+  { id: "preparing_prompt", label: "Готовим запрос к модели" },
+  { id: "generating", label: "Модель собирает RU/EN Summary" },
+  { id: "validating", label: "Проверяем структуру ответа" },
+  { id: "saving", label: "Сохраняем результат" },
+  { id: "completed", label: "Готово" },
+] as const;
+
+function NewSummaryProgress({ progress }: { progress: NewSummaryProgressRecord | null }) {
+  const stage = progress?.stage ?? "queued";
+  const stageIndex = newSummaryProgressSteps.findIndex((step) => step.id === stage);
+  const activeIndex = stage === "failed" ? newSummaryProgressSteps.length - 2 : Math.max(0, stageIndex);
+  const percent = Math.max(0, Math.min(100, progress?.percent ?? 15));
+  const isFailed = progress?.status === "failed" || stage === "failed";
+  const activeLabel = isFailed ? "Сборка остановилась с ошибкой" : newSummaryProgressSteps[activeIndex]?.label ?? "Готовим AI Summary";
+
+  return (
+    <div className="analysis-new-summary-progress" aria-live="polite">
+      <div className="analysis-new-summary-progress__header">
+        <div>
+          <strong>{activeLabel}</strong>
+          <span>Готовим AI Summary по skills/new-summary/SKILL.md</span>
+        </div>
+        <b>{percent}%</b>
+      </div>
+      <div className="analysis-new-summary-progress__track" aria-hidden="true">
+        <span style={{ width: `${percent}%` }} />
+      </div>
+      <ol className="analysis-new-summary-progress__steps">
+        {newSummaryProgressSteps.map((step, index) => {
+          const state =
+            isFailed && index === activeIndex
+              ? "failed"
+              : index < activeIndex || stage === "completed"
+                ? "completed"
+                : index === activeIndex
+                  ? "active"
+                  : "pending";
+          return (
+            <li className={`analysis-new-summary-progress__step analysis-new-summary-progress__step--${state}`} key={step.id}>
+              <span aria-hidden="true" />
+              <p>{step.label}</p>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+function fallbackNewSummaryProgress(newSummary: NewSummaryRecord | null): NewSummaryProgressRecord | null {
+  if (!newSummary?.available) {
+    return null;
+  }
+  const statuses = [newSummary.ru.status, newSummary.en.status];
+  if (statuses.every((status) => status === "completed")) {
+    return { stage: "completed", status: "completed", percent: 100, updated_at: null };
+  }
+  if (statuses.some((status) => status === "failed")) {
+    return { stage: "failed", status: "failed", percent: 100, updated_at: null };
+  }
+  if (statuses.some((status) => status === "running")) {
+    return { stage: "generating", status: "running", percent: 70, updated_at: null };
+  }
+  if (statuses.some((status) => status === "waiting")) {
+    return { stage: "waiting_for_ic_review", status: "waiting", percent: 5, updated_at: null };
+  }
+  return { stage: "queued", status: "queued", percent: 15, updated_at: null };
 }
 
 function ResultReportSection({ children, title }: { children: ReactNode; title: string }) {
@@ -3146,6 +3218,115 @@ const analysisStyles = `
   font-weight: 700;
   text-align: center;
   padding: 24px;
+}
+
+.analysis-new-summary-progress {
+  display: grid;
+  gap: 16px;
+  border: 1px solid #d6dee8;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 18px;
+}
+
+.analysis-new-summary-progress__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.analysis-new-summary-progress__header div {
+  display: grid;
+  gap: 4px;
+}
+
+.analysis-new-summary-progress__header strong {
+  color: #111827;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.analysis-new-summary-progress__header span {
+  color: #5b6472;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.analysis-new-summary-progress__header b {
+  color: #087f5b;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.analysis-new-summary-progress__track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e5eaf0;
+}
+
+.analysis-new-summary-progress__track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #0e9f6e;
+  transition: width 240ms ease;
+}
+
+.analysis-new-summary-progress__steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.analysis-new-summary-progress__step {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  color: #64748b;
+}
+
+.analysis-new-summary-progress__step span {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #cbd5e1;
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+.analysis-new-summary-progress__step p {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.analysis-new-summary-progress__step--completed {
+  color: #087f5b;
+}
+
+.analysis-new-summary-progress__step--completed span,
+.analysis-new-summary-progress__step--active span {
+  border-color: #0e9f6e;
+  background: #0e9f6e;
+}
+
+.analysis-new-summary-progress__step--active {
+  color: #111827;
+}
+
+.analysis-new-summary-progress__step--failed {
+  color: #b42318;
+}
+
+.analysis-new-summary-progress__step--failed span {
+  border-color: #d92d20;
+  background: #d92d20;
 }
 
 .analysis-result-stack {

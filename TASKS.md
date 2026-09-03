@@ -21,6 +21,14 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Add AI Summary generation observability without exposing technical logs
+  in the product UI. The New Summary API now returns a safe public progress
+  state, the analysis page renders a stage progress bar while RU/EN Summary is
+  being prepared, and worker-side New Summary generation writes phase/error
+  diagnostics to worker logs with only safe metadata (IDs, phase, token/size
+  counts, schema paths, error class/hash, JSON/schema locations, and frame
+  names). Public New Summary failures are reduced to short error codes so
+  validation/model text is not surfaced to users or admins through API fields.
 - [x] Hide IC Review full-report downloads from analysis result pages without
   removing stored artifacts or backend download support. The visible
   `Скачать полный отчет`, `Скачать PDF`, and `Скачать MD` controls were removed
