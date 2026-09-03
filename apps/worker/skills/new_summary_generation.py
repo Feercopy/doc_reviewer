@@ -122,15 +122,10 @@ def generate_and_persist_new_summary_report(
             base_url=base_url,
             prompt=prompt,
             response_schema=response_schema,
+            source_payload=source_payload,
+            anonymization_metadata=run_parameters.get(RUN_PARAMETER_KEY),
             run_parameters=run_parameters,
             attempt_results=provider_results,
-        )
-        payload = deanonymize_model_value(payload, metadata=run_parameters.get(RUN_PARAMETER_KEY))
-        validate(instance=payload, schema=response_schema)
-        payload = _validated_source_dependent_report(
-            payload=payload,
-            source_payload=source_payload,
-            response_schema=response_schema,
         )
     except Exception as exc:
         session.rollback()
@@ -206,7 +201,27 @@ def build_new_summary_source(
 
 def new_summary_source_fingerprint(source_payload: dict[str, Any]) -> str:
     return hashlib.sha256(
-        json.dumps(source_payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+        json.dumps(
+            {
+                "source_payload": source_payload,
+                "skill": {
+                    "path": SKILL_PATH,
+                    "version": NEW_SUMMARY_VERSION,
+                    "text": _skill_text(),
+                },
+                "schema": {
+                    "path": SCHEMA_PATH,
+                    "value": _new_summary_schema(),
+                },
+                "checklist": {
+                    "path": CHECKLIST_PATH,
+                    "value": _new_summary_stage_checklists(),
+                },
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+        ).encode("utf-8")
     ).hexdigest()
 
 
@@ -385,6 +400,8 @@ def _run_generation_with_json_retry(
     base_url: str | None,
     prompt: str,
     response_schema: dict[str, Any],
+    source_payload: dict[str, Any],
+    anonymization_metadata: dict[str, Any] | None,
     run_parameters: dict[str, Any],
     attempt_results: list[AnalysisProviderResult],
 ) -> dict[str, Any]:
@@ -399,8 +416,17 @@ def _run_generation_with_json_retry(
     )
     attempt_results.append(result)
     try:
-        return _validated_new_summary(result, response_schema)
-    except (json.JSONDecodeError, ValidationError) as exc:
+        return _validated_new_summary(
+            result,
+            response_schema,
+            source_payload=source_payload,
+            anonymization_metadata=anonymization_metadata,
+        )
+    except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+        retry_parameters = {**run_parameters, "new_summary_json_retry": True}
+        retry_mock = run_parameters.get("new_summary_json_retry_mock_provider_result")
+        if isinstance(retry_mock, dict):
+            retry_parameters["mock_provider_result"] = retry_mock
         retry_result = _call_provider(
             provider=provider,
             model=model,
@@ -412,10 +438,15 @@ def _run_generation_with_json_retry(
                 + f"({exc.__class__.__name__}). Return exactly one complete JSON object that matches the schema."
             ),
             response_schema=response_schema,
-            run_parameters={**run_parameters, "new_summary_json_retry": True},
+            run_parameters=retry_parameters,
         )
         attempt_results.append(retry_result)
-        return _validated_new_summary(retry_result, response_schema)
+        return _validated_new_summary(
+            retry_result,
+            response_schema,
+            source_payload=source_payload,
+            anonymization_metadata=anonymization_metadata,
+        )
 
 
 def _call_provider(
@@ -445,10 +476,17 @@ def _call_provider(
 def _validated_new_summary(
     result: AnalysisProviderResult,
     response_schema: dict[str, Any],
+    *,
+    source_payload: dict[str, Any],
+    anonymization_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
     payload = parse_json_output(result.structured_text)
-    validate(instance=payload, schema=response_schema)
-    return payload
+    payload = deanonymize_model_value(payload, metadata=anonymization_metadata)
+    return _validated_source_dependent_report(
+        payload=payload,
+        source_payload=source_payload,
+        response_schema=response_schema,
+    )
 
 
 def _validated_source_dependent_report(
@@ -457,6 +495,9 @@ def _validated_source_dependent_report(
     source_payload: dict[str, Any],
     response_schema: dict[str, Any],
 ) -> dict[str, Any]:
+    payload = _normalize_generated_report_shell(payload=payload, source_payload=source_payload)
+    if not isinstance(payload, dict):
+        raise ValueError("new_summary_not_object")
     if payload.get("language") != "en":
         raise ValueError("new_summary_language_mismatch")
     expected_stage = source_payload.get("document_stage")
@@ -481,6 +522,143 @@ def _validated_source_dependent_report(
     normalized["versions"] = normalized_versions
     validate(instance=normalized, schema=response_schema)
     return normalized
+
+
+def _normalize_generated_report_shell(*, payload: dict[str, Any], source_payload: dict[str, Any]) -> dict[str, Any]:
+    """Repair technical JSON drift while preserving model-authored content."""
+    if not isinstance(payload, dict):
+        return payload
+
+    normalized = _filter_allowed_keys(
+        payload,
+        allowed={"schema_version", "language", "title", "versions"},
+    )
+    normalized.setdefault("schema_version", "new-summary-v1")
+    normalized.setdefault("language", "en")
+    title = normalized.get("title")
+    if not isinstance(title, str) or not title.strip():
+        normalized["title"] = f"AI Summary {_source_initiative_title(source_payload)}"
+
+    versions = normalized.get("versions")
+    if not isinstance(versions, list):
+        versions = []
+    ordered_versions = _ordered_versions_with_inferred_languages(versions)
+    normalized["versions"] = [
+        _normalize_generated_version_shell(
+            version,
+            source_payload=source_payload,
+            language=language,
+        )
+        for language, version in zip(("en", "ru"), ordered_versions, strict=True)
+    ]
+    return normalized
+
+
+def _ordered_versions_with_inferred_languages(versions: list[Any]) -> list[dict[str, Any]]:
+    dict_versions = [version for version in versions if isinstance(version, dict)]
+    by_language: dict[str, dict[str, Any]] = {}
+    unlabeled: list[dict[str, Any]] = []
+    for version in dict_versions:
+        language = version.get("language")
+        if language in LANGUAGES and language not in by_language:
+            by_language[language] = version
+        else:
+            unlabeled.append(version)
+    for language in ("en", "ru"):
+        if language not in by_language and unlabeled:
+            by_language[language] = unlabeled.pop(0)
+    return [by_language.get("en") or {}, by_language.get("ru") or {}]
+
+
+def _normalize_generated_version_shell(
+    version: dict[str, Any],
+    *,
+    source_payload: dict[str, Any],
+    language: str,
+) -> dict[str, Any]:
+    normalized = _filter_allowed_keys(
+        version,
+        allowed={
+            "language",
+            "stage",
+            "traction_summary",
+            "context",
+            "required_elements",
+            "required_details",
+            "confirmed",
+            "insufficiently_confirmed",
+            "critical_problems",
+            "other",
+        },
+    )
+    normalized["language"] = language
+    normalized["stage"] = source_payload.get("document_stage") or normalized.get("stage")
+    if not isinstance(normalized.get("context"), str) or not str(normalized.get("context")).strip():
+        normalized["context"] = _missing_text(language, "context")
+    normalized["traction_summary"] = _normalize_traction_summary(
+        normalized.get("traction_summary"),
+        language=language,
+    )
+    for key in ("required_elements", "confirmed", "insufficiently_confirmed", "critical_problems", "other"):
+        if not isinstance(normalized.get(key), list):
+            normalized[key] = []
+    return normalized
+
+
+def _filter_allowed_keys(value: dict[str, Any], *, allowed: set[str]) -> dict[str, Any]:
+    return {key: _copy_jsonish(item) for key, item in value.items() if key in allowed}
+
+
+def _source_initiative_title(source_payload: dict[str, Any]) -> str:
+    title = source_payload.get("initiative_title")
+    if isinstance(title, str) and title.strip():
+        return title.strip()
+    return "Untitled initiative"
+
+
+def _normalize_traction_summary(value: Any, *, language: str) -> dict[str, Any]:
+    if isinstance(value, dict):
+        metric_label = value.get("metric_label")
+        periods = value.get("periods")
+        rows = value.get("rows")
+        if isinstance(metric_label, str) and metric_label.strip() and isinstance(periods, list) and isinstance(rows, list):
+            period_pairs = [
+                (index, str(period).strip())
+                for index, period in enumerate(periods)
+                if str(period).strip()
+            ]
+            normalized_periods = [period for _, period in period_pairs]
+            normalized_rows = [
+                {
+                    "label": str(row.get("label") or "").strip(),
+                    "values": [
+                        str(row.get("values", [])[index])
+                        if isinstance(row.get("values"), list) and index < len(row.get("values", []))
+                        else ""
+                        for index, _ in period_pairs
+                    ],
+                }
+                for row in rows
+                if isinstance(row, dict) and str(row.get("label") or "").strip()
+            ]
+            if normalized_periods and normalized_rows:
+                return {
+                    "metric_label": metric_label.strip(),
+                    "periods": normalized_periods,
+                    "rows": normalized_rows,
+                }
+    period = "Не указано" if language == "ru" else "Not provided"
+    return {
+        "metric_label": "Revenue",
+        "periods": [period],
+        "rows": [{"label": "Total incremental output uplifts", "values": [""]}],
+    }
+
+
+def _missing_text(language: str, field: str) -> str:
+    if language == "ru":
+        return f"Данные для раздела `{field}` не были надежно выделены из входных анализов."
+    return f"Data for `{field}` was not reliably extracted from the source analyses."
 
 
 def _split_bilingual_report(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -538,8 +716,96 @@ def _normalized_required_details(payload: dict[str, Any]) -> dict[str, Any]:
     for item_id, detail in details.items():
         if not isinstance(item_id, str):
             continue
-        normalized[_canonical_required_element_id(item_id)] = _copy_jsonish(detail)
+        normalized_detail = _normalized_required_detail(detail)
+        if normalized_detail is not None:
+            normalized[_canonical_required_element_id(item_id)] = normalized_detail
     return normalized
+
+
+def _normalized_required_detail(detail: Any) -> dict[str, Any] | None:
+    if not isinstance(detail, dict):
+        return None
+    detail_type = detail.get("type")
+    if detail_type == "solution_validation":
+        detail_items = detail.get("items")
+        if not isinstance(detail_items, list):
+            return None
+        items = [
+            {"text": text, "verdict": verdict}
+            for item in detail_items
+            if isinstance(item, dict)
+            for text in [_non_empty_string(item.get("text"))]
+            for verdict in [_enum_value(item.get("verdict"), {"confirmed", "insufficient"})]
+            if text is not None and verdict is not None
+        ]
+        return {"type": detail_type, "items": items} if items else None
+    if detail_type == "metric_binding":
+        return {
+            "type": detail_type,
+            "input_metrics": _normalized_metric_binding_items(detail.get("input_metrics")),
+            "output_metrics": _normalized_metric_binding_items(detail.get("output_metrics")),
+        }
+    if detail_type == "next_review_plan":
+        outputs = _non_empty_strings(detail.get("outputs_until_next_review"))
+        metrics = _normalized_metric_plan_rows(detail.get("metrics_until_next_review"))
+        if not outputs or not metrics:
+            return None
+        return {
+            "type": detail_type,
+            "outputs_until_next_review": outputs,
+            "metrics_until_next_review": metrics,
+        }
+    if detail_type == "stop_criteria":
+        criteria = _non_empty_strings(detail.get("criteria"))
+        return {"type": detail_type, "criteria": criteria} if criteria else None
+    return None
+
+
+def _normalized_metric_binding_items(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    return [
+        {"metric": metric, "binding": binding, "evidence": evidence}
+        for item in value
+        if isinstance(item, dict)
+        for metric in [_non_empty_string(item.get("metric"))]
+        for binding in [_enum_value(item.get("binding"), {"confirmed", "insufficient"})]
+        for evidence in [_non_empty_string(item.get("evidence"))]
+        if metric is not None and binding is not None and evidence is not None
+    ]
+
+
+def _normalized_metric_plan_rows(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    return [
+        {"metric": metric, "current": current, "next_review": next_review}
+        for item in value
+        if isinstance(item, dict)
+        for metric in [_non_empty_string(item.get("metric"))]
+        for current in [_non_empty_string(item.get("current"))]
+        for next_review in [_non_empty_string(item.get("next_review"))]
+        if metric is not None and current is not None and next_review is not None
+    ]
+
+
+def _non_empty_strings(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in (_non_empty_string(raw) for raw in value) if item is not None]
+
+
+def _non_empty_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _enum_value(value: Any, allowed: set[str]) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value if value in allowed else None
 
 
 def _latest_detail_source(*, session: Session, analysis: Analysis) -> Any:

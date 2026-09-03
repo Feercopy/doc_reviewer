@@ -13,10 +13,11 @@ from app.schemas.analyses import NewSummaryRead, NewSummaryVariantRead
 from app.schemas.enums import RunStatus
 from app.services.summary_localizations import latest_completed_ic_review
 from app.services.summary_localizations import SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER
+from app.services.summary_localizations import SUMMARY_LOCALIZATIONS_POSTPROCESSING
 
 
 NEW_SUMMARY_KEY = "new_summary"
-NEW_SUMMARY_VERSION = 1
+NEW_SUMMARY_VERSION = 2
 NEW_SUMMARY_GENERATION_MODE = "new_summary_skill"
 STALE_NEW_SUMMARY_AFTER = timedelta(minutes=30)
 
@@ -53,9 +54,8 @@ def prepare_new_summary_for_check_run(
 
     revision = str(check_run.id)
     state = _state(analysis)
-    postprocessing_finished = (
-        (check_run.run_parameters or {}).get(SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER) is True
-    )
+    postprocessing_marker = (check_run.run_parameters or {}).get(SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER)
+    postprocessing_finished = postprocessing_marker is True or postprocessing_marker != SUMMARY_LOCALIZATIONS_POSTPROCESSING
     if not postprocessing_finished:
         is_waiting_current = (
             state.get("source_revision") == revision

@@ -430,6 +430,8 @@ Appendix 1. План работ на следующие полгода, вклю
 - каждый объект в `versions[]` содержит `language`, `stage`, `context`,
   `traction_summary`, `required_elements`, `confirmed`, `insufficiently_confirmed`,
   `critical_problems` и `other`;
+- если содержательные правила выше не требуют выводить разделы `confirmed` или
+  `insufficiently_confirmed`, верни для них пустые массивы;
 - `versions[].traction_summary` содержит `metric_label`, `periods` и `rows`;
 - `versions[].traction_summary.periods` содержит заголовки годов, кварталов и `Total`
   в том порядке, в котором они должны быть выведены в PDF-таблице;
@@ -440,6 +442,8 @@ Appendix 1. План работ на следующие полгода, вклю
   чеклиста стадии;
 - `versions[].required_elements[].status` равно только `есть` или `нет`;
 - `versions[].other` может быть пустым массивом;
+- материалы для Appendices передавай только в `versions[].required_details`;
+  не добавляй отдельное поле `appendices`, потому что его собирает слой отображения;
 - не добавляй поля, которых нет в схеме;
 - не добавляй технические настройки PDF-рендеринга в JSON: цвета, отступы, размер
   шрифта и прочие параметры оформления применяет слой сборки артефактов по правилам
