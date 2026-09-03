@@ -21,6 +21,16 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Diagnose and fix AI Summary generation for historical analyses such as
+  `283a2039-d479-4673-85c1-bec12d129738`. Production state showed both
+  `new_summary` variants failing with `unhashable type: 'dict'`; the failing
+  path was OpenAI-compatible schema adaptation, where a schema property named
+  `type` with an object value (`{"const": ...}`) was treated as the JSON Schema
+  `type` keyword. Guarded provider schema normalization so only string schema
+  types are inspected for provider-unsupported constraints. Verified the full
+  new-summary schema now converts before provider calls, provider adapter tests
+  pass (`14 passed`), summary localization tests pass (`17 passed`), Python
+  compilation passes, and `git diff --check` is clean.
 - [x] Fix AI Summary preparation for old and new analyses after the new
   `skills/new-summary/SKILL.md` format became stricter than the persisted JSON
   contract. Legacy completed IC Review runs without the postprocessing marker

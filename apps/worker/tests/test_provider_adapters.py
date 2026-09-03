@@ -199,6 +199,47 @@ def test_openai_compatible_adapter_removes_provider_unsupported_numeric_bounds()
     assert schema_with_numeric_bounds["properties"]["confidence"]["minimum"] == 0
 
 
+def test_openai_compatible_adapter_ignores_property_named_type_with_object_schema():
+    captured = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"summary":"ok"}'))],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=2),
+                model_dump_json=lambda: '{"raw":true}',
+            )
+
+    class FakeClient:
+        chat = SimpleNamespace(completions=FakeCompletions())
+
+    schema_with_type_property = {
+        "type": "object",
+        "properties": {
+            "detail": {
+                "type": "object",
+                "properties": {
+                    "type": {"const": "solution_validation"},
+                    "count": {"type": "number", "minimum": 0},
+                },
+            },
+        },
+    }
+    request = _request(
+        Provider.OPENAI_COMPATIBLE,
+        api_key="sk-test",
+        base_url="https://openrouter.ai/api/v1",
+        response_schema=schema_with_type_property,
+    )
+
+    OpenAICompatibleAdapter(client_factory=lambda **_: FakeClient()).run(request)
+
+    provider_schema = captured["response_format"]["json_schema"]["schema"]
+    assert provider_schema["properties"]["detail"]["properties"]["type"] == {"const": "solution_validation"}
+    assert "minimum" not in provider_schema["properties"]["detail"]["properties"]["count"]
+
+
 def test_openai_compatible_adapter_normalizes_responses_api_result():
     captured = {}
 
