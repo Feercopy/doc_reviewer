@@ -356,6 +356,19 @@ def test_new_summary_solution_validation_detail_ignores_non_list_items():
     )
 
 
+def test_new_summary_source_fingerprint_changes_with_skill_contract(monkeypatch):
+    source_payload = {"initiative_title": "Case", "document_stage": "Gate 2"}
+    monkeypatch.setattr(new_summary_generation, "_skill_text", lambda: "skill contract v1")
+    monkeypatch.setattr(new_summary_generation, "_new_summary_schema", lambda: {"type": "object"})
+    monkeypatch.setattr(new_summary_generation, "_new_summary_stage_checklists", lambda: {"gate_2": []})
+    first = new_summary_generation.new_summary_source_fingerprint(source_payload)
+
+    monkeypatch.setattr(new_summary_generation, "_skill_text", lambda: "skill contract v2")
+    second = new_summary_generation.new_summary_source_fingerprint(source_payload)
+
+    assert second != first
+
+
 def test_english_generation_uses_original_evidence_not_russian_variant(tmp_path, monkeypatch):
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
     get_settings.cache_clear()

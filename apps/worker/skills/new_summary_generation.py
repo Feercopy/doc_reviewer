@@ -201,7 +201,27 @@ def build_new_summary_source(
 
 def new_summary_source_fingerprint(source_payload: dict[str, Any]) -> str:
     return hashlib.sha256(
-        json.dumps(source_payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+        json.dumps(
+            {
+                "source_payload": source_payload,
+                "skill": {
+                    "path": SKILL_PATH,
+                    "version": NEW_SUMMARY_VERSION,
+                    "text": _skill_text(),
+                },
+                "schema": {
+                    "path": SCHEMA_PATH,
+                    "value": _new_summary_schema(),
+                },
+                "checklist": {
+                    "path": CHECKLIST_PATH,
+                    "value": _new_summary_stage_checklists(),
+                },
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+        ).encode("utf-8")
     ).hexdigest()
 
 
