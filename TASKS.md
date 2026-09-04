@@ -21,6 +21,15 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Restore the visible IC Review PDF download in the Financial Analysis
+  panel without re-enabling Markdown or full-report download controls. Completed
+  IC Review runs now show a PDF-only `Скачать PDF` action when the persisted
+  `artifact:legacy_report_pdf` artifact exists, even if the compact structured
+  result is unavailable, while stored artifacts and backend download endpoints
+  remain unchanged; the canonical IC Review plan now documents this approved
+  PDF-only frontend download contract. Verified with focused Analysis page
+  frontend tests (`26 files, 155 tests passed`), production web build, and
+  `git diff --check`.
 - [x] Align embedded AI Summary width with Product Analysis and Financial
   Analysis tabs. The production analysis page now keeps `NewSummaryReportView`
   full-width only in embedded mode, while standalone concept pages retain their

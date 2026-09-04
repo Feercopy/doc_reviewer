@@ -233,7 +233,7 @@ describe("analysis result page", () => {
     expect(pageSource).toContain("Only .xlsx financial model files are supported.");
   });
 
-  it("keeps IC review tab compact, relaunchable after failure, and hides full report downloads", () => {
+  it("keeps IC review tab compact, relaunchable after failure, and shows the IC Review PDF download", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const icPanelSource = pageSource.slice(
       pageSource.indexOf("function IcReviewPanel"),
@@ -244,10 +244,11 @@ describe("analysis result page", () => {
     expect(icPanelSource).toContain("IC review failed:");
     expect(icPanelSource).toContain("run.error_message");
     expect(icPanelSource).not.toContain("IcReviewFullReportDownloads");
-    expect(icPanelSource).not.toContain('"artifact:legacy_report_pdf"');
+    expect(icPanelSource).toContain('{run.status === "completed" ? <IcReviewPdfDownload run={run} /> : null}');
+    expect(icPanelSource).toContain('"artifact:legacy_report_pdf"');
     expect(icPanelSource).not.toContain('"artifact:legacy_report_markdown"');
-    expect(icPanelSource).not.toContain("Скачать полный отчет");
-    expect(icPanelSource).not.toContain("Скачать PDF");
+    expect(icPanelSource).toContain("IC Review PDF");
+    expect(icPanelSource).toContain("Скачать PDF");
     expect(icPanelSource).not.toContain("Скачать MD");
     expect(icPanelSource).toContain('const setupControlsDisabled = analysis.status !== "completed" || isLaunching || runIsActive');
     expect(icPanelSource).toContain("const launchDisabled = launchAvailability.disabled || runIsActive");
@@ -320,6 +321,7 @@ describe("analysis result page", () => {
     expect(pageSource).toContain("width: 44px;\n  height: 44px;\n  min-height: 44px;");
     expect(pageSource).toContain(".analysis-feedback-submit {\n  width: 100%;\n  min-height: 44px;");
     expect(pageSource).toContain(".analysis-ic-workbook-upload {\n  position: relative;\n  display: flex;");
+    expect(pageSource).toContain(".analysis-ic-download {\n  display: inline-flex;\n  min-height: 44px;");
     expect(pageSource).toContain("min-height: 56px;");
   });
 
