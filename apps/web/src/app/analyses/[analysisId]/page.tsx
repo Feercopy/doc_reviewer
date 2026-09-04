@@ -33,7 +33,7 @@ import {
   type SummaryLocalizationsRecord,
 } from "@/lib/api/documents";
 import { submitFeedback } from "@/lib/api/feedback";
-import { createIcReviewRun } from "@/lib/api/ic-review";
+import { createIcReviewRun, icReviewArtifactUrl } from "@/lib/api/ic-review";
 import type { NewSummaryReport } from "@/lib/newSummary";
 import {
   getProviderDefaultModel,
@@ -2043,6 +2043,7 @@ function IcReviewRunSummary({
         </div>
       ) : null}
 
+      {run.status === "completed" ? <IcReviewPdfDownload run={run} /> : null}
       {run.status === "completed" && compactDisplay ? <IcReviewCompletedResult display={compactDisplay} /> : null}
       {run.status === "completed" && !compactDisplay ? (
         <div className="analysis-alert">IC review completed, but compact result is unavailable.</div>
@@ -2051,11 +2052,26 @@ function IcReviewRunSummary({
   );
 }
 
-function IcReviewCompletedResult({
-  display,
-}: {
-  display: ReturnType<typeof buildIcReviewCompactDisplay>;
-}) {
+function IcReviewPdfDownload({ run }: { run: AnalysisCheckRunRecord }) {
+  const hasPdf = run.artifacts.some((artifact) => artifact.key === "artifact:legacy_report_pdf");
+
+  if (!hasPdf) {
+    return null;
+  }
+
+  return (
+    <section className="analysis-ic-section analysis-ic-downloads" aria-label="IC review PDF download">
+      <h3>IC Review PDF</h3>
+      <div className="analysis-ic-download-actions">
+        <a className="analysis-ic-download" download href={icReviewArtifactUrl(run.id, "artifact:legacy_report_pdf")}>
+          Скачать PDF
+        </a>
+      </div>
+    </section>
+  );
+}
+
+function IcReviewCompletedResult({ display }: { display: ReturnType<typeof buildIcReviewCompactDisplay> }) {
   return (
     <div className="analysis-ic-result stack">
       <div className="analysis-ic-verdict">
@@ -2928,6 +2944,7 @@ const analysisStyles = `
 }
 
 .analysis-workbench button:focus-visible,
+.analysis-workbench .analysis-ic-download:focus-visible,
 .analysis-workbench input:focus-visible,
 .analysis-workbench select:focus-visible,
 .analysis-workbench textarea:focus-visible {
@@ -4033,6 +4050,36 @@ const analysisStyles = `
   border-radius: 8px;
   font-size: 13px;
   font-weight: 800;
+}
+
+.analysis-ic-download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.analysis-ic-download {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(94, 234, 212, 0.28);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #14b8a6 0%, #0f766e 100%);
+  box-shadow: 0 12px 28px rgba(20, 184, 166, 0.18);
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 0 14px;
+  text-decoration: none;
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.analysis-ic-download:hover {
+  border-color: rgba(94, 234, 212, 0.55);
+  transform: translateY(-1px);
 }
 
 @media (max-width: 1100px) {

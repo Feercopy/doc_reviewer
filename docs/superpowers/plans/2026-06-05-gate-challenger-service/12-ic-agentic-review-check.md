@@ -4,7 +4,7 @@
 
 **Goal:** Automatically launch IC Agentic Review after a product analysis completes, retain manual relaunch controls, use an optional linked or run-uploaded `.xlsx` financial model, and preserve reproducible raw, prompt, script, validation, compact-result, Markdown, and PDF artifacts.
 
-**Architecture:** IC Agentic Review is a separate auxiliary analysis run, not a predicted-comments run. After Gate Challenger completes, the main worker creates and enqueues the IC run and reuses the primary document's linked Fin Summary when present. The dedicated analysis tab still supports manual launch or relaunch with one optional `.xlsx` model. One RQ job calls the provider directly for each original IC role prompt and a synthesis prompt, then runs the original deterministic scripts from a snapshotted `IC-Agentic-Review` source. The compact structured result remains the primary UI; generated Markdown and PDF reports are preserved as internal reproducibility artifacts, but the analysis page does not expose direct full-report download controls.
+**Architecture:** IC Agentic Review is a separate auxiliary analysis run, not a predicted-comments run. After Gate Challenger completes, the main worker creates and enqueues the IC run and reuses the primary document's linked Fin Summary when present. The dedicated analysis tab still supports manual launch or relaunch with one optional `.xlsx` model. One RQ job calls the provider directly for each original IC role prompt and a synthesis prompt, then runs the original deterministic scripts from a snapshotted `IC-Agentic-Review` source. The compact structured result remains the primary UI; completed runs expose a direct PDF download when the stored PDF artifact exists, while generated Markdown and legacy full-report controls remain hidden from the analysis page.
 
 **Tech Stack:** FastAPI, SQLAlchemy, Alembic, Pydantic, RQ, Redis, existing provider adapters, JSON Schema, Next.js, TypeScript, Python subprocess with no shell, `openpyxl`, `reportlab`, `scipy`, `numpy`.
 
@@ -24,7 +24,7 @@ Included:
 - Persist raw output for every role call.
 - Persist synthesis prompt and synthesis raw output.
 - Persist postprocess log, validation report, and deterministic script artifacts.
-- Render a compact UI-native result as the primary view and keep generated Markdown and PDF reports as internal reproducibility artifacts without direct analysis-page download controls.
+- Render a compact UI-native result as the primary view, expose the generated PDF as a direct download when available, and keep generated Markdown plus legacy full-report controls hidden from the analysis page.
 - Preserve legacy-compatible JSON, raw/script artifacts, and XLSX outputs as internal reproducibility artifacts when scripts produce them.
 
 Not included:
@@ -745,7 +745,7 @@ Acceptance:
 - Do not call model providers from the frontend.
 - Do not trust artifact paths from the frontend.
 - Do not store raw private document text in the `IC-Agentic-Review` source repository.
-- Do not display the generated PDF as the main result. The compact schema is the primary product UI contract; Markdown and PDF artifacts are retained for reproducibility and may be re-exposed by a future explicit support/admin workflow, but not by the analysis result page.
+- Do not display the generated PDF as the main result. The compact schema is the primary product UI contract; PDF artifacts may be exposed as a direct download from the analysis result page when available, while Markdown artifacts and legacy full-report controls remain retained for reproducibility without frontend download controls.
 - Do not create commits unless the user explicitly asks.
 
 ## Self-Review
