@@ -2588,3 +2588,11 @@ Exit criteria:
   replacing it with placeholders, critical problems stay non-empty while
   confirmed/insufficient sections may be empty, and New Summary state version is
   bumped to regenerate summaries produced under the previous technical contract.
+- 2026-09-04: Investigated production Devil's Advocate failure for run
+  `857a8aa5-28c5-4bdd-8306-9e756ca42838`: the provider returned an otherwise
+  valid compact JSON object with a single trailing comma before an array close,
+  causing strict parsing to fail. Added Devil's Advocate-only trailing-comma
+  repair before schema validation, leaving other schemas strict. Verified with
+  `python3 -m pytest apps/worker/tests/test_schema_validation.py -q`,
+  `python3 -m pytest apps/worker/tests/test_run_predicted_comments_job.py -q`,
+  and `python3 -m pytest apps/worker/tests/test_run_analysis_job.py -q`.

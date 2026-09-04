@@ -120,6 +120,75 @@ def test_parse_and_validate_json_output_accepts_literal_tabs_inside_json_strings
     assert payload == {"anchor_text": "Cost allocation, %\t3%\t37%"}
 
 
+def test_parse_and_validate_json_output_repairs_devils_advocate_trailing_commas():
+    content = json.dumps(_devils_advocate_result_payload(), ensure_ascii=False, indent=2)
+    content = content.replace(
+        '    "Rebuild FAQ 3."\n  ],',
+        '    "Rebuild FAQ 3.",\n  ],',
+    )
+    structured_text = json.dumps(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": content,
+                    }
+                }
+            ]
+        },
+        ensure_ascii=False,
+    )
+
+    payload = schema_validation.parse_and_validate_json_output(
+        structured_text=structured_text,
+        schema_path="contracts/schemas/devils-advocate-result.schema.json",
+    )
+
+    assert payload["actionable_jtbds"] == [
+        "Clarify baseline.",
+        "Add KPI gate.",
+        "Rebuild FAQ 3.",
+    ]
+
+
+def test_parse_and_validate_json_output_keeps_trailing_commas_strict_for_other_schemas(tmp_path, monkeypatch):
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "required": ["items"],
+                "properties": {"items": {"type": "array", "items": {"type": "string"}}},
+                "additionalProperties": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(schema_validation, "_resolve_schema_path", lambda _: schema_path)
+
+    try:
+        schema_validation.parse_and_validate_json_output(
+            structured_text='{"items": ["one",]}',
+            schema_path="custom.schema.json",
+        )
+    except json.JSONDecodeError:
+        return
+
+    raise AssertionError("Non-Devil's Advocate schema accepted trailing-comma JSON")
+
+
+def test_parse_json_output_trailing_comma_repair_preserves_string_literals():
+    payload = schema_validation.parse_json_output(
+        '{"text": "Keep comma before bracket ,] inside the string.", "items": ["one",]}',
+        allow_trailing_comma_repair=True,
+    )
+
+    assert payload == {
+        "text": "Keep comma before bracket ,] inside the string.",
+        "items": ["one"],
+    }
+
+
 def test_parse_and_validate_json_output_normalizes_devils_advocate_markdown_only_result():
     markdown = """# 🔴 Devil's Advocate — SD Business Services (Gate 3)
 
@@ -318,4 +387,96 @@ def _main_analysis_result_payload() -> dict:
                 "evidence": "The document omits the proof.",
             }
         ],
+    }
+
+
+def _devils_advocate_result_payload() -> dict:
+    return {
+        "run_mode": "full_ic_voting",
+        "native_markdown": "Devil's Advocate markdown.",
+        "preflight_summary": ["Document is ready for critique."],
+        "brutal_truth": "Evidence is still too weak for approval.",
+        "detected_contradictions": [],
+        "role_comments": [
+            {
+                "voter": "MP",
+                "vote": "reject",
+                "rationale": "Baseline is unclear.",
+                "comments": [
+                    {
+                        "anchor_text": "Baseline revenue",
+                        "body": "The baseline is not separated from incremental uplift.",
+                        "comment_type": "methodology_issue",
+                        "severity": "critical",
+                    }
+                ],
+            },
+            {
+                "voter": "CPO",
+                "vote": "reject",
+                "rationale": "Product evidence is weak.",
+                "comments": [
+                    {
+                        "anchor_text": "Target conversion",
+                        "body": "The target conversion lacks user evidence.",
+                        "comment_type": "missing_data",
+                        "severity": "important",
+                    }
+                ],
+            },
+            {
+                "voter": "TechDir",
+                "vote": "reject",
+                "rationale": "Technical dependency is unresolved.",
+                "comments": [
+                    {
+                        "anchor_text": "Integration plan",
+                        "body": "The integration plan has no committed timeline.",
+                        "comment_type": "risk_not_addressed",
+                        "severity": "important",
+                    }
+                ],
+            },
+            {
+                "voter": "VertDir",
+                "vote": "reject",
+                "rationale": "Vertical impact is not proven.",
+                "comments": [
+                    {
+                        "anchor_text": "Category uplift",
+                        "body": "The category uplift is not tied to a verified driver.",
+                        "comment_type": "weak_argument",
+                        "severity": "important",
+                    }
+                ],
+            },
+        ],
+        "tough_questions": [
+            {"question": "What is the clean baseline?", "persona": "MP"},
+            {"question": "What product evidence supports the target?", "persona": "CPO"},
+            {"question": "When is the dependency ready?", "persona": "TechDir"},
+        ],
+        "actionable_jtbds": [
+            "Clarify baseline.",
+            "Add KPI gate.",
+            "Rebuild FAQ 3.",
+        ],
+        "ic_decision": {
+            "verdict": "rework",
+            "vote_tally": {
+                "MP": "reject",
+                "CPO": "reject",
+                "TechDir": "reject",
+                "VertDir": "reject",
+            },
+            "rationale": "All four reviewers require stronger evidence.",
+            "conditions": ["Clarify baseline."],
+            "heuristics_fired": [],
+            "patterns_fired": [],
+            "precedents_anchored": [],
+            "next_ic": "Return after evidence update.",
+        },
+        "consulted_wiki_pages": [],
+        "source_citations": [],
+        "retrieval": {},
     }
