@@ -19,8 +19,12 @@ BOLD_LABEL_RE = re.compile(r"^\s*(?:[-*+]\s*)?\*\*(.+?):\*\*\s*(.*?)\s*$")
 ANCHOR_COMMENT_RE = re.compile(r'^\s*[*-]\s+(?:\*|_)?["“]?(.+?)["”]?(?:\*|_)?\s*[—-]\s*(.+?)\s*$')
 
 
-def parse_json_output(structured_text: str) -> Any:
-    return _parse_json_output(structured_text, depth=0)
+def parse_json_output(structured_text: str, *, allow_trailing_comma_repair: bool = False) -> Any:
+    return _parse_json_output(
+        structured_text,
+        depth=0,
+        allow_trailing_comma_repair=allow_trailing_comma_repair,
+    )
 
 
 GATE_CHALLENGER_RESULT_SCHEMAS = {
@@ -36,30 +40,51 @@ def parse_and_validate_json_output(
     document_type: str | None = None,
     enforce_stage_checklist: bool = False,
 ) -> dict:
-    payload = parse_json_output(structured_text)
+    schema_name = Path(schema_path).name
+    try:
+        payload = parse_json_output(structured_text)
+    except json.JSONDecodeError:
+        if schema_name != DEVILS_ADVOCATE_SCHEMA:
+            raise
+        payload = parse_json_output(structured_text, allow_trailing_comma_repair=True)
     schema = json.loads(_resolve_schema_path(schema_path).read_text(encoding="utf-8"))
     payload = _normalize_payload_for_schema(payload=payload, schema=schema, schema_path=schema_path)
     validate(instance=payload, schema=schema)
-    if enforce_stage_checklist and Path(schema_path).name in GATE_CHALLENGER_RESULT_SCHEMAS:
+    if enforce_stage_checklist and schema_name in GATE_CHALLENGER_RESULT_SCHEMAS:
         validate_stage_checklist_for_document_type(payload, document_type=document_type)
     return payload
 
 
-def _loads_json_output(json_text: str) -> Any:
+def _loads_json_output(json_text: str, *, allow_trailing_comma_repair: bool = False) -> Any:
     try:
         return json.loads(json_text)
     except json.JSONDecodeError as exc:
-        if "Invalid control character" not in exc.msg:
-            raise
-        return json.loads(json_text, strict=False)
+        if allow_trailing_comma_repair:
+            repaired_text = _remove_json_trailing_commas(json_text)
+            if repaired_text != json_text:
+                try:
+                    return json.loads(repaired_text)
+                except json.JSONDecodeError as repaired_exc:
+                    if "Invalid control character" in repaired_exc.msg:
+                        return json.loads(repaired_text, strict=False)
+        if "Invalid control character" in exc.msg:
+            return json.loads(json_text, strict=False)
+        raise
 
 
-def _parse_json_output(structured_text: str, *, depth: int) -> Any:
-    payload = _loads_json_output(_extract_json_text(structured_text))
-    return _unwrap_provider_envelope(payload, depth=depth)
+def _parse_json_output(structured_text: str, *, depth: int, allow_trailing_comma_repair: bool) -> Any:
+    payload = _loads_json_output(
+        _extract_json_text(structured_text),
+        allow_trailing_comma_repair=allow_trailing_comma_repair,
+    )
+    return _unwrap_provider_envelope(
+        payload,
+        depth=depth,
+        allow_trailing_comma_repair=allow_trailing_comma_repair,
+    )
 
 
-def _unwrap_provider_envelope(payload: Any, *, depth: int) -> Any:
+def _unwrap_provider_envelope(payload: Any, *, depth: int, allow_trailing_comma_repair: bool) -> Any:
     if depth >= 3 or not isinstance(payload, dict):
         return payload
 
@@ -67,17 +92,67 @@ def _unwrap_provider_envelope(payload: Any, *, depth: int) -> Any:
     if isinstance(parsed, dict):
         return parsed
     if isinstance(parsed, str) and parsed.strip():
-        return _parse_json_output(parsed, depth=depth + 1)
+        return _parse_json_output(
+            parsed,
+            depth=depth + 1,
+            allow_trailing_comma_repair=allow_trailing_comma_repair,
+        )
 
     content = _chat_completion_content(payload)
     if content:
-        return _parse_json_output(content, depth=depth + 1)
+        return _parse_json_output(
+            content,
+            depth=depth + 1,
+            allow_trailing_comma_repair=allow_trailing_comma_repair,
+        )
 
     output_text = _responses_output_text(payload)
     if output_text:
-        return _parse_json_output(output_text, depth=depth + 1)
+        return _parse_json_output(
+            output_text,
+            depth=depth + 1,
+            allow_trailing_comma_repair=allow_trailing_comma_repair,
+        )
 
     return payload
+
+
+def _remove_json_trailing_commas(json_text: str) -> str:
+    chars: list[str] = []
+    in_string = False
+    escaped = False
+    index = 0
+    while index < len(json_text):
+        char = json_text[index]
+        if in_string:
+            chars.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if char == '"':
+            in_string = True
+            chars.append(char)
+            index += 1
+            continue
+
+        if char == ",":
+            lookahead = index + 1
+            while lookahead < len(json_text) and json_text[lookahead].isspace():
+                lookahead += 1
+            if lookahead < len(json_text) and json_text[lookahead] in "]}":
+                index += 1
+                continue
+
+        chars.append(char)
+        index += 1
+
+    return "".join(chars)
 
 
 def _chat_completion_parsed(payload: dict) -> Any:
