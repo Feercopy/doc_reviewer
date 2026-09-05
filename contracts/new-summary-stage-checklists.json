@@ -140,5 +140,17 @@
       "label_ru": "Stop-критерии - в каких случаях мы останавливаем работу над стримом",
       "label_en": "Stop criteria: when work on the stream should stop"
     }
+  ],
+  "unknown": [
+    {
+      "id": "unknown_document_type",
+      "label_ru": "Тип документа не определён автоматически",
+      "label_en": "Document type was not detected automatically"
+    },
+    {
+      "id": "unknown_source_materials",
+      "label_ru": "Доступны исходные материалы для анализа",
+      "label_en": "Source materials are available for analysis"
+    }
   ]
 }

@@ -56,6 +56,7 @@ STAGE_LABELS = {
     "stream_review_1": "Stream Review 1",
     "stream_review_2_plus": "Stream Review 2+",
     "progress_review": "Progress Review",
+    "unknown": "Unknown",
 }
 
 

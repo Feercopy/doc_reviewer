@@ -372,6 +372,92 @@ def test_new_summary_source_fingerprint_changes_with_skill_contract(monkeypatch)
     assert second != first
 
 
+def test_new_summary_source_allows_unknown_document_type():
+    db = _session()
+    try:
+        analysis, check_run = _seed(db)
+        document = db.get(Document, analysis.document_id)
+        assert document is not None
+        document.detected_document_type = DocumentType.UNKNOWN.value
+        analysis.run_parameters = {"document_type": DocumentType.UNKNOWN.value}
+        db.commit()
+
+        source = new_summary_generation.build_new_summary_source(
+            session=db,
+            analysis=analysis,
+            check_run=check_run,
+        )
+
+        assert source["document_type"] == DocumentType.UNKNOWN.value
+        assert source["document_stage"] == "Unknown"
+    finally:
+        db.close()
+
+
+def test_new_summary_variants_are_generated_for_unknown_document_type(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
+    db = _session()
+    try:
+        analysis, check_run = _seed(db)
+        document = db.get(Document, analysis.document_id)
+        assert document is not None
+        document.detected_document_type = DocumentType.UNKNOWN.value
+        analysis.run_parameters = {"document_type": DocumentType.UNKNOWN.value}
+        output = dict(analysis.structured_output)
+        result = dict(output["result"])
+        result["new_summary"] = {
+            "version": 2,
+            "generation_mode": "new_summary_skill",
+            "source_revision": str(check_run.id),
+            "ru": {"status": "queued", "payload": None, "error_message": None},
+            "en": {"status": "queued", "payload": None, "error_message": None},
+        }
+        output["result"] = result
+        analysis.structured_output = output
+        payload = _new_summary_report_payload(
+            ru_context="Команда проверяет инициативу с неопределённой стадией.",
+            en_context="The team is reviewing an initiative with an unknown stage.",
+            stage="Unknown",
+            required_elements=[
+                {
+                    "id": "unknown_document_type",
+                    "label_ru": "Тип документа не определён автоматически",
+                    "label_en": "Document type was not detected automatically",
+                },
+                {
+                    "id": "unknown_source_materials",
+                    "label_ru": "Доступны исходные материалы для анализа",
+                    "label_en": "Source materials are available for analysis",
+                },
+            ],
+        )
+        check_run.run_parameters = {
+            "new_summary_mock_provider_result": {
+                "structured_text": json.dumps(payload, ensure_ascii=False),
+                "raw_output": "raw new summary unknown stage",
+                "latency_ms": 1,
+            }
+        }
+        db.commit()
+
+        run_summary_localizations(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        state = analysis.structured_output["result"]["new_summary"]
+        assert state["ru"]["status"] == "completed", state["ru"]
+        assert state["en"]["status"] == "completed", state["en"]
+        assert state["ru"]["payload"]["stage"] == "Unknown"
+        assert state["en"]["payload"]["stage"] == "Unknown"
+        assert [item["id"] for item in state["ru"]["payload"]["required_elements"]] == [
+            "unknown_document_type",
+            "unknown_source_materials",
+        ]
+    finally:
+        db.close()
+        get_settings.cache_clear()
+
+
 def test_english_generation_uses_original_evidence_not_russian_variant(tmp_path, monkeypatch):
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
     get_settings.cache_clear()
@@ -849,22 +935,44 @@ def _session():
     return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
 
 
-def _new_summary_report_payload(*, ru_context: str, en_context: str) -> dict:
+def _new_summary_report_payload(
+    *,
+    ru_context: str,
+    en_context: str,
+    stage: str = "Gate 2",
+    required_elements: list[dict[str, str]] | None = None,
+) -> dict:
     return {
         "schema_version": "new-summary-v1",
         "language": "en",
         "title": "AI Summary Case",
         "versions": [
-            _new_summary_payload(language="en", context=en_context),
-            _new_summary_payload(language="ru", context=ru_context),
+            _new_summary_payload(
+                language="en",
+                context=en_context,
+                stage=stage,
+                required_elements=required_elements,
+            ),
+            _new_summary_payload(
+                language="ru",
+                context=ru_context,
+                stage=stage,
+                required_elements=required_elements,
+            ),
         ],
     }
 
 
-def _new_summary_payload(*, language: str, context: str) -> dict:
+def _new_summary_payload(
+    *,
+    language: str,
+    context: str,
+    stage: str,
+    required_elements: list[dict[str, str]] | None,
+) -> dict:
     return {
         "language": language,
-        "stage": "Gate 2",
+        "stage": stage,
         "traction_summary": {
             "metric_label": "Revenue" if language == "en" else "Revenue",
             "periods": ["Not provided" if language == "en" else "Не указано"],
@@ -901,6 +1009,14 @@ def _new_summary_payload(*, language: str, context: str) -> dict:
                 "status": "нет",
                 "evidence": "Нет данных." if language == "ru" else "No evidence is provided.",
             },
+        ] if required_elements is None else [
+            {
+                "id": item["id"],
+                "label": item["label_ru"] if language == "ru" else item["label_en"],
+                "status": "нет",
+                "evidence": "Нет данных." if language == "ru" else "No evidence is provided.",
+            }
+            for item in required_elements
         ],
         "confirmed": ["Спрос частично подтверждён." if language == "ru" else "Demand is partly confirmed."],
         "insufficiently_confirmed": [

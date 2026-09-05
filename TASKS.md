@@ -2596,3 +2596,13 @@ Exit criteria:
   `python3 -m pytest apps/worker/tests/test_schema_validation.py -q`,
   `python3 -m pytest apps/worker/tests/test_run_predicted_comments_job.py -q`,
   and `python3 -m pytest apps/worker/tests/test_run_analysis_job.py -q`.
+- 2026-09-05: Allowed repository New Summary source assembly for analyses whose
+  parsed document type remains `unknown`, preserving the stage label as
+  `Unknown` instead of blocking generation before the provider call. Added
+  focused coverage in `test_run_summary_localizations_job.py`; after PR review,
+  extended the shared New Summary schema and stage checklist with a neutral
+  `unknown` fallback so validation can complete without pretending the document
+  is a known Gate or Review stage. Verified with `python3 -m pytest
+  apps/worker/tests/test_run_summary_localizations_job.py -q`, `python3 -m
+  compileall -q apps/worker/skills/new_summary_generation.py`, and `git diff
+  --check`.

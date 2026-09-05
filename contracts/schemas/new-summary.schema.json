@@ -75,7 +75,8 @@
             "Progress Review",
             "Stream Review 1",
             "Stream Review 2+",
-            "Stream Review 2+ / Progress Review"
+            "Stream Review 2+ / Progress Review",
+            "Unknown"
           ]
         },
         "traction_summary": {
@@ -188,7 +189,9 @@
             "progress_review_plan_fact_last_half_year",
             "stream_review_2_plus_next_half_year_plan",
             "stream_review_2_plus_stop_criteria",
-            "stream_review_2_plus_plan_fact_last_half_year"
+            "stream_review_2_plus_plan_fact_last_half_year",
+            "unknown_document_type",
+            "unknown_source_materials"
           ]
         },
         "label": {
