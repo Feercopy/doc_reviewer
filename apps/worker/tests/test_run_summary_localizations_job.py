@@ -432,6 +432,8 @@ def test_new_summary_variants_are_generated_for_unknown_document_type(tmp_path, 
                 },
             ],
         )
+        for version in payload["versions"]:
+            version["critical_problems"] = []
         check_run.run_parameters = {
             "new_summary_mock_provider_result": {
                 "structured_text": json.dumps(payload, ensure_ascii=False),
@@ -453,6 +455,8 @@ def test_new_summary_variants_are_generated_for_unknown_document_type(tmp_path, 
             "unknown_document_type",
             "unknown_source_materials",
         ]
+        assert state["ru"]["payload"]["critical_problems"] == []
+        assert state["en"]["payload"]["critical_problems"] == []
     finally:
         db.close()
         get_settings.cache_clear()

@@ -2606,3 +2606,17 @@ Exit criteria:
   apps/worker/tests/test_run_summary_localizations_job.py -q`, `python3 -m
   compileall -q apps/worker/skills/new_summary_generation.py`, and `git diff
   --check`.
+- 2026-09-11: Followed up on production analysis
+  `5905e522-e881-40d5-9614-ce45e052b1dd`: after enabling `unknown`, New Summary
+  reached provider validation but failed because the generated `Unknown` Russian
+  version had an empty `critical_problems` list. Adjusted the New Summary JSON
+  schema so `critical_problems` may be empty only for `Unknown`, while known
+  Gate/Review stages keep the stricter retry behavior for empty critical
+  findings. After review, kept the conditional in local validation but stripped
+  `if`/`then`/`else`/`not` keywords and the now-empty conditional `allOf`
+  wrapper from OpenAI-compatible provider schemas so providers do not reject
+  requests before generation. Verified with `python3 -m pytest
+  apps/worker/tests/test_run_summary_localizations_job.py -q`, `python3 -m
+  pytest apps/worker/tests/test_provider_adapters.py -q`, `python3 -m
+  compileall -q apps/worker/providers/openai_compatible.py
+  apps/worker/skills/new_summary_generation.py`, and `git diff --check`.

@@ -107,7 +107,7 @@
           "description": "What is not sufficiently confirmed. Do not duplicate required elements or identified problems."
         },
         "critical_problems": {
-          "$ref": "#/$defs/finding_list",
+          "$ref": "#/$defs/optional_finding_list",
           "description": "Decision-critical problems only; do not include recommendations or action plans."
         },
         "other": {
@@ -116,7 +116,22 @@
           "items": { "$ref": "#/$defs/non_empty_string" },
           "description": "Optional cross-functional observations that do not belong in previous sections."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["stage"],
+            "properties": {
+              "stage": { "not": { "const": "Unknown" } }
+            }
+          },
+          "then": {
+            "properties": {
+              "critical_problems": { "$ref": "#/$defs/finding_list" }
+            }
+          }
+        }
+      ]
     },
     "traction_summary": {
       "type": "object",
