@@ -73,6 +73,9 @@ def run_role_step(
 
     provider_raw_output: str | None = None
     provider_structured_text: str | None = None
+    prompt_artifact_path: Path | None = None
+    prompt_fingerprint: str | None = None
+    prompt_artifact_committed = False
     try:
         prompt = render_role_prompt(
             role=role,
@@ -93,16 +96,18 @@ def run_role_step(
             RUN_PARAMETER_KEY: db_safe_anonymization_metadata(anonymization.metadata) or {"enabled": False},
         }
         storage_backend = storage or LocalDocumentStorage(get_settings().storage_root)
-        prompt_path = write_prompt_artifact(
+        prompt_artifact_path = write_prompt_artifact(
             storage=storage_backend,
             analysis_id=analysis.id,
             run_id=check_run.id,
             step_name=role,
             prompt=prompt,
         )
-        step.prompt_artifact_path = str(prompt_path)
-        step.prompt_fingerprint = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        prompt_fingerprint = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        step.prompt_artifact_path = str(prompt_artifact_path)
+        step.prompt_fingerprint = prompt_fingerprint
         session.commit()
+        prompt_artifact_committed = True
 
         result, json_retry = _run_role_provider_with_json_retry(
             provider=provider,
@@ -194,6 +199,40 @@ def run_role_step(
             return structured
         session.rollback()
         safe_error = safe_ic_review_error_message(exc)
+        if _can_fallback_missing_workbook_pre_provider_error(
+            role=role,
+            context=context,
+            safe_error=safe_error,
+            provider_raw_output=provider_raw_output,
+            provider_structured_text=provider_structured_text,
+            prompt_artifact_path=prompt_artifact_path,
+            prompt_artifact_committed=prompt_artifact_committed,
+        ):
+            fallback_step = session.get(AnalysisCheckStep, step.id)
+            if fallback_step is None:
+                raise
+            structured = _missing_workbook_financial_role_fallback(
+                role=role,
+                schema=schema,
+                fallback_reason=f"pre_provider_error:{safe_error}",
+            )
+            fallback_step.prompt_artifact_path = str(prompt_artifact_path)
+            fallback_step.prompt_fingerprint = prompt_fingerprint
+            fallback_step.structured_output = structured
+            fallback_step.status = RunStatus.COMPLETED.value
+            fallback_step.error_message = None
+            fallback_step.artifacts = [
+                *list(fallback_step.artifacts or []),
+                {
+                    "key": "role_pre_provider_fallback",
+                    "kind": "metadata",
+                    "reason": safe_error,
+                    "source": "missing_workbook_financial_auditor",
+                },
+            ]
+            fallback_step.completed_at = utc_now()
+            session.commit()
+            return structured
         failed_step = session.get(AnalysisCheckStep, step.id)
         if failed_step is None:
             raise
@@ -347,7 +386,32 @@ def _can_fallback_missing_workbook_role(*, role: str, context: ICReviewContext) 
     )
 
 
-def _missing_workbook_financial_role_fallback(*, role: str, schema: dict[str, Any]) -> dict[str, Any]:
+def _can_fallback_missing_workbook_pre_provider_error(
+    *,
+    role: str,
+    context: ICReviewContext,
+    safe_error: str,
+    provider_raw_output: str | None,
+    provider_structured_text: str | None,
+    prompt_artifact_path: Path | None,
+    prompt_artifact_committed: bool,
+) -> bool:
+    return (
+        _can_fallback_missing_workbook_role(role=role, context=context)
+        and safe_error == "programming_error"
+        and provider_raw_output is None
+        and provider_structured_text is None
+        and prompt_artifact_path is not None
+        and not prompt_artifact_committed
+    )
+
+
+def _missing_workbook_financial_role_fallback(
+    *,
+    role: str,
+    schema: dict[str, Any],
+    fallback_reason: str = "provider returned invalid JSON",
+) -> dict[str, Any]:
     structured = {
         "role": role,
         "section_keys": ["section_4"],
@@ -427,7 +491,7 @@ def _missing_workbook_financial_role_fallback(*, role: str, schema: dict[str, An
                 }
             ],
             "primary_verify_notes": [
-                "Financial role fallback was used because the workbook was absent and the provider returned invalid JSON."
+                f"Financial role fallback was used because the workbook was absent and {fallback_reason}."
             ],
         },
     }

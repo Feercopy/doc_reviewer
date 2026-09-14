@@ -21,6 +21,18 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Harden IC Review when the financial role is launched without an attached
+  Fin Summary/workbook and prompt-metadata persistence fails before a provider
+  response is produced. The `ic-financial-auditor` step now uses the existing
+  missing-workbook `data_gap` fallback only when no workbook context exists,
+  the prompt artifact has already been written, and the pre-provider commit has
+  not completed, preserving the ability to run financial review without a
+  financial file while avoiding a full IC Review failure for this narrow
+  recoverable path. Added focused regression coverage for both the fallback and
+  non-masked prompt-rendering failure paths. Verified Python compilation for
+  the touched worker files, `docker compose -f infra/docker-compose.yml config`,
+  and `git diff --check`; pytest could not run in the clean worktree because no
+  pytest environment is installed and the local Docker daemon is unavailable.
 - [x] Restore the visible IC Review PDF download in the Financial Analysis
   panel without re-enabling Markdown or full-report download controls. Completed
   IC Review runs now show a PDF-only `Скачать PDF` action when the persisted

@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 from jsonschema import ValidationError
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -662,6 +663,95 @@ def test_run_financial_role_step_without_workbook_falls_back_after_invalid_json(
             "source": "missing_workbook_financial_auditor",
         }
         assert check_run.status == RunStatus.RUNNING.value
+    finally:
+        db.close()
+
+
+def test_run_financial_role_step_without_workbook_falls_back_after_pre_provider_programming_error(
+    tmp_path, monkeypatch
+):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        check_run = _check_run(analysis_id=analysis.id, run_parameters={})
+        db.add_all([analysis, check_run])
+        db.commit()
+
+        original_commit = db.commit
+        commit_calls = 0
+
+        def fail_when_persisting_prompt_metadata():
+            nonlocal commit_calls
+            commit_calls += 1
+            if commit_calls == 2:
+                raise ProgrammingError("UPDATE analysis_check_runs", {}, RuntimeError("database write failed"))
+            return original_commit()
+
+        monkeypatch.setattr(db, "commit", fail_when_persisting_prompt_metadata)
+
+        structured = run_role_step(
+            session=db,
+            check_run=check_run,
+            analysis=analysis,
+            role="ic-financial-auditor",
+            context=_context(workbook=False),
+            source_snapshot=_snapshot(),
+            storage=LocalDocumentStorage(tmp_path / "storage"),
+        )
+
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        db.refresh(check_run)
+        assert structured["role"] == "ic-financial-auditor"
+        assert structured["findings"][0]["severity"] == "data_gap"
+        assert step.status == RunStatus.COMPLETED.value
+        assert step.error_message is None
+        assert step.raw_output is None
+        assert step.prompt_artifact_path is not None
+        assert step.prompt_fingerprint is not None
+        assert step.artifacts[-1] == {
+            "key": "role_pre_provider_fallback",
+            "kind": "metadata",
+            "reason": "programming_error",
+            "source": "missing_workbook_financial_auditor",
+        }
+        assert check_run.status == RunStatus.RUNNING.value
+        assert commit_calls == 3
+    finally:
+        db.close()
+
+
+def test_run_financial_role_step_without_workbook_does_not_mask_prompt_rendering_error(
+    tmp_path, monkeypatch
+):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        check_run = _check_run(analysis_id=analysis.id, run_parameters={})
+        db.add_all([analysis, check_run])
+        db.commit()
+
+        def fail_prompt_render(**_kwargs):
+            raise ProgrammingError("SELECT source_snapshot", {}, RuntimeError("snapshot query failed"))
+
+        monkeypatch.setattr(role_runner, "render_role_prompt", fail_prompt_render)
+
+        with pytest.raises(ProgrammingError):
+            run_role_step(
+                session=db,
+                check_run=check_run,
+                analysis=analysis,
+                role="ic-financial-auditor",
+                context=_context(workbook=False),
+                source_snapshot=_snapshot(),
+                storage=LocalDocumentStorage(tmp_path / "storage"),
+            )
+
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        db.refresh(check_run)
+        assert step.status == RunStatus.FAILED.value
+        assert step.error_message == "programming_error"
+        assert step.prompt_artifact_path is None
+        assert check_run.status == RunStatus.FAILED.value
     finally:
         db.close()
 
