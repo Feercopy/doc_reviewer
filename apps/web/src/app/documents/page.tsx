@@ -13,7 +13,7 @@ import {
 } from "@/lib/api/provider-settings";
 import {
   USER_SELECTABLE_DOCUMENT_TYPES,
-  deleteDocumentAnalyses,
+  deleteDocument,
   getDocument,
   listDocuments,
   uploadDocument,
@@ -425,14 +425,15 @@ export default function DocumentsPage() {
     setCasePendingDelete(document);
   }
 
-  async function confirmDeleteCaseAnalyses() {
+  async function confirmDeleteCase() {
     if (!casePendingDelete) {
       return;
     }
     setDeletingId(casePendingDelete.id);
     setError("");
     try {
-      await deleteDocumentAnalyses(casePendingDelete.id);
+      await deleteDocument(casePendingDelete.id);
+      setDocuments((current) => current.filter((document) => document.id !== casePendingDelete.id));
       setCaseAnalysesByDocumentId((current) => {
         const next = { ...current };
         delete next[casePendingDelete.id];
@@ -441,7 +442,7 @@ export default function DocumentsPage() {
       setCasePendingDelete(null);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete analysis results");
+      setError(err instanceof Error ? err.message : "Failed to delete case");
     } finally {
       setDeletingId("");
     }
@@ -910,9 +911,9 @@ export default function DocumentsPage() {
         {casePendingDelete ? (
           <ConfirmDeleteDialog
             busy={deletingId === casePendingDelete.id}
-            message="Are you sure you want to delete all the analysis results for this case?"
+            message="Are you sure you want to delete this case?"
             onCancel={() => setCasePendingDelete(null)}
-            onDelete={confirmDeleteCaseAnalyses}
+            onDelete={confirmDeleteCase}
           />
         ) : null}
       </main>

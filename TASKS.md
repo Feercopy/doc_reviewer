@@ -21,6 +21,14 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Fix the main Documents table Delete action to remove the case/document
+  from the table instead of clearing only its analysis results. The confirmation
+  now calls the existing document delete API, optimistically removes the row and
+  its cached latest-analysis status, then refreshes from the backend. Admin
+  analysis history now excludes analyses for deleted documents so the recovery
+  fallback cannot rehydrate a deleted case. Updated the focused frontend/API
+  tests and verified `git diff --check` plus Docker Compose configuration; full
+  CI remains the production verification path.
 - [x] Add user-readable and internally diagnosable IC Review failure reporting
   for the Financial Analysis page. Failed IC Review runs now expose a safe
   `public_error` object with code, stage label, plain-language description, and

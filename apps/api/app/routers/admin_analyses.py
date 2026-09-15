@@ -11,7 +11,7 @@ from app.models.document import Document
 from app.models.skill import Skill
 from app.models.user import User
 from app.schemas.admin import AdminAnalysesListResponse, AdminAnalysisRead
-from app.schemas.enums import Provider, RunStatus
+from app.schemas.enums import EntityStatus, Provider, RunStatus
 
 router = APIRouter(prefix="/admin/analyses", tags=["admin-analyses"])
 
@@ -30,7 +30,7 @@ def list_admin_analyses(
         .join(Document, Document.id == Analysis.document_id)
         .join(User, User.id == Analysis.user_id)
         .join(Skill, Skill.id == Analysis.skill_id)
-        .where(Analysis.deleted_at.is_(None))
+        .where(Analysis.deleted_at.is_(None), Document.status != EntityStatus.DELETED.value)
     )
     if provider is not None:
         statement = statement.where(Analysis.provider == provider.value)
