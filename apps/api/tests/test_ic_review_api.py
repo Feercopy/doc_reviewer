@@ -402,6 +402,79 @@ def test_ic_review_raw_outputs_are_admin_only(client, db_session, monkeypatch, t
     assert admin_payload["run_parameters"]["skill_source_snapshot"]["artifact_path"] == str(tmp_path / "snapshot")
 
 
+def test_failed_ic_review_exposes_public_error_but_hides_internal_diagnostics(
+    client,
+    db_session,
+    monkeypatch,
+    tmp_path,
+):
+    _configure_ic_review_dependencies(db_session, monkeypatch, tmp_path)
+    analysis = _create_analysis_for_api(db_session, status=RunStatus.COMPLETED)
+    skill = db_session.query(Skill).filter_by(name="ic_agentic_review").one()
+    run = AnalysisCheckRun(
+        analysis_id=analysis.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
+        check_type="ic_agentic_review",
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="openai/gpt-5.5",
+        status=RunStatus.FAILED.value,
+        current_stage="failed:ic-financial-auditor",
+        error_message="schema_validation_failed:minLength",
+        run_parameters={
+            "ic_review_error_diagnostics": [
+                {
+                    "code": "schema_validation_failed:minLength",
+                    "phase": "role_step",
+                    "message_sha256": "abc",
+                }
+            ],
+            "source_snapshot_artifact_path": str(tmp_path / "snapshot"),
+        },
+        artifacts=[],
+        uploaded_workbook_metadata={},
+    )
+    db_session.add(run)
+    db_session.flush()
+    db_session.add(
+        AnalysisCheckStep(
+            check_run_id=run.id,
+            step_type="role",
+            step_name="ic-financial-auditor",
+            status=RunStatus.FAILED.value,
+            error_message="schema_validation_failed:minLength",
+        )
+    )
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    db_session.commit()
+
+    login(client, "author", "secret")
+    user_response = client.get(f"/ic-review-runs/{run.id}")
+    assert user_response.status_code == 200
+    user_payload = user_response.json()
+    assert user_payload["public_error"] == {
+        "code": "schema_validation_failed",
+        "title": "Ответ модели не прошел проверку структуры",
+        "description": (
+            "Модель ответила, но одно или несколько обязательных полей оказались пустыми, слишком короткими "
+            "или не соответствуют контракту результата."
+        ),
+        "failed_stage": "ic-financial-auditor",
+        "failed_stage_label": "финансовый аудитор",
+        "next_action": "Перезапустите IC Review. Если ошибка повторится, нужно смотреть, какая роль вернула некорректный блок.",
+        "retryable": True,
+    }
+    assert "ic_review_error_diagnostics" not in user_payload["run_parameters"]
+
+    client.post("/auth/logout")
+    login(client, admin.login, "secret")
+    admin_response = client.get(f"/ic-review-runs/{run.id}")
+    assert admin_response.status_code == 200
+    admin_payload = admin_response.json()
+    assert admin_payload["public_error"]["failed_stage_label"] == "финансовый аудитор"
+    assert "ic_review_error_diagnostics" not in admin_payload["run_parameters"]
+
+
 def test_analysis_read_embeds_latest_ic_review_run_sanitized_for_normal_user(
     client,
     db_session,

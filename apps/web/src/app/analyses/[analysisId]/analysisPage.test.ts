@@ -241,8 +241,11 @@ describe("analysis result page", () => {
     );
 
     expect(icPanelSource).toContain('run.status === "failed"');
-    expect(icPanelSource).toContain("IC review failed:");
-    expect(icPanelSource).toContain("run.error_message");
+    expect(icPanelSource).toContain("<IcReviewFailureAlert publicError={run.public_error} fallbackCode={run.error_message} />");
+    expect(icPanelSource).toContain("function IcReviewFailureAlert");
+    expect(icPanelSource).toContain("publicError.title");
+    expect(icPanelSource).toContain("publicError.failed_stage_label");
+    expect(icPanelSource).toContain("publicError.next_action");
     expect(icPanelSource).not.toContain("IcReviewFullReportDownloads");
     expect(icPanelSource).toContain('{run.status === "completed" ? <IcReviewPdfDownload run={run} /> : null}');
     expect(icPanelSource).toContain('"artifact:legacy_report_pdf"');

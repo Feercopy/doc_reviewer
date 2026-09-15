@@ -21,6 +21,19 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Add user-readable and internally diagnosable IC Review failure reporting
+  for the Financial Analysis page. Failed IC Review runs now expose a safe
+  `public_error` object with code, stage label, plain-language description, and
+  next action through full analysis reads and status polling, while worker
+  failures persist hidden `ic_review_error_diagnostics` metadata containing
+  phase/stage/step, exception class, safe code, message hash/length, and code
+  frames without raw document/model text. The diagnostics key is stripped from
+  API responses for both normal users and admins. The Financial Analysis tab
+  renders the new failure card and falls back to the legacy error code for old
+  payloads. Verified Python compilation and `git diff --check`; local web
+  tests could not run because npm dependencies attempted a sandbox-blocked
+  registry fetch, so GitHub CI remains the authoritative frontend/API/worker
+  verification.
 - [x] Harden IC Review when the financial role is launched without an attached
   Fin Summary/workbook and prompt-metadata persistence fails before a provider
   response is produced. The `ic-financial-auditor` step now uses the existing

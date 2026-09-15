@@ -8,6 +8,7 @@ from typing import Any
 
 from jsonschema import validate
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import get_settings
 from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisCheckStep
@@ -29,7 +30,12 @@ from privacy.model_anonymization import (
 )
 from results.schema_validation import parse_json_output
 
-from .errors import IcReviewRunCancelled, safe_ic_review_error_message
+from .errors import (
+    IcReviewRunCancelled,
+    append_ic_review_error_diagnostics,
+    build_ic_review_error_diagnostics,
+    safe_ic_review_error_message,
+)
 
 
 IC_REVIEW_PROVIDER_TIMEOUT_SECONDS = 300
@@ -211,6 +217,14 @@ def run_role_step(
             fallback_step = session.get(AnalysisCheckStep, step.id)
             if fallback_step is None:
                 raise
+            diagnostic = build_ic_review_error_diagnostics(
+                exc,
+                phase="role_pre_provider_fallback",
+                stage=f"role:{role}",
+                step_name=role,
+                provider_raw_output_present=False,
+                prompt_artifact_present=prompt_artifact_path is not None,
+            )
             structured = _missing_workbook_financial_role_fallback(
                 role=role,
                 schema=schema,
@@ -231,6 +245,13 @@ def run_role_step(
                 },
             ]
             fallback_step.completed_at = utc_now()
+            fallback_run = session.get(AnalysisCheckRun, check_run.id)
+            if fallback_run is not None:
+                fallback_run.run_parameters = append_ic_review_error_diagnostics(
+                    fallback_run.run_parameters,
+                    diagnostic,
+                )
+                flag_modified(fallback_run, "run_parameters")
             session.commit()
             return structured
         failed_step = session.get(AnalysisCheckStep, step.id)
@@ -244,10 +265,23 @@ def run_role_step(
         failed_step.completed_at = utc_now()
         failed_run = session.get(AnalysisCheckRun, check_run.id)
         if failed_run is not None:
+            diagnostic = build_ic_review_error_diagnostics(
+                exc,
+                phase="role_step",
+                stage=f"role:{role}",
+                step_name=role,
+                provider_raw_output_present=raw_to_preserve is not None,
+                prompt_artifact_present=prompt_artifact_path is not None,
+            )
             failed_run.status = RunStatus.FAILED.value
             failed_run.current_stage = f"failed:{role}"
             failed_run.error_message = safe_error
             failed_run.completed_at = utc_now()
+            failed_run.run_parameters = append_ic_review_error_diagnostics(
+                failed_run.run_parameters,
+                diagnostic,
+            )
+            flag_modified(failed_run, "run_parameters")
         session.commit()
         raise
 

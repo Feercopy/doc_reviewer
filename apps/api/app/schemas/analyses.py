@@ -55,9 +55,20 @@ class AnalysisCheckStepStatusRead(BaseModel):
     completed_at: datetime | None
 
 
+class AnalysisCheckRunPublicErrorRead(BaseModel):
+    code: str
+    title: str
+    description: str
+    failed_stage: str | None = None
+    failed_stage_label: str | None = None
+    next_action: str
+    retryable: bool = True
+
+
 class AnalysisCheckRunStatusRead(RunStatusSummaryRead):
     current_stage: str | None
     steps: list[AnalysisCheckStepStatusRead] = Field(default_factory=list)
+    public_error: AnalysisCheckRunPublicErrorRead | None = None
 
 
 class AnalysisStatusRead(BaseModel):
@@ -239,6 +250,7 @@ class AnalysisCheckRunRead(BaseModel):
     legacy_output: dict | None
     raw_output: str | None
     error_message: str | None
+    public_error: AnalysisCheckRunPublicErrorRead | None = None
     latency_ms: int | None
     input_tokens: int | None
     output_tokens: int | None

@@ -469,6 +469,8 @@ def _latest_ic_review_status_summaries(
     db: Session,
     analysis_ids: list[UUID],
 ) -> dict[UUID, AnalysisCheckRunStatusRead]:
+    from app.services.ic_review import build_public_ic_review_error
+
     ranked = (
         select(
             AnalysisCheckRun.id.label("id"),
@@ -527,8 +529,10 @@ def _latest_ic_review_status_summaries(
                 )
             )
 
-    return {
-        analysis_id: AnalysisCheckRunStatusRead(
+    latest: dict[UUID, AnalysisCheckRunStatusRead] = {}
+    for analysis_id, row in latest_rows.items():
+        steps = steps_by_run_id.get(row["id"], [])
+        latest[analysis_id] = AnalysisCheckRunStatusRead(
             id=row["id"],
             status=row["status"],
             current_stage=row["current_stage"],
@@ -536,10 +540,15 @@ def _latest_ic_review_status_summaries(
             created_at=row["created_at"],
             started_at=row["started_at"],
             completed_at=row["completed_at"],
-            steps=steps_by_run_id.get(row["id"], []),
+            steps=steps,
+            public_error=build_public_ic_review_error(
+                status=row["status"],
+                error_message=row["error_message"],
+                current_stage=row["current_stage"],
+                steps=steps,
+            ),
         )
-        for analysis_id, row in latest_rows.items()
-    }
+    return latest
 
 
 def _analysis_source_traces(*, db: Session, analysis_ids: list[UUID]) -> dict[UUID, SourceTrace]:

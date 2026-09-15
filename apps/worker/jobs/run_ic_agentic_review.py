@@ -38,7 +38,12 @@ from app.services.summary_localizations import (
 from app.storage.local import LocalDocumentStorage
 from ic_review.context import build_ic_review_context
 from ic_review.context_pack import build_ic_review_context_pack
-from ic_review.errors import IcReviewRunCancelled, safe_ic_review_error_message
+from ic_review.errors import (
+    IcReviewRunCancelled,
+    append_ic_review_error_diagnostics,
+    build_ic_review_error_diagnostics,
+    safe_ic_review_error_message,
+)
 from ic_review.renderer import REVIEW_SCHEMA_PATH, ROLE_ORDER, render_synthesis_prompt
 from ic_review.role_runner import apply_ic_review_provider_defaults, run_role_step, write_prompt_artifact
 from ic_review.schema_normalization import normalize_schema_bounded_strings
@@ -546,6 +551,18 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
         if provider_raw_output is not None and failed.raw_output is None:
             failed.raw_output = provider_raw_output or provider_structured_text
         failed.completed_at = utc_now()
+        diagnostic = build_ic_review_error_diagnostics(
+            exc,
+            phase="job_failure",
+            stage=failed.current_stage,
+            provider_raw_output_present=provider_raw_output is not None,
+            prompt_artifact_present=None,
+        )
+        failed.run_parameters = append_ic_review_error_diagnostics(
+            failed.run_parameters,
+            diagnostic,
+        )
+        flag_modified(failed, "run_parameters")
         session.commit()
         worker_logger.info(
             "worker_job_failed",
@@ -554,6 +571,11 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
                 "entity_id": str(run_uuid),
                 "status": "failed",
                 "error_class": exc.__class__.__name__,
+                "error_code": diagnostic["code"],
+                "stage": diagnostic["stage"],
+                "phase": diagnostic["phase"],
+                "message_sha256": diagnostic["message_sha256"],
+                "message_length": diagnostic["message_length"],
             },
         )
     finally:

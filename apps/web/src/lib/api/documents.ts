@@ -162,6 +162,7 @@ export type AnalysisCheckStepStatusRecord = RunStatusSummaryRecord & {
 export type AnalysisCheckRunStatusRecord = RunStatusSummaryRecord & {
   current_stage: string | null;
   steps: AnalysisCheckStepStatusRecord[];
+  public_error: IcReviewPublicError | null;
 };
 
 export type AnalysisStatusRecord = {
@@ -377,6 +378,16 @@ export type AnalysisCheckStepRecord = {
   completed_at: string | null;
 };
 
+export type IcReviewPublicError = {
+  code: string;
+  title: string;
+  description: string;
+  failed_stage: string | null;
+  failed_stage_label: string | null;
+  next_action: string;
+  retryable: boolean;
+};
+
 export type AnalysisCheckRunRecord = {
   id: string;
   analysis_id: string;
@@ -392,6 +403,7 @@ export type AnalysisCheckRunRecord = {
   legacy_output: Record<string, unknown> | null;
   raw_output: string | null;
   error_message: string | null;
+  public_error: IcReviewPublicError | null;
   latency_ms: number | null;
   input_tokens: number | null;
   output_tokens: number | null;

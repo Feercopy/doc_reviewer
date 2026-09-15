@@ -13,7 +13,7 @@ from app.models.document import Document
 from app.models.skill import Skill
 from app.models.skill_source import SkillSource
 from app.models.user import User
-from app.schemas.analyses import AnalysisCheckRunRead, AnalysisCheckStepRead, SourceTrace
+from app.schemas.analyses import AnalysisCheckRunPublicErrorRead, AnalysisCheckRunRead, AnalysisCheckStepRead, SourceTrace
 from app.schemas.enums import EntityStatus, Provider, RunStatus, SkillType
 from app.schemas.provider_settings import normalize_available_models
 from app.services.analyses import AnalysisNotFoundError, AnalysisPreconditionError, get_analysis_for_actor
@@ -26,6 +26,7 @@ from app.storage.local import LocalDocumentStorage, StoredFileTooLargeError
 
 IC_REVIEW_CHECK_TYPE = "ic_agentic_review"
 IC_REVIEW_SKILL_NAME = "ic_agentic_review"
+IC_REVIEW_INTERNAL_DIAGNOSTICS_KEY = "ic_review_error_diagnostics"
 MAX_WORKBOOK_SIZE_BYTES = 25 * 1024 * 1024
 
 
@@ -207,6 +208,12 @@ def read_ic_review_run(*, db: Session, actor: User, run: AnalysisCheckRun) -> An
     skill = db.get(Skill, run.skill_id)
     admin = can_read_raw_output(actor, run)
     steps = _steps_for_run(db=db, run_id=run.id)
+    public_error = build_public_ic_review_error(
+        status=run.status,
+        error_message=run.error_message,
+        current_stage=run.current_stage,
+        steps=steps,
+    )
     return AnalysisCheckRunRead(
         id=run.id,
         analysis_id=run.analysis_id,
@@ -222,6 +229,7 @@ def read_ic_review_run(*, db: Session, actor: User, run: AnalysisCheckRun) -> An
         legacy_output=run.legacy_output if admin else None,
         raw_output=run.raw_output if admin else None,
         error_message=run.error_message,
+        public_error=public_error,
         latency_ms=run.latency_ms,
         input_tokens=run.input_tokens,
         output_tokens=run.output_tokens,
@@ -234,6 +242,30 @@ def read_ic_review_run(*, db: Session, actor: User, run: AnalysisCheckRun) -> An
         created_at=run.created_at,
         started_at=run.started_at,
         completed_at=run.completed_at,
+    )
+
+
+def build_public_ic_review_error(
+    *,
+    status: str,
+    error_message: str | None,
+    current_stage: str | None,
+    steps: list | None,
+) -> AnalysisCheckRunPublicErrorRead | None:
+    if status != RunStatus.FAILED.value:
+        return None
+
+    code = _public_error_code(error_message)
+    failed_stage = _failed_stage(current_stage=current_stage, steps=steps or [])
+    error_copy = _IC_REVIEW_PUBLIC_ERROR_COPY.get(code) or _IC_REVIEW_PUBLIC_ERROR_COPY["ic_review_failed"]
+    return AnalysisCheckRunPublicErrorRead(
+        code=code,
+        title=error_copy["title"],
+        description=error_copy["description"],
+        failed_stage=failed_stage,
+        failed_stage_label=_stage_label(failed_stage),
+        next_action=error_copy["next_action"],
+        retryable=error_copy["retryable"],
     )
 
 
@@ -496,6 +528,7 @@ def _sanitize_metadata(metadata: dict | None, *, include_paths: bool) -> dict:
 def _sanitize_run_parameters(run_parameters: dict | None, *, include_paths: bool) -> dict:
     parameters = dict(run_parameters or {})
     _strip_model_anonymization_replacements(parameters)
+    parameters.pop(IC_REVIEW_INTERNAL_DIAGNOSTICS_KEY, None)
     if include_paths:
         return parameters
     return _strip_path_values(parameters)
@@ -514,6 +547,8 @@ def _strip_path_values(value):
         stripped = {}
         for key, item in value.items():
             normalized_key = str(key).lower()
+            if normalized_key == IC_REVIEW_INTERNAL_DIAGNOSTICS_KEY:
+                continue
             if normalized_key == "path" or normalized_key.endswith("_path") or normalized_key.endswith("_artifact_path"):
                 continue
             stripped[key] = _strip_path_values(item)
@@ -521,6 +556,149 @@ def _strip_path_values(value):
     if isinstance(value, list):
         return [_strip_path_values(item) for item in value]
     return value
+
+
+def _public_error_code(error_message: str | None) -> str:
+    code = str(error_message or "").strip() or "ic_review_failed"
+    if code.startswith("invalid_json:"):
+        return "invalid_json"
+    if code.startswith("schema_validation_failed:"):
+        return "schema_validation_failed"
+    if code.startswith("source_snapshot_missing:"):
+        return "source_snapshot_missing"
+    if code.startswith("missing_role_outputs:"):
+        return "missing_role_outputs"
+    return code
+
+
+def _failed_stage(*, current_stage: str | None, steps: list) -> str | None:
+    if current_stage:
+        normalized = current_stage.strip()
+        if normalized.startswith("failed:"):
+            return normalized.removeprefix("failed:")
+        if normalized:
+            return normalized
+    for step in reversed(steps):
+        if step.status == RunStatus.FAILED.value:
+            return step.step_name
+    return None
+
+
+def _stage_label(stage: str | None) -> str | None:
+    if not stage:
+        return None
+    return _IC_REVIEW_STAGE_LABELS.get(stage, stage.replace("_", " ").replace("-", " "))
+
+
+_IC_REVIEW_STAGE_LABELS = {
+    "queued": "очередь запуска",
+    "preparing_context": "подготовка запуска",
+    "loading_snapshot": "загрузка версии скилла",
+    "extracting_workbook": "чтение финансового файла",
+    "formula_audit": "проверка формул в финансовом файле",
+    "building_context": "сбор контекста для IC Review",
+    "synthesis": "сбор итогового финансового анализа",
+    "postprocessing": "подготовка итоговых артефактов",
+    "ic-financial-auditor": "финансовый аудитор",
+    "ic-product-analyst": "продуктовый аналитик IC Review",
+    "ic-market-analyst": "рыночный аналитик IC Review",
+    "ic-web-researcher": "проверка внешних/рыночных вводных",
+    "ic-benchmark-valuation": "бенчмарки и оценка",
+    "ic-team-legal": "команда и юридические риски",
+    "ic-tech-dd": "техническая проверка",
+    "ic-risk-scenario": "риски и сценарии",
+}
+
+
+_IC_REVIEW_PUBLIC_ERROR_COPY = {
+    "programming_error": {
+        "title": "Внутренняя техническая ошибка IC Review",
+        "description": (
+            "Анализ остановился внутри сервиса во время подготовки, сохранения или обработки шага. "
+            "Это не означает, что документ плохой: чаще всего проблема в технической обвязке запуска."
+        ),
+        "next_action": "Перезапустите IC Review. Если ошибка повторится, передайте ссылку на анализ и время запуска.",
+        "retryable": True,
+    },
+    "invalid_json": {
+        "title": "Модель вернула ответ в неверном формате",
+        "description": (
+            "IC Review получил ответ, который не удалось разобрать как корректный JSON. "
+            "Содержимое документа при этом не показывается в ошибке."
+        ),
+        "next_action": "Перезапустите IC Review. Если повторится, нужен разбор технического лога по run id.",
+        "retryable": True,
+    },
+    "schema_validation_failed": {
+        "title": "Ответ модели не прошел проверку структуры",
+        "description": (
+            "Модель ответила, но одно или несколько обязательных полей оказались пустыми, слишком короткими "
+            "или не соответствуют контракту результата."
+        ),
+        "next_action": "Перезапустите IC Review. Если ошибка повторится, нужно смотреть, какая роль вернула некорректный блок.",
+        "retryable": True,
+    },
+    "provider_key_missing": {
+        "title": "Не настроен ключ провайдера модели",
+        "description": "IC Review не может обратиться к модели, потому что для выбранного провайдера нет доступного ключа.",
+        "next_action": "Настройте ключ провайдера в Settings или попросите администратора проверить общий ключ.",
+        "retryable": False,
+    },
+    "parent_analysis_not_completed": {
+        "title": "Основной анализ еще не завершен",
+        "description": "IC Review запускается только после успешного завершения основного Gate Challenger анализа.",
+        "next_action": "Дождитесь завершения основного анализа и запустите IC Review еще раз.",
+        "retryable": True,
+    },
+    "workbook_storage_path_not_xlsx": {
+        "title": "Финансовый файл должен быть .xlsx",
+        "description": "Для проверки формул и таблиц IC Review принимает только Excel-файл в формате .xlsx.",
+        "next_action": "Загрузите Fin Summary в формате .xlsx или запустите IC Review без финансового файла.",
+        "retryable": False,
+    },
+    "workbook_parse_failed": {
+        "title": "Финансовый файл не удалось прочитать",
+        "description": "Сервис не смог разобрать приложенный Excel-файл для проверки формул и таблиц.",
+        "next_action": "Проверьте, что файл открывается в Excel, сохраните его как .xlsx и запустите IC Review еще раз.",
+        "retryable": True,
+    },
+    "formula_auditor_failed": {
+        "title": "Проверка формул завершилась ошибкой",
+        "description": "Excel-файл был найден, но отдельный шаг проверки формул не смог завершиться корректно.",
+        "next_action": "Перезапустите IC Review. Если повторится, нужен технический разбор финансового файла.",
+        "retryable": True,
+    },
+    "source_snapshot_missing": {
+        "title": "Не найден файл скилла IC Review",
+        "description": "Запуск не смог найти один из файлов сохраненной версии IC Review skill.",
+        "next_action": "Попросите администратора проверить подключение/снапшот IC Review skill и перезапустите анализ.",
+        "retryable": False,
+    },
+    "missing_role_outputs": {
+        "title": "Не хватает результатов одной из ролей IC Review",
+        "description": "Итоговый финансовый анализ не собрался, потому что не все роли вернули результат.",
+        "next_action": "Перезапустите IC Review. Если повторится, нужен разбор роли, указанной в этапе ошибки.",
+        "retryable": True,
+    },
+    "cancelled_by_user": {
+        "title": "IC Review остановлен пользователем",
+        "description": "Запуск был отменен вручную и не дошел до финального результата.",
+        "next_action": "Запустите IC Review заново, если результат все еще нужен.",
+        "retryable": True,
+    },
+    "worker_job_abandoned": {
+        "title": "Запуск был прерван воркером",
+        "description": "Фоновый процесс остановился или был перезапущен до завершения IC Review.",
+        "next_action": "Запустите IC Review заново.",
+        "retryable": True,
+    },
+    "ic_review_failed": {
+        "title": "IC Review завершился ошибкой",
+        "description": "Финансовый анализ не был завершен. Точный технический код сохранен во внутренней диагностике.",
+        "next_action": "Перезапустите IC Review. Если повторится, передайте ссылку на анализ и время запуска.",
+        "retryable": True,
+    },
+}
 
 
 def _can_download_artifact(*, actor: User, run: AnalysisCheckRun, artifact: dict) -> bool:

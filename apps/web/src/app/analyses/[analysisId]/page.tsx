@@ -22,6 +22,7 @@ import {
   type AnalysisRecord,
   type AnalysisStatusRecord,
   type DocumentRecord,
+  type IcReviewPublicError,
   type NewSummaryProgressRecord,
   type NewSummaryRecord,
   type OutputLanguage,
@@ -2037,10 +2038,7 @@ function IcReviewRunSummary({
       ) : null}
 
       {run.status === "failed" ? (
-        <div className="analysis-alert">
-          <strong>IC review failed:</strong>
-          {run.error_message ? <span>{run.error_message}</span> : null}
-        </div>
+        <IcReviewFailureAlert publicError={run.public_error} fallbackCode={run.error_message} />
       ) : null}
 
       {run.status === "completed" ? <IcReviewPdfDownload run={run} /> : null}
@@ -2048,6 +2046,43 @@ function IcReviewRunSummary({
       {run.status === "completed" && !compactDisplay ? (
         <div className="analysis-alert">IC review completed, but compact result is unavailable.</div>
       ) : null}
+    </div>
+  );
+}
+
+function IcReviewFailureAlert({
+  publicError,
+  fallbackCode,
+}: {
+  publicError: IcReviewPublicError | null | undefined;
+  fallbackCode: string | null;
+}) {
+  if (!publicError) {
+    return (
+      <div className="analysis-alert">
+        <strong>IC review failed:</strong>
+        {fallbackCode ? <span>{fallbackCode}</span> : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="analysis-alert analysis-ic-error-card">
+      <div className="analysis-ic-error-card__header">
+        <strong>{publicError.title}</strong>
+        <span>{publicError.code}</span>
+      </div>
+      {publicError.failed_stage_label ? (
+        <p>
+          <b>Где упало:</b> {publicError.failed_stage_label}
+        </p>
+      ) : null}
+      <p>
+        <b>Что произошло:</b> {publicError.description}
+      </p>
+      <p>
+        <b>Что сделать:</b> {publicError.next_action}
+      </p>
     </div>
   );
 }
@@ -4140,6 +4175,40 @@ const analysisStyles = `
   font-size: 12px;
   line-height: 17px;
   overflow-wrap: anywhere;
+}
+
+.analysis-ic-error-card {
+  display: grid;
+  gap: 10px;
+}
+
+.analysis-ic-error-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.analysis-ic-error-card__header span {
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 999px;
+  color: #fecaca;
+  padding: 4px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.analysis-ic-error-card p {
+  margin: 0;
+  color: #fecaca;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.analysis-ic-error-card b {
+  color: #fee2e2;
 }
 
 .analysis-ic-verdict,

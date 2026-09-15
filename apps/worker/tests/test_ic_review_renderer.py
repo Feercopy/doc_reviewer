@@ -708,6 +708,15 @@ def test_run_financial_role_step_without_workbook_falls_back_after_pre_provider_
         assert step.raw_output is None
         assert step.prompt_artifact_path is not None
         assert step.prompt_fingerprint is not None
+        diagnostics = check_run.run_parameters["ic_review_error_diagnostics"]
+        assert diagnostics[-1]["code"] == "programming_error"
+        assert diagnostics[-1]["phase"] == "role_pre_provider_fallback"
+        assert diagnostics[-1]["stage"] == "role:ic-financial-auditor"
+        assert diagnostics[-1]["step_name"] == "ic-financial-auditor"
+        assert diagnostics[-1]["prompt_artifact_present"] is True
+        assert diagnostics[-1]["provider_raw_output_present"] is False
+        assert "message_sha256" in diagnostics[-1]
+        assert "database write failed" not in json.dumps(diagnostics, ensure_ascii=False)
         assert step.artifacts[-1] == {
             "key": "role_pre_provider_fallback",
             "kind": "metadata",
@@ -751,6 +760,12 @@ def test_run_financial_role_step_without_workbook_does_not_mask_prompt_rendering
         assert step.status == RunStatus.FAILED.value
         assert step.error_message == "programming_error"
         assert step.prompt_artifact_path is None
+        diagnostics = check_run.run_parameters["ic_review_error_diagnostics"]
+        assert diagnostics[-1]["code"] == "programming_error"
+        assert diagnostics[-1]["phase"] == "role_step"
+        assert diagnostics[-1]["stage"] == "role:ic-financial-auditor"
+        assert diagnostics[-1]["prompt_artifact_present"] is False
+        assert "snapshot query failed" not in json.dumps(diagnostics, ensure_ascii=False)
         assert check_run.status == RunStatus.FAILED.value
     finally:
         db.close()
