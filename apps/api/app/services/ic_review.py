@@ -611,6 +611,15 @@ _IC_REVIEW_STAGE_LABELS = {
 
 
 _IC_REVIEW_PUBLIC_ERROR_COPY = {
+    "duplicate_prepared_statement": {
+        "title": "Ошибка подключения к базе данных при параллельном IC Review",
+        "description": (
+            "IC Review остановился из-за конфликта подготовленного SQL-запроса в подключении к базе данных. "
+            "Обычно это проявляется при нескольких одновременных запусках и не связано с качеством документа."
+        ),
+        "next_action": "Перезапустите IC Review. Если ошибка повторится, передайте ссылку на анализ и время запуска.",
+        "retryable": True,
+    },
     "programming_error": {
         "title": "Внутренняя техническая ошибка IC Review",
         "description": (

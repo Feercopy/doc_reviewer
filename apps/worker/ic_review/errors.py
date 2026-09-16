@@ -9,6 +9,7 @@ import traceback
 from typing import Any
 
 from jsonschema import ValidationError
+from sqlalchemy.exc import DBAPIError
 
 
 class IcReviewRunCancelled(RuntimeError):
@@ -18,6 +19,7 @@ class IcReviewRunCancelled(RuntimeError):
 ERROR_DIAGNOSTICS_RUN_PARAMETER_KEY = "ic_review_error_diagnostics"
 
 SAFE_ERROR_CODES = {
+    "duplicate_prepared_statement",
     "formula_auditor_failed",
     "ic_review_artifact_path_escapes_run_dir",
     "ic_review_context_missing",
@@ -59,6 +61,10 @@ def safe_ic_review_error_message(exc: BaseException) -> str:
         return _validation_error_message(cause)
     if isinstance(cause, json.JSONDecodeError):
         return f"invalid_json:{cause.msg}"
+    if isinstance(exc, DBAPIError) and exc.orig is not None:
+        dbapi_code = _exception_code(exc.orig)
+        if dbapi_code in SAFE_ERROR_CODES:
+            return dbapi_code
 
     return _exception_code(exc)
 
@@ -112,6 +118,9 @@ def build_ic_review_error_diagnostics(
         diagnostic["provider_raw_output_present"] = provider_raw_output_present
     if prompt_artifact_present is not None:
         diagnostic["prompt_artifact_present"] = prompt_artifact_present
+    db_error = _safe_db_error_details(exc)
+    if db_error:
+        diagnostic["db_error"] = db_error
     return diagnostic
 
 
@@ -139,3 +148,24 @@ def _safe_traceback(exc: BaseException) -> list[dict[str, Any]]:
         }
         for frame in frames[-8:]
     ]
+
+
+def _safe_db_error_details(exc: BaseException) -> dict[str, Any] | None:
+    if not isinstance(exc, DBAPIError):
+        return None
+    details: dict[str, Any] = {
+        "statement_operation": _statement_operation(exc.statement),
+        "dbapi_error_class": exc.orig.__class__.__name__ if exc.orig is not None else None,
+        "dbapi_error_module": exc.orig.__class__.__module__ if exc.orig is not None else None,
+    }
+    sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+    if sqlstate:
+        details["sqlstate"] = str(sqlstate)
+    return {key: value for key, value in details.items() if value}
+
+
+def _statement_operation(statement: str | None) -> str | None:
+    if not statement:
+        return None
+    match = re.match(r"\s*([A-Za-z]+)", statement)
+    return match.group(1).upper() if match else None

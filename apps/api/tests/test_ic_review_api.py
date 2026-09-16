@@ -19,6 +19,7 @@ from app.schemas.enums import DocumentParseStatus, DocumentType, Provider, Role,
 from app.security.passwords import hash_password
 from app.security.secrets import encrypt_secret
 from app.seeds.skills import seed_baseline_skills
+from app.services.ic_review import build_public_ic_review_error
 
 from test_documents_upload import create_user, login
 
@@ -473,6 +474,21 @@ def test_failed_ic_review_exposes_public_error_but_hides_internal_diagnostics(
     admin_payload = admin_response.json()
     assert admin_payload["public_error"]["failed_stage_label"] == "финансовый аудитор"
     assert "ic_review_error_diagnostics" not in admin_payload["run_parameters"]
+
+
+def test_duplicate_prepared_statement_has_specific_public_error_copy():
+    public_error = build_public_ic_review_error(
+        status=RunStatus.FAILED.value,
+        error_message="duplicate_prepared_statement",
+        current_stage="failed:ic-financial-auditor",
+        steps=[],
+    )
+
+    assert public_error is not None
+    assert public_error.code == "duplicate_prepared_statement"
+    assert public_error.title == "Ошибка подключения к базе данных при параллельном IC Review"
+    assert public_error.failed_stage_label == "финансовый аудитор"
+    assert "нескольких одновременных запусках" in public_error.description
 
 
 def test_analysis_read_embeds_latest_ic_review_run_sanitized_for_normal_user(

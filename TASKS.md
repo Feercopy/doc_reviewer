@@ -21,6 +21,19 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Diagnose and fix the IC Review load-test failure for analysis
+  `63b798d1-d85e-41f3-bc68-2621fc4c46aa`. Production diagnostics showed nine
+  IC Review runs created during the same load window failed at
+  `ic-financial-auditor` with SQLAlchemy `ProgrammingError` caused by
+  `DuplicatePreparedStatement`, while one run continued. The failure was a
+  PostgreSQL/psycopg prepared-statement conflict under concurrent worker load,
+  not a document or model-output issue. Disabled psycopg automatic prepared
+  statements via `prepare_threshold=None`, added a dedicated public error copy
+  for `duplicate_prepared_statement`, and expanded hidden IC Review diagnostics
+  with safe DBAPI class/module/sql-operation details without SQL parameters,
+  raw document text, provider output, prompts, or plaintext exception messages.
+  Verified Python compilation, `git diff --check`, and Docker Compose
+  configuration; full API/worker/web verification is delegated to GitHub CI.
 - [x] Fix the main Documents table Delete action to remove the case/document
   from the table instead of clearing only its analysis results. The confirmation
   now calls the existing document delete API, optimistically removes the row and
