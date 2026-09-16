@@ -4,6 +4,7 @@ import hashlib
 from typing import Any
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import get_settings
 from app.models.analysis import AnalysisCheckRun, AnalysisCheckStep
@@ -84,14 +85,57 @@ def fail_result_synthesis_step(
     step: AnalysisCheckStep,
     error_message: str,
     raw_output: str | None,
+    diagnostics: dict[str, Any] | None = None,
 ) -> None:
     failed_step = session.get(AnalysisCheckStep, step.id)
     if failed_step is None:
         return
     failed_step.raw_output = failed_step.raw_output or raw_output
+    if diagnostics:
+        artifacts = list(failed_step.artifacts or [])
+        artifacts.append(
+            {
+                "key": "internal_error_diagnostics",
+                "kind": "diagnostics",
+                "internal_only": True,
+                "diagnostics": diagnostics,
+            }
+        )
+        failed_step.artifacts = artifacts
+        flag_modified(failed_step, "artifacts")
     failed_step.status = RunStatus.FAILED.value
     failed_step.error_message = error_message
     failed_step.completed_at = utc_now()
+    session.commit()
+
+
+def cancel_result_synthesis_step(
+    *,
+    session: Session,
+    step: AnalysisCheckStep,
+    error_message: str,
+    raw_output: str | None,
+    diagnostics: dict[str, Any] | None = None,
+) -> None:
+    cancelled_step = session.get(AnalysisCheckStep, step.id)
+    if cancelled_step is None:
+        return
+    cancelled_step.raw_output = cancelled_step.raw_output or raw_output
+    if diagnostics:
+        artifacts = list(cancelled_step.artifacts or [])
+        artifacts.append(
+            {
+                "key": "internal_error_diagnostics",
+                "kind": "diagnostics",
+                "internal_only": True,
+                "diagnostics": diagnostics,
+            }
+        )
+        cancelled_step.artifacts = artifacts
+        flag_modified(cancelled_step, "artifacts")
+    cancelled_step.status = RunStatus.CANCELLED.value
+    cancelled_step.error_message = error_message
+    cancelled_step.completed_at = utc_now()
     session.commit()
 
 

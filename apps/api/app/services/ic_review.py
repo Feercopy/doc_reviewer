@@ -505,6 +505,8 @@ def _sanitize_artifacts(artifacts: list | None, *, include_paths: bool) -> list[
     for artifact in artifacts or []:
         if not isinstance(artifact, dict):
             continue
+        if artifact.get("internal_only") is True:
+            continue
         item = dict(artifact)
         run_parameters = item.get("run_parameters")
         if isinstance(run_parameters, dict):

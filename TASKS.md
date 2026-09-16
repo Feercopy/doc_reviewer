@@ -21,6 +21,20 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Fix AI Summary generation and Full Analysis readiness semantics. Production
+  runs were storing `new_summary_generation_failed:BadRequestError` for
+  `skills/new-summary/SKILL.md`, which points to provider rejection before a
+  valid result was persisted. The repository skill now returns one bilingual
+  JSON object with a complex local schema, so OpenAI-compatible generation uses
+  JSON object mode and keeps strict validation in the worker after the response.
+  Added safe internal-only diagnostics for provider/save failures, including
+  phase, provider status/code/type metadata, prompt/schema/source sizes, hashes,
+  and trace frames without document text or raw prompts. The analysis status API
+  now returns the AI Summary state, and the document page treats Full Analysis
+  as complete only after Gate Challenger, Devil's Advocate, IC Review, and both
+  AI Summary variants are completed. Verified focused API/worker tests and
+  Python compilation; frontend build is delegated to GitHub CI because local
+  `npm` is unavailable in this environment.
 - [x] Diagnose and fix the IC Review load-test failure for analysis
   `63b798d1-d85e-41f3-bc68-2621fc4c46aa`. Production diagnostics showed nine
   IC Review runs created during the same load window failed at
@@ -2666,3 +2680,19 @@ Exit criteria:
   pytest apps/worker/tests/test_provider_adapters.py -q`, `python3 -m
   compileall -q apps/worker/providers/openai_compatible.py
   apps/worker/skills/new_summary_generation.py`, and `git diff --check`.
+- 2026-09-16: Investigated production AI Summary failures where the UI showed
+  “AI Summary пока не удалось подготовить” while the worker job finished with a
+  persisted New Summary failure. The stored public error was
+  `new_summary_generation_failed:BadRequestError`, so New Summary generation
+  now requests generic JSON object output from OpenAI-compatible providers and
+  keeps strict validation local. AI Summary is initialized as a waiting stage
+  when IC Review completes, promoted to queued after IC postprocessing, and the
+  full-analysis chain is not complete until both RU and EN variants complete.
+  Status polling now returns only lightweight New Summary status/progress
+  instead of full report payloads, and chain cancellation marks a running New
+  Summary as cancelled so it cannot be saved over a stopped analysis.
+  Follow-up review fixes moved orchestration to a dedicated
+  `new_summary_expected` marker so legacy localization markers do not affect
+  old analyses, recover stale waiting postprocessing states, render cancelled
+  New Summary states in the UI, and finalize cancelled synthesis trace steps
+  with retained raw provider output.

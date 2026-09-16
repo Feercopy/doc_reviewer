@@ -163,6 +163,7 @@ export type AnalysisCheckRunStatusRecord = RunStatusSummaryRecord & {
   current_stage: string | null;
   steps: AnalysisCheckStepStatusRecord[];
   public_error: IcReviewPublicError | null;
+  new_summary_expected: boolean;
 };
 
 export type AnalysisStatusRecord = {
@@ -183,6 +184,7 @@ export type AnalysisStatusRecord = {
   predicted_comment_run: RunStatusSummaryRecord | null;
   detail_run: RunStatusSummaryRecord | null;
   ic_review_run: AnalysisCheckRunStatusRecord | null;
+  new_summary: NewSummaryRecord | null;
 };
 
 export type PredictedCommentRunRecord = {

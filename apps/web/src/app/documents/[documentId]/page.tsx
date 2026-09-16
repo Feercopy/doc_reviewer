@@ -121,7 +121,32 @@ function isFullAnalysisComplete(analysis: AnalysisStatusRecord): boolean {
   return (
     analysis.status === "completed" &&
     isDevilsAdvocateCompleteOrSkipped(analysis) &&
-    analysis.ic_review_run?.status === "completed"
+    analysis.ic_review_run?.status === "completed" &&
+    isNewSummaryCompleteOrNotRequested(analysis)
+  );
+}
+
+function isNewSummaryCompleteOrNotRequested(analysis: AnalysisStatusRecord): boolean {
+  if (analysis.new_summary?.available !== true) {
+    return true;
+  }
+  return isNewSummaryComplete(analysis);
+}
+
+function isNewSummaryComplete(analysis: AnalysisStatusRecord): boolean {
+  return (
+    analysis.new_summary?.available === true &&
+    analysis.new_summary.ru.status === "completed" &&
+    analysis.new_summary.en.status === "completed"
+  );
+}
+
+function isNewSummaryFailed(analysis: AnalysisStatusRecord): boolean {
+  return (
+    analysis.new_summary?.available === true &&
+    [analysis.new_summary.ru.status, analysis.new_summary.en.status].some((status) =>
+      status === "failed" || status === "cancelled",
+    )
   );
 }
 
@@ -140,7 +165,8 @@ function isFullAnalysisFailed(analysis: AnalysisStatusRecord): boolean {
     analysis.predicted_comment_run?.status === "failed" ||
     analysis.predicted_comment_run?.status === "cancelled" ||
     analysis.ic_review_run?.status === "failed" ||
-    analysis.ic_review_run?.status === "cancelled"
+    analysis.ic_review_run?.status === "cancelled" ||
+    isNewSummaryFailed(analysis)
   );
 }
 
@@ -175,6 +201,25 @@ function getFullAnalysisStatusLabel(analysis: AnalysisStatusRecord): string {
   }
   if (icRun.status !== "completed") {
     return getIcReviewProgressStatusLabel(icRun);
+  }
+  if (analysis.new_summary?.available !== true) {
+    return "Completed";
+  }
+  const newSummaryProgress = analysis.new_summary.progress;
+  if (isNewSummaryFailed(analysis)) {
+    return "AI Summary failed";
+  }
+  if (!isNewSummaryComplete(analysis)) {
+    if (newSummaryProgress?.stage === "saving") {
+      return "Saving AI Summary";
+    }
+    if (newSummaryProgress?.stage === "generating") {
+      return "Generating AI Summary";
+    }
+    if (newSummaryProgress?.stage === "preparing_sources" || newSummaryProgress?.stage === "preparing_prompt") {
+      return "Preparing AI Summary";
+    }
+    return "AI Summary queued";
   }
   return "Completed";
 }

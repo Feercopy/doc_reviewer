@@ -145,6 +145,7 @@ def test_summary_localization_prepare_failure_does_not_downgrade_completed_ic_re
         assert records["check_run"].status == RunStatus.COMPLETED.value
         assert records["check_run"].current_stage == "completed"
         assert records["check_run"].run_parameters["summary_localizations_expected"] is True
+        assert records["check_run"].run_parameters["new_summary_expected"] is True
         assert result["summary_localizations"]["ru"]["status"] == "waiting"
         assert result["summary_localizations"]["en"]["status"] == "waiting"
         assert result["short_summary_status"] == "completed"
@@ -193,6 +194,7 @@ def test_summary_localization_marker_failure_does_not_downgrade_completed_ic_rev
         assert records["check_run"].status == RunStatus.COMPLETED.value
         assert records["check_run"].current_stage == "completed"
         assert records["check_run"].run_parameters["summary_localizations_expected"] == "postprocessing"
+        assert records["check_run"].run_parameters["new_summary_expected"] == "postprocessing"
         assert result["summary_localizations"]["ru"]["status"] == "waiting"
         assert result["summary_localizations"]["en"]["status"] == "waiting"
         assert result["short_summary_status"] == "completed"

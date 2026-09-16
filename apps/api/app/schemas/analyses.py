@@ -69,6 +69,7 @@ class AnalysisCheckRunStatusRead(RunStatusSummaryRead):
     current_stage: str | None
     steps: list[AnalysisCheckStepStatusRead] = Field(default_factory=list)
     public_error: AnalysisCheckRunPublicErrorRead | None = None
+    new_summary_expected: bool = False
 
 
 class AnalysisStatusRead(BaseModel):
@@ -89,6 +90,7 @@ class AnalysisStatusRead(BaseModel):
     predicted_comment_run: RunStatusSummaryRead | None = None
     detail_run: RunStatusSummaryRead | None = None
     ic_review_run: AnalysisCheckRunStatusRead | None = None
+    new_summary: dict | None = None
 
 
 class AnalysisStatusesListResponse(BaseModel):

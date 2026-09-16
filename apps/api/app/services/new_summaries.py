@@ -12,11 +12,11 @@ from app.models.analysis import Analysis, AnalysisCheckRun
 from app.schemas.analyses import NewSummaryRead, NewSummaryVariantRead
 from app.schemas.enums import RunStatus
 from app.services.summary_localizations import latest_completed_ic_review
-from app.services.summary_localizations import SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER
-from app.services.summary_localizations import SUMMARY_LOCALIZATIONS_POSTPROCESSING
 
 
 NEW_SUMMARY_KEY = "new_summary"
+NEW_SUMMARY_EXPECTED_PARAMETER = "new_summary_expected"
+NEW_SUMMARY_POSTPROCESSING = "postprocessing"
 NEW_SUMMARY_VERSION = 2
 NEW_SUMMARY_GENERATION_MODE = "new_summary_skill"
 STALE_NEW_SUMMARY_AFTER = timedelta(minutes=30)
@@ -30,6 +30,7 @@ NEW_SUMMARY_PROGRESS_PERCENTS = {
     "saving": 95,
     "completed": 100,
     "failed": 100,
+    "cancelled": 100,
 }
 
 
@@ -44,10 +45,13 @@ def request_new_summary(
     if analysis.status != RunStatus.COMPLETED.value or check_run is None:
         return read_new_summary(analysis), False
 
+    postprocessing_marker = (check_run.run_parameters or {}).get(NEW_SUMMARY_EXPECTED_PARAMETER)
     response, should_enqueue = prepare_new_summary_for_check_run(
         analysis=analysis,
         check_run=check_run,
-        create_if_missing=create_if_missing,
+        create_if_missing=create_if_missing
+        or postprocessing_marker is True
+        or postprocessing_marker == NEW_SUMMARY_POSTPROCESSING,
     )
     if should_enqueue:
         db.commit()
@@ -65,18 +69,26 @@ def prepare_new_summary_for_check_run(
 
     revision = str(check_run.id)
     state = _state(analysis)
-    postprocessing_marker = (check_run.run_parameters or {}).get(SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER)
-    postprocessing_finished = postprocessing_marker is True or postprocessing_marker != SUMMARY_LOCALIZATIONS_POSTPROCESSING
+    postprocessing_marker = (check_run.run_parameters or {}).get(NEW_SUMMARY_EXPECTED_PARAMETER)
+    postprocessing_finished = postprocessing_marker is True or postprocessing_marker != NEW_SUMMARY_POSTPROCESSING
     if not postprocessing_finished:
-        is_waiting_current = (
+        is_current = (
             state.get("source_revision") == revision
             and state.get("version") == NEW_SUMMARY_VERSION
             and state.get("generation_mode") == NEW_SUMMARY_GENERATION_MODE
         )
-        if create_if_missing and not is_waiting_current:
-            state = _empty_state(revision, status="waiting")
-            _persist_state(analysis, state)
-        return _read_state(analysis.id, state), False
+        stale_waiting = is_current and any(
+            isinstance(state.get(language), dict)
+            and state[language].get("status") == "waiting"
+            and _is_stale(state[language])
+            for language in ("ru", "en")
+        )
+        if not stale_waiting:
+            if create_if_missing and not is_current:
+                state = _empty_state(revision, status="waiting")
+                _persist_state(analysis, state)
+            return _read_state(analysis.id, state), False
+        state = _state(analysis)
 
     should_enqueue = False
     is_current = (
@@ -107,6 +119,26 @@ def prepare_new_summary_for_check_run(
     if should_enqueue:
         _persist_state(analysis, state)
     return _read_state(analysis.id, state), should_enqueue
+
+
+def initialize_waiting_new_summary_for_check_run(
+    *,
+    analysis: Analysis,
+    check_run: AnalysisCheckRun,
+) -> NewSummaryRead:
+    if analysis.status != RunStatus.COMPLETED.value or check_run.status != RunStatus.COMPLETED.value:
+        return read_new_summary(analysis)
+
+    revision = str(check_run.id)
+    state = _state(analysis)
+    if (
+        state.get("source_revision") != revision
+        or state.get("version") != NEW_SUMMARY_VERSION
+        or state.get("generation_mode") != NEW_SUMMARY_GENERATION_MODE
+    ):
+        state = _empty_state(revision, status="waiting")
+        _persist_state(analysis, state)
+    return _read_state(analysis.id, state)
 
 
 def mark_new_summary_enqueue_failed(*, db: Session, analysis: Analysis, error_message: str) -> None:
@@ -143,6 +175,24 @@ def mark_new_summary_failed(*, analysis: Analysis, revision: str, language: str,
     _persist_state(analysis, state)
 
 
+def mark_new_summary_cancelled(*, analysis: Analysis, revision: str | None = None) -> bool:
+    state = _state(analysis)
+    if not state:
+        return False
+    if revision is not None and state.get("source_revision") != revision:
+        return False
+    changed = False
+    for language in ("ru", "en"):
+        variant = state.get(language)
+        if isinstance(variant, dict) and variant.get("status") in {"waiting", "queued", "running"}:
+            state[language] = {**variant, "status": "cancelled", "error_message": "cancelled_by_user"}
+            changed = True
+    if changed:
+        state["progress"] = _progress_state(stage="cancelled", status="cancelled")
+        _persist_state(analysis, state)
+    return changed
+
+
 def persist_new_summary_variant(
     *,
     analysis: Analysis,
@@ -168,6 +218,18 @@ def persist_new_summary_variant(
 
 def read_new_summary(analysis: Analysis) -> NewSummaryRead:
     return _read_state(analysis.id, _state(analysis))
+
+
+def read_new_summary_state(*, analysis_id: UUID, state: Any) -> NewSummaryRead:
+    return _read_state(analysis_id, state if isinstance(state, dict) else {})
+
+
+def read_new_summary_status_state(*, analysis_id: UUID, state: Any) -> NewSummaryRead:
+    return _read_state(analysis_id, state if isinstance(state, dict) else {}, include_payload=False)
+
+
+def read_waiting_new_summary_status(*, analysis_id: UUID, revision: str | None) -> NewSummaryRead:
+    return _read_state(analysis_id, _empty_state(revision, status="waiting"), include_payload=False)
 
 
 def _state(analysis: Analysis) -> dict[str, Any]:
@@ -237,7 +299,7 @@ def _persist_state(analysis: Analysis, state: dict[str, Any]) -> None:
     flag_modified(analysis, "structured_output")
 
 
-def _read_state(analysis_id: UUID, state: dict[str, Any]) -> NewSummaryRead:
+def _read_state(analysis_id: UUID, state: dict[str, Any], *, include_payload: bool = True) -> NewSummaryRead:
     available = (
         state.get("version") == NEW_SUMMARY_VERSION
         and state.get("generation_mode") == NEW_SUMMARY_GENERATION_MODE
@@ -247,15 +309,15 @@ def _read_state(analysis_id: UUID, state: dict[str, Any]) -> NewSummaryRead:
         source_revision=state.get("source_revision"),
         generation_mode=state.get("generation_mode") if available else None,
         available=available,
-        ru=_variant(state.get("ru") if available else None),
-        en=_variant(state.get("en") if available else None),
+        ru=_variant(state.get("ru") if available else None, include_payload=include_payload),
+        en=_variant(state.get("en") if available else None, include_payload=include_payload),
         progress=_progress(state) if available else None,
     )
 
 
-def _variant(value: Any) -> NewSummaryVariantRead:
+def _variant(value: Any, *, include_payload: bool = True) -> NewSummaryVariantRead:
     item = value if isinstance(value, dict) else {}
-    payload = item.get("payload") if isinstance(item.get("payload"), dict) else None
+    payload = item.get("payload") if include_payload and isinstance(item.get("payload"), dict) else None
     return NewSummaryVariantRead(
         status=str(item.get("status") or "missing"),
         payload=payload,

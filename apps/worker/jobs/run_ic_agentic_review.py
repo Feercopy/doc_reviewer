@@ -27,7 +27,13 @@ from app.schemas.enums import Provider, RunStatus
 from app.security.secrets import decrypt_secret
 from app.services.provider_keys import get_shared_provider_key
 from app.services.analysis_jobs import enqueue_run_summary_localizations
-from app.services.new_summaries import mark_new_summary_enqueue_failed, request_new_summary
+from app.services.new_summaries import (
+    NEW_SUMMARY_EXPECTED_PARAMETER,
+    NEW_SUMMARY_POSTPROCESSING,
+    initialize_waiting_new_summary_for_check_run,
+    mark_new_summary_enqueue_failed,
+    request_new_summary,
+)
 from app.services.summary_localizations import (
     SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER,
     SUMMARY_LOCALIZATIONS_POSTPROCESSING,
@@ -373,9 +379,14 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
             check_run.completed_at = utc_now()
             run_parameters = dict(check_run.run_parameters or {})
             run_parameters[SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER] = SUMMARY_LOCALIZATIONS_POSTPROCESSING
+            run_parameters[NEW_SUMMARY_EXPECTED_PARAMETER] = NEW_SUMMARY_POSTPROCESSING
             check_run.run_parameters = run_parameters
             flag_modified(check_run, "run_parameters")
             initialize_waiting_summary_localizations_for_check_run(
+                analysis=analysis,
+                check_run=check_run,
+            )
+            initialize_waiting_new_summary_for_check_run(
                 analysis=analysis,
                 check_run=check_run,
             )
@@ -442,6 +453,7 @@ def run_ic_agentic_review(check_run_id: str, *, db: Session | None = None) -> No
             try:
                 run_parameters = dict(check_run.run_parameters or {})
                 run_parameters[SUMMARY_LOCALIZATIONS_EXPECTED_PARAMETER] = True
+                run_parameters[NEW_SUMMARY_EXPECTED_PARAMETER] = True
                 check_run.run_parameters = run_parameters
                 flag_modified(check_run, "run_parameters")
                 session.commit()

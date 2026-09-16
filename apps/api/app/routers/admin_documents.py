@@ -151,6 +151,7 @@ def _latest_analysis_statuses_through_analysis_lookup(
             Analysis.created_at.label("created_at"),
             Analysis.started_at.label("started_at"),
             Analysis.completed_at.label("completed_at"),
+            Analysis.structured_output["result"]["new_summary"].label("new_summary_state"),
             func.row_number()
             .over(
                 partition_by=Analysis.document_id,
@@ -184,6 +185,7 @@ def _latest_analysis_statuses_through_analysis_lookup(
             created_at=row["created_at"],
             started_at=row["started_at"],
             completed_at=row["completed_at"],
+            new_summary_state=row["new_summary_state"] if isinstance(row["new_summary_state"], dict) else None,
         )
         for row in rows
     ]

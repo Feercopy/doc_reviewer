@@ -19,6 +19,7 @@ from app.schemas.enums import Provider, RunStatus
 from app.services.new_summaries import (
     NEW_SUMMARY_GENERATION_MODE,
     NEW_SUMMARY_VERSION,
+    mark_new_summary_cancelled,
     mark_new_summary_failed,
     mark_new_summary_progress,
     mark_new_summary_running,
@@ -36,6 +37,7 @@ from providers.base import AnalysisProviderResult, ProviderRunRequest
 from providers.registry import get_provider_adapter
 from results.schema_validation import parse_json_output
 from skills.result_synthesis_trace import (
+    cancel_result_synthesis_step,
     complete_result_synthesis_step,
     fail_result_synthesis_step,
     start_result_synthesis_step,
@@ -117,6 +119,8 @@ def generate_and_persist_new_summary_report(
     apply_ic_review_provider_defaults(run_parameters)
     run_parameters["max_output_tokens"] = MAX_OUTPUT_TOKENS
     run_parameters["max_retries"] = max(1, int(run_parameters.get("max_retries") or 0))
+    if provider == Provider.OPENAI_COMPATIBLE:
+        run_parameters["response_format"] = {"type": "json_object"}
     run_parameters["new_summary_language"] = "bilingual"
     run_parameters["new_summary_provider"] = provider.value
     run_parameters["new_summary_model"] = model
@@ -163,7 +167,7 @@ def generate_and_persist_new_summary_report(
     except Exception as exc:
         session.rollback()
         public_error = public_new_summary_error_message(exc)
-        _log_new_summary_failure(
+        diagnostics = _new_summary_error_diagnostics(
             exc,
             {
                 **diagnostic_context,
@@ -171,6 +175,15 @@ def generate_and_persist_new_summary_report(
                 "public_error": public_error,
                 "attempt_count": len(provider_results),
                 "attempts": _provider_attempt_diagnostics(provider_results),
+                "prompt_chars": len(prompt),
+                "schema_chars": len(json.dumps(response_schema, ensure_ascii=False)),
+                "source_payload_chars": len(json.dumps(source_payload, ensure_ascii=False, default=str)),
+            },
+        )
+        _log_new_summary_failure(
+            exc,
+            {
+                **diagnostics,
             },
         )
         fail_result_synthesis_step(
@@ -178,6 +191,7 @@ def generate_and_persist_new_summary_report(
             step=step,
             error_message=public_error,
             raw_output=_combined_raw_output(provider_results),
+            diagnostics=diagnostics,
         )
         mark_new_summary_failed(
             analysis=analysis,
@@ -194,41 +208,109 @@ def generate_and_persist_new_summary_report(
         session.commit()
         raise
 
-    mark_new_summary_progress(analysis=analysis, revision=revision, stage="saving")
-    session.commit()
-    variants = _split_bilingual_report(payload)
-    source_fingerprint = new_summary_source_fingerprint(source_payload)
-    for language in LANGUAGES:
-        persist_new_summary_variant(
-            analysis=analysis,
-            revision=revision,
-            language=language,
-            payload=variants[language],
-            source_fingerprint=source_fingerprint,
-            trace_step_id=str(step.id),
+    try:
+        session.refresh(analysis)
+        if _analysis_chain_cancel_requested(analysis):
+            diagnostics = _new_summary_error_diagnostics(
+                RuntimeError("cancelled_by_user"),
+                {
+                    **diagnostic_context,
+                    "phase": "cancelled_after_generation",
+                    "public_error": "cancelled_by_user",
+                    "attempt_count": len(provider_results),
+                    "attempts": _provider_attempt_diagnostics(provider_results),
+                    "provider_raw_output_present": bool(_combined_raw_output(provider_results)),
+                },
+            )
+            cancel_result_synthesis_step(
+                session=session,
+                step=step,
+                error_message="cancelled_by_user",
+                raw_output=_combined_raw_output(provider_results),
+                diagnostics=diagnostics,
+            )
+            mark_new_summary_cancelled(analysis=analysis, revision=revision)
+            session.commit()
+            _log_new_summary_phase(
+                "cancelled",
+                {
+                    **diagnostic_context,
+                    "attempt_count": len(provider_results),
+                    "attempts": _provider_attempt_diagnostics(provider_results),
+                },
+            )
+            return {}
+        mark_new_summary_progress(analysis=analysis, revision=revision, stage="saving")
+        session.commit()
+        variants = _split_bilingual_report(payload)
+        source_fingerprint = new_summary_source_fingerprint(source_payload)
+        for language in LANGUAGES:
+            persist_new_summary_variant(
+                analysis=analysis,
+                revision=revision,
+                language=language,
+                payload=variants[language],
+                source_fingerprint=source_fingerprint,
+                trace_step_id=str(step.id),
+            )
+        _log_new_summary_phase(
+            "completed",
+            {
+                **diagnostic_context,
+                "attempt_count": len(provider_results),
+                "attempts": _provider_attempt_diagnostics(provider_results),
+                "ru_payload_keys": sorted(variants["ru"].keys()),
+                "en_payload_keys": sorted(variants["en"].keys()),
+            },
         )
-    _log_new_summary_phase(
-        "completed",
-        {
-            **diagnostic_context,
-            "attempt_count": len(provider_results),
-            "attempts": _provider_attempt_diagnostics(provider_results),
-            "ru_payload_keys": sorted(variants["ru"].keys()),
-            "en_payload_keys": sorted(variants["en"].keys()),
-        },
-    )
-    complete_result_synthesis_step(
-        session=session,
-        step=step,
-        raw_output=_combined_raw_output(provider_results),
-        structured_output=payload,
-        input_tokens=_sum_optional(provider_results, "input_tokens"),
-        output_tokens=_sum_optional(provider_results, "output_tokens"),
-        latency_ms=_sum_optional(provider_results, "latency_ms"),
-        estimated_cost=_sum_optional(provider_results, "estimated_cost"),
-    )
-    session.commit()
+        complete_result_synthesis_step(
+            session=session,
+            step=step,
+            raw_output=_combined_raw_output(provider_results),
+            structured_output=payload,
+            input_tokens=_sum_optional(provider_results, "input_tokens"),
+            output_tokens=_sum_optional(provider_results, "output_tokens"),
+            latency_ms=_sum_optional(provider_results, "latency_ms"),
+            estimated_cost=_sum_optional(provider_results, "estimated_cost"),
+        )
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        public_error = public_new_summary_error_message(exc)
+        diagnostics = _new_summary_error_diagnostics(
+            exc,
+            {
+                **diagnostic_context,
+                "phase": "saving_failed",
+                "public_error": public_error,
+                "attempt_count": len(provider_results),
+                "attempts": _provider_attempt_diagnostics(provider_results),
+                "provider_raw_output_present": bool(_combined_raw_output(provider_results)),
+                "payload_keys": sorted(payload.keys()),
+            },
+        )
+        _log_new_summary_failure(exc, diagnostics)
+        fail_result_synthesis_step(
+            session=session,
+            step=step,
+            error_message=public_error,
+            raw_output=_combined_raw_output(provider_results),
+            diagnostics=diagnostics,
+        )
+        for language in LANGUAGES:
+            mark_new_summary_failed(
+                analysis=analysis,
+                revision=revision,
+                language=language,
+                error_message=public_error,
+            )
+        session.commit()
+        raise
     return payload
+
+
+def _analysis_chain_cancel_requested(analysis: Analysis) -> bool:
+    return bool((analysis.run_parameters or {}).get("analysis_chain_cancel_requested_at"))
 
 
 def build_new_summary_source(
@@ -1011,6 +1093,9 @@ def public_new_summary_error_message(exc: BaseException) -> str:
         return f"new_summary_generation_failed:invalid_json:{exc.lineno}:{exc.colno}"
     if isinstance(exc, ValidationError):
         return f"new_summary_generation_failed:schema_validation:{_json_path(exc.path)}"
+    status_code = getattr(exc, "status_code", None)
+    if status_code == 400 or exc.__class__.__name__ == "BadRequestError":
+        return "new_summary_generation_failed:provider_bad_request"
     return f"new_summary_generation_failed:{exc.__class__.__name__}"
 
 
@@ -1045,6 +1130,51 @@ def _log_new_summary_failure(exc: BaseException, context: dict[str, Any]) -> Non
     )
 
 
+def _new_summary_error_diagnostics(exc: BaseException, context: dict[str, Any]) -> dict[str, Any]:
+    diagnostics = {
+        **_diagnostic_safe_context(context),
+        "error_class": exc.__class__.__name__,
+        "error_module": exc.__class__.__module__,
+        "public_error": public_new_summary_error_message(exc),
+        "error_message_length": len(str(exc)),
+        "error_message_sha256": hashlib.sha256(str(exc).encode("utf-8", errors="replace")).hexdigest(),
+        "traceback": _safe_traceback(exc),
+    }
+    provider_error = _safe_provider_error_details(exc)
+    if provider_error:
+        diagnostics["provider_error"] = provider_error
+    if isinstance(exc, json.JSONDecodeError):
+        diagnostics["json_error_line"] = exc.lineno
+        diagnostics["json_error_column"] = exc.colno
+    if isinstance(exc, ValidationError):
+        diagnostics["validation_path"] = _json_path(exc.path)
+        diagnostics["validation_schema_path"] = _json_path(exc.schema_path)
+        diagnostics["validation_validator"] = exc.validator
+    return diagnostics
+
+
+def _safe_provider_error_details(exc: BaseException) -> dict[str, Any] | None:
+    details: dict[str, Any] = {}
+    for attribute in ("status_code", "code", "type", "param"):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, str | int):
+            details[attribute] = value
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error") if isinstance(body.get("error"), dict) else body
+        for source_key, target_key in (("code", "body_code"), ("type", "body_type"), ("param", "body_param")):
+            value = error.get(source_key)
+            if isinstance(value, str | int):
+                details[target_key] = value
+        message = error.get("message")
+        if isinstance(message, str):
+            details["body_message_length"] = len(message)
+            details["body_message_sha256"] = hashlib.sha256(
+                message.encode("utf-8", errors="replace")
+            ).hexdigest()
+    return details or None
+
+
 def _provider_attempt_diagnostics(results: list[AnalysisProviderResult]) -> list[dict[str, Any]]:
     return [
         {
@@ -1075,10 +1205,13 @@ def _diagnostic_safe_context(context: dict[str, Any]) -> dict[str, Any]:
         "attempt",
         "attempt_count",
         "prompt_chars",
+        "schema_chars",
         "schema_path",
         "skill_path",
         "source_fingerprint",
+        "source_payload_chars",
         "source_document_excerpt_chars",
+        "provider_raw_output_present",
     }
     for key in allowed_scalars:
         value = context.get(key)
@@ -1092,6 +1225,12 @@ def _diagnostic_safe_context(context: dict[str, Any]) -> dict[str, Any]:
         safe["ru_payload_keys"] = [str(item) for item in context["ru_payload_keys"]]
     if isinstance(context.get("en_payload_keys"), list):
         safe["en_payload_keys"] = [str(item) for item in context["en_payload_keys"]]
+    if isinstance(context.get("payload_keys"), list):
+        safe["payload_keys"] = [str(item) for item in context["payload_keys"]]
+    if isinstance(context.get("provider_error"), dict):
+        safe["provider_error"] = context["provider_error"]
+    if isinstance(context.get("traceback"), list):
+        safe["traceback"] = context["traceback"]
     return safe
 
 
