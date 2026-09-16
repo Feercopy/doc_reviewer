@@ -21,6 +21,25 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Add AI Summary PDF and Word downloads backed by the stored
+  `new_summary` payload and formatted with the current Stash `New-summary`
+  rules. The API now exposes owner-authorized `/analyses/{id}/new-summary/export/pdf`
+  and `/docx` exports without re-running model analysis or reading raw provider
+  output; the frontend shows separate `Скачать PDF` and `Скачать Word` actions
+  only after both RU/EN AI Summary variants are complete. Exported documents use
+  the skill section order (Title, Stage, Traction Summary, Context, Required
+  elements, Identified/Выявленные problems, Other, Appendices) and intentionally
+  omit legacy `confirmed` / `insufficiently_confirmed` blocks. Synced
+  `skills/new-summary/SKILL.md` to the latest Stash version. The API image now
+  installs DejaVu fonts so PDF export can render Cyrillic inside the slim
+  production/test container. Review hardening added deterministic PDF table
+  widths, correct Appendix verdict labels, localized Russian current-value
+  headers, and safe provenance in DOCX metadata plus both exported document
+  bodies. Verified focused
+  API export tests, all analysis API tests, Python compilation, Docker Compose
+  config, and `git diff --check`; local frontend tests could not run because
+  `node_modules` are absent and sandboxed `pnpm` cannot fetch npm registry
+  packages.
 - [x] Fix AI Summary generation and Full Analysis readiness semantics. Production
   runs were storing `new_summary_generation_failed:BadRequestError` for
   `skills/new-summary/SKILL.md`, which points to provider rejection before a

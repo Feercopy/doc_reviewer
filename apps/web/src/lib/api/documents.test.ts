@@ -9,6 +9,7 @@ import {
   deleteDocument,
   deleteDocumentAnalyses,
   getParsedText,
+  newSummaryExportUrl,
   patchDocumentTitle,
   patchDocumentType,
   uploadDocument,
@@ -264,6 +265,15 @@ describe("documents api", () => {
   it("builds IC review artifact download urls with encoded artifact keys", () => {
     expect(icReviewArtifactUrl("run-id", "artifact:legacy_report_pdf")).toBe(
       "http://localhost:8000/ic-review-runs/run-id/artifacts/artifact%3Alegacy_report_pdf",
+    );
+  });
+
+  it("builds AI Summary export download urls", () => {
+    expect(newSummaryExportUrl("analysis-id", "pdf")).toBe(
+      "http://localhost:8000/analyses/analysis-id/new-summary/export/pdf",
+    );
+    expect(newSummaryExportUrl("analysis-id", "docx")).toBe(
+      "http://localhost:8000/analyses/analysis-id/new-summary/export/docx",
     );
   });
 });

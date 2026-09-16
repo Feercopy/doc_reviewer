@@ -14,6 +14,7 @@ import {
   getAnalysisStatus,
   getDocument,
   getNewSummary,
+  newSummaryExportUrl,
   type AnalysisCheckRunStatusRecord,
   type AnalysisCheckStepRecord,
   type AnalysisCheckStepStatusRecord,
@@ -948,7 +949,8 @@ function NewSummaryPanel({
     const report: NewSummaryReport = {
       analysis_id: analysis.id,
       created_at: analysis.completed_at ?? analysis.created_at,
-      pdf_path: null,
+      docx_path: newSummaryExportUrl(analysis.id, "docx"),
+      pdf_path: newSummaryExportUrl(analysis.id, "pdf"),
       route: null,
       ru: newSummaryRu,
       en: newSummaryEn,

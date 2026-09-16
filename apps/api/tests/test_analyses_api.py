@@ -2,6 +2,8 @@ from datetime import timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from docx import Document as DocxDocument
+
 from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisCheckStep, AnalysisDetailRun, PredictedCommentRun
 from app.models.base import utc_now
 from app.models.document import Document
@@ -1459,6 +1461,101 @@ def test_new_summary_endpoint_queues_legacy_completed_ic_review_without_postproc
     assert response.json()["progress"]["stage"] == "queued"
 
 
+def test_new_summary_export_downloads_completed_summary_as_pdf_and_docx(client, db_session, tmp_path):
+    user = create_user(db_session, "new-summary-export-author", "secret")
+    skills = seed_baseline_skills(db_session)
+    document_id = _create_completed_document(client, db_session, user)
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=user.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="need_evidence",
+        summary="Нужны подтверждения",
+        structured_output={
+            "result": {
+                "new_summary": {
+                    "version": 2,
+                    "generation_mode": "new_summary_skill",
+                    "source_revision": str(uuid4()),
+                    "ru": {
+                        "status": "completed",
+                        "payload": _new_summary_payload(language="ru"),
+                        "source_fingerprint": "ru-fingerprint",
+                    },
+                    "en": {
+                        "status": "completed",
+                        "payload": _new_summary_payload(language="en"),
+                        "source_fingerprint": "en-fingerprint",
+                    },
+                    "progress": {"stage": "completed", "status": "completed", "percent": 100},
+                }
+            }
+        },
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.commit()
+    login(client, user.login, "secret")
+
+    pdf_response = client.get(f"/analyses/{analysis.id}/new-summary/export/pdf")
+    docx_response = client.get(f"/analyses/{analysis.id}/new-summary/export/docx")
+
+    assert pdf_response.status_code == 200
+    assert pdf_response.headers["content-type"].startswith("application/pdf")
+    assert pdf_response.content.startswith(b"%PDF")
+    assert docx_response.status_code == 200
+    assert docx_response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert docx_response.content.startswith(b"PK")
+    exported = tmp_path / "summary.docx"
+    exported.write_bytes(docx_response.content)
+    document = DocxDocument(exported)
+    paragraph_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    table_text = "\n".join(cell.text for table in document.tables for row in table.rows for cell in row.cells)
+    text = f"{paragraph_text}\n{table_text}"
+    assert "AI Summary Test Initiative" in text
+    assert "Выявленные проблемы" in text
+    assert "Подтверждено" in text
+    assert "Связь подтверждена" not in text
+    assert "Текущее значение" in text
+    assert f"analysis_id={analysis.id}" in text
+    assert f"document_id={analysis.document_id}" in text
+    assert "Что подтверждено" not in text
+    assert "Что недостаточно подтверждено" not in text
+
+
+def test_new_summary_export_requires_completed_summary(client, db_session):
+    user = create_user(db_session, "new-summary-export-pending-author", "secret")
+    skills = seed_baseline_skills(db_session)
+    document_id = _create_completed_document(client, db_session, user)
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=user.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        verdict="need_evidence",
+        summary="Нужны подтверждения",
+        structured_output={"result": {"new_summary": {"version": 2, "ru": {"status": "queued"}, "en": {"status": "queued"}}}},
+        run_parameters={},
+    )
+    db_session.add(analysis)
+    db_session.commit()
+    login(client, user.login, "secret")
+
+    response = client.get(f"/analyses/{analysis.id}/new-summary/export/pdf")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "AI Summary is not ready for export"
+
+
 def test_cancel_analysis_preserves_completed_gate_result_and_cancels_downstream_runs(client, db_session):
     user = create_user(db_session, "author", "secret")
     skills = seed_baseline_skills(db_session)
@@ -1908,3 +2005,63 @@ def _create_completed_document_row(db_session, user):
     db_session.add(document)
     db_session.flush()
     return document.id
+
+
+def _new_summary_payload(*, language: str):
+    is_ru = language == "ru"
+    return {
+        "schema_version": "new-summary-v1",
+        "language": language,
+        "title": "AI Summary Test Initiative",
+        "stage": "Gate 2",
+        "traction_summary": {
+            "metric_label": "Revenue" if not is_ru else "Revenue",
+            "periods": ["2026", "2027", "Total"],
+            "rows": [{"label": "Revenue (incr)", "values": ["10", "20", "30"]}],
+        },
+        "context": "Инициатива проверяет новый продуктовый сценарий." if is_ru else "The initiative tests a new product scenario.",
+        "required_elements": [
+            {
+                "id": "gate2_value_proposition",
+                "label": "Уникальное товарное предложение" if is_ru else "Unique value proposition",
+                "status": "есть",
+                "evidence": "В документе описано отличие продукта." if is_ru else "The document describes product differentiation.",
+            },
+            {
+                "id": "gate2_target_product",
+                "label": "Описание MVP/целевого продукта" if is_ru else "MVP or target product description",
+                "status": "нет",
+                "evidence": "MVP описан неполно." if is_ru else "The MVP description is incomplete.",
+            },
+        ],
+        "required_details": {
+            "gate2_value_proposition": {
+                "type": "solution_validation",
+                "items": [
+                    {
+                        "text": "Проверена базовая потребность." if is_ru else "The baseline need is tested.",
+                        "verdict": "confirmed",
+                    }
+                ],
+            },
+            "gate2_target_product": {
+                "type": "next_review_plan",
+                "outputs_until_next_review": ["Запустить MVP." if is_ru else "Launch the MVP."],
+                "metrics_until_next_review": [
+                    {
+                        "metric": "Activation",
+                        "current": "10%",
+                        "next_review": "20%",
+                    }
+                ],
+            },
+        },
+        "confirmed": ["Этот блок не должен попадать в экспорт." if is_ru else "This block must not be exported."],
+        "insufficiently_confirmed": [
+            "Этот блок тоже не должен попадать в экспорт." if is_ru else "This block must not be exported either."
+        ],
+        "critical_problems": [
+            "Не хватает доказательств устойчивости эффекта." if is_ru else "The durability of the effect is not sufficiently evidenced."
+        ],
+        "other": ["Есть операционная зависимость." if is_ru else "There is an operational dependency."],
+    }

@@ -65,6 +65,7 @@ export type NewSummaryContent = {
 export type NewSummaryReport = {
   analysis_id: string;
   created_at?: string | null;
+  docx_path?: string | null;
   pdf_path?: string | null;
   route?: string | null;
   ru: NewSummaryContent;
