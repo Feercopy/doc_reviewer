@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -45,6 +45,11 @@ from app.services.documents import DocumentNotFoundError
 from app.services.new_summaries import (
     mark_new_summary_enqueue_failed,
     request_new_summary,
+)
+from app.services.new_summary_exports import (
+    NewSummaryExportUnavailableError,
+    UnsupportedNewSummaryExportFormatError,
+    build_new_summary_export,
 )
 from app.services.summary_localizations import (
     mark_summary_localizations_enqueue_failed,
@@ -236,6 +241,30 @@ def ensure_analysis_new_summary(
             )
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="New Summary generation queue is unavailable") from exc
     return response
+
+
+@router.get("/analyses/{analysis_id}/new-summary/export/{file_format}")
+def download_analysis_new_summary_export(
+    analysis_id: UUID,
+    file_format: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> Response:
+    try:
+        analysis = get_analysis_for_actor(db=db, actor=current_user, analysis_id=analysis_id)
+        export = build_new_summary_export(analysis=analysis, file_format=file_format)
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+    except UnsupportedNewSummaryExportFormatError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export format not found") from exc
+    except NewSummaryExportUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="AI Summary is not ready for export") from exc
+
+    return Response(
+        content=export.content,
+        media_type=export.media_type,
+        headers={"Content-Disposition": export.content_disposition},
+    )
 
 
 @router.delete("/analyses/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT)

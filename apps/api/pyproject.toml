@@ -16,6 +16,7 @@ dependencies = [
   "rq",
   "python-docx",
   "pypdf",
+  "reportlab",
   "httpx[socks]",
   "anthropic",
   "openai",

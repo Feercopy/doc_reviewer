@@ -392,8 +392,11 @@ describe("analysis result page", () => {
     expect(pageSource).not.toContain("getSummaryLocalizations(params.analysisId)");
     expect(pageSource).toContain("ensureNewSummary(params.analysisId)");
     expect(pageSource).toContain("getNewSummary(params.analysisId)");
+    expect(pageSource).toContain("newSummaryExportUrl");
     expect(newSummaryPanelSource).toContain('newSummary.ru.status === "completed"');
     expect(newSummaryPanelSource).toContain('newSummary.en.status === "completed"');
+    expect(newSummaryPanelSource).toContain('docx_path: newSummaryExportUrl(analysis.id, "docx")');
+    expect(newSummaryPanelSource).toContain('pdf_path: newSummaryExportUrl(analysis.id, "pdf")');
     expect(newSummaryPanelSource).toContain("return <NewSummaryReportView embedded report={report} />");
     expect(pageSource).toContain('useState<OutputLanguage>("ru")');
     expect(pageSource).not.toContain("window.location.reload");
@@ -412,6 +415,7 @@ describe("analysis result page", () => {
 
     expect(pageSource).toContain("ensureNewSummary(params.analysisId)");
     expect(pageSource).toContain("getNewSummary(params.analysisId)");
+    expect(pageSource).toContain("newSummaryExportUrl");
     expect(pageSource).toContain('if (analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed")');
     expect(pageSource).not.toContain('activeFullReportTab === "legacySummary"');
     expect(pageSource).not.toContain('activeTopTab === "fullReport"');
@@ -421,6 +425,8 @@ describe("analysis result page", () => {
     expect(newSummaryPanelSource).toContain('newSummary?.available === true');
     expect(newSummaryPanelSource).toContain('newSummary.ru.status === "completed"');
     expect(newSummaryPanelSource).toContain('newSummary.en.status === "completed"');
+    expect(newSummaryPanelSource).toContain('docx_path: newSummaryExportUrl(analysis.id, "docx")');
+    expect(newSummaryPanelSource).toContain('pdf_path: newSummaryExportUrl(analysis.id, "pdf")');
     expect(newSummaryPanelSource).toContain("return <NewSummaryReportView embedded report={report} />");
     expect(newSummaryPanelSource).toContain("<NewSummaryProgress progress={newSummary?.progress ?? fallbackNewSummaryProgress(newSummary)} />");
     expect(newSummaryPanelSource).toContain("Повторная попытка начнётся автоматически при следующем открытии страницы.");
@@ -442,6 +448,37 @@ describe("analysis result page", () => {
     expect(embeddedStyles).toContain("width: 100%;");
     expect(embeddedStyles).toContain("max-width: none;");
     expect(embeddedStyles).toContain("margin: 0;");
+  });
+
+  it("renders separate AI Summary PDF and Word download controls", () => {
+    const newSummarySource = readFileSync(
+      new URL("../../../components/new-summary/NewSummaryReport.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(newSummarySource).toContain('downloadPdf: "Скачать PDF"');
+    expect(newSummarySource).toContain('downloadWord: "Скачать Word"');
+    expect(newSummarySource).toContain("report.pdf_path");
+    expect(newSummarySource).toContain("report.docx_path");
+    expect(newSummarySource).not.toContain("Скачать PDF на русском и английском");
+  });
+
+  it("keeps repository AI Summary presentation aligned with the current skill section order", () => {
+    const newSummarySource = readFileSync(
+      new URL("../../../components/new-summary/NewSummaryReport.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(newSummarySource).toContain("content.traction_summary");
+    expect(newSummarySource).toContain("content.context");
+    expect(newSummarySource).toContain("content.required_elements");
+    expect(newSummarySource).toContain("content.critical_problems");
+    expect(newSummarySource).toContain("content.other");
+    expect(newSummarySource).toContain("content.required_details");
+    expect(newSummarySource).not.toContain("content.confirmed");
+    expect(newSummarySource).not.toContain("content.insufficiently_confirmed");
+    expect(newSummarySource).not.toContain("Что подтверждено");
+    expect(newSummarySource).not.toContain("Что недостаточно подтверждено");
   });
 
   it("renders the stage checklist as a red and green traffic-light block above Summary product analysis", () => {

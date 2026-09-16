@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchNoContent, apiFetchText } from "./client";
+import { apiFetch, apiFetchNoContent, apiFetchText, resolveApiBaseUrl } from "./client";
 import type { NewSummaryContent } from "../newSummary";
 
 export type DocumentType =
@@ -560,4 +560,8 @@ export async function ensureNewSummary(analysisId: string): Promise<NewSummaryRe
 
 export async function getNewSummary(analysisId: string): Promise<NewSummaryRecord> {
   return apiFetch<NewSummaryRecord>(`/analyses/${analysisId}/new-summary`);
+}
+
+export function newSummaryExportUrl(analysisId: string, fileFormat: "pdf" | "docx"): string {
+  return `${resolveApiBaseUrl()}/analyses/${analysisId}/new-summary/export/${fileFormat}`;
 }

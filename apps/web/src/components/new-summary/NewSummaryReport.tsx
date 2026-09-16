@@ -18,9 +18,8 @@ const labels = {
     bindingInsufficient: "Связь недостаточно подтверждена",
     context: "Краткий контекст инициативы",
     critical: "Выявленные проблемы",
-    confirmed: "Что подтверждено",
-    download: "Скачать PDF на русском и английском",
-    insufficient: "Что недостаточно подтверждено",
+    downloadPdf: "Скачать PDF",
+    downloadWord: "Скачать Word",
     inputMetrics: "Input metrics",
     list: "Все новые Summary",
     metric: "Метрика",
@@ -43,9 +42,8 @@ const labels = {
     bindingInsufficient: "Binding not sufficiently confirmed",
     context: "Initiative context",
     critical: "Identified problems",
-    confirmed: "What is confirmed",
-    download: "Download the Russian and English PDF",
-    insufficient: "What is not sufficiently confirmed",
+    downloadPdf: "Download PDF",
+    downloadWord: "Download Word",
     inputMetrics: "Input metrics",
     list: "All New Summaries",
     metric: "Metric",
@@ -110,7 +108,12 @@ export function NewSummaryReportView({
           </div>
           {report.pdf_path ? (
             <a className="new-summary-download" download href={report.pdf_path}>
-              {text.download}
+              {text.downloadPdf}
+            </a>
+          ) : null}
+          {report.docx_path ? (
+            <a className="new-summary-download" download href={report.docx_path}>
+              {text.downloadWord}
             </a>
           ) : null}
         </div>
@@ -154,15 +157,6 @@ export function NewSummaryReportView({
             );
           })}
         </ul>
-      </section>
-
-      <section className="new-summary-panel new-summary-evidence-grid">
-        <SummarySection className="confirmed" items={content.confirmed} title={text.confirmed} />
-        <SummarySection
-          className="insufficient"
-          items={content.insufficiently_confirmed}
-          title={text.insufficient}
-        />
       </section>
 
       <section className="new-summary-panel new-summary-critical">
