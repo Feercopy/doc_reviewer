@@ -221,6 +221,10 @@ def test_new_summary_variants_are_generated_from_repository_skill(tmp_path, monk
         assert "new_summary_en" not in steps
         skill_artifact = next(item for item in steps["new_summary_bilingual"].artifacts if item["key"] == "skill")
         assert skill_artifact["skill"]["source_path"] == "skills/new-summary/SKILL.md"
+        parameters_artifact = next(
+            item for item in steps["new_summary_bilingual"].artifacts if item["key"] == "effective_run_parameters"
+        )
+        assert parameters_artifact["run_parameters"]["response_format"] == {"type": "json_object"}
     finally:
         db.close()
         get_settings.cache_clear()

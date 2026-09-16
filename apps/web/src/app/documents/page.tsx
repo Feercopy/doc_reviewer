@@ -82,7 +82,27 @@ function isFullAnalysisComplete(analysis: AnalysisStatusRecord): boolean {
   return (
     analysis.status === "completed" &&
     isDevilsAdvocateCompleteOrSkipped(analysis) &&
-    analysis.ic_review_run?.status === "completed"
+    analysis.ic_review_run?.status === "completed" &&
+    isNewSummaryCompleteOrNotRequested(analysis)
+  );
+}
+
+function isNewSummaryCompleteOrNotRequested(analysis: AnalysisStatusRecord): boolean {
+  if (analysis.new_summary?.available !== true) {
+    return true;
+  }
+  return (
+    analysis.new_summary.ru.status === "completed" &&
+    analysis.new_summary.en.status === "completed"
+  );
+}
+
+function isNewSummaryFailed(analysis: AnalysisStatusRecord): boolean {
+  return (
+    analysis.new_summary?.available === true &&
+    [analysis.new_summary.ru.status, analysis.new_summary.en.status].some((status) =>
+      status === "failed" || status === "cancelled",
+    )
   );
 }
 
@@ -100,7 +120,8 @@ function isFullAnalysisFailed(analysis: AnalysisStatusRecord): boolean {
     analysis.predicted_comment_run?.status === "failed" ||
     analysis.predicted_comment_run?.status === "cancelled" ||
     analysis.ic_review_run?.status === "failed" ||
-    analysis.ic_review_run?.status === "cancelled"
+    analysis.ic_review_run?.status === "cancelled" ||
+    isNewSummaryFailed(analysis)
   );
 }
 
@@ -155,6 +176,20 @@ function getAnalysisStatusSignal(
   }
   if (icStatus !== "completed") {
     return { label: `IC Review ${icStatus}`, tone: icStatus === "queued" ? "warn" : "info" };
+  }
+
+  if (analysis.new_summary?.available === true) {
+    const progressStage = analysis.new_summary.progress?.stage;
+    if (progressStage === "saving") {
+      return { label: "Saving AI Summary", tone: "info" };
+    }
+    if (progressStage === "generating") {
+      return { label: "Generating AI Summary", tone: "info" };
+    }
+    if (progressStage === "preparing_sources" || progressStage === "preparing_prompt") {
+      return { label: "Preparing AI Summary", tone: "info" };
+    }
+    return { label: "AI Summary queued", tone: "warn" };
   }
 
   return { label: "Analysis running", tone: "info" };
@@ -247,6 +282,7 @@ function adminAnalysisToStatus(analysis: AdminAnalysis): AnalysisStatusRecord {
     predicted_comment_run: null,
     detail_run: null,
     ic_review_run: null,
+    new_summary: null,
   };
 }
 

@@ -37,6 +37,13 @@ from app.schemas.enums import (
 )
 from app.services.documents import DocumentNotFoundError, get_document_for_actor
 from app.services.external_sources import SourceUnavailableError
+from app.services.new_summaries import (
+    NEW_SUMMARY_EXPECTED_PARAMETER,
+    NEW_SUMMARY_POSTPROCESSING,
+    mark_new_summary_cancelled,
+    read_new_summary_status_state,
+    read_waiting_new_summary_status,
+)
 from app.services.provider_keys import get_shared_provider_key
 from app.schemas.provider_settings import normalize_available_models
 from app.services.skill_snapshots import create_skill_source_snapshot
@@ -84,6 +91,7 @@ class AnalysisStatusSource:
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
+    new_summary_state: dict | None
 
 
 def create_analysis_for_document(
@@ -383,6 +391,10 @@ def read_analysis_statuses(*, db: Session, sources: list[AnalysisStatusSource]) 
             predicted_comment_run=predicted_runs.get(source.id),
             detail_run=detail_runs.get(source.id),
             ic_review_run=ic_review_runs.get(source.id),
+            new_summary=_analysis_new_summary_status(
+                source=source,
+                ic_review_run=ic_review_runs.get(source.id),
+            ),
         )
         for source in sources
     ]
@@ -409,6 +421,7 @@ def _analysis_status_select():
         Analysis.created_at.label("created_at"),
         Analysis.started_at.label("started_at"),
         Analysis.completed_at.label("completed_at"),
+        Analysis.structured_output["result"]["new_summary"].label("new_summary_state"),
     )
 
 
@@ -427,6 +440,7 @@ def _analysis_status_source(row) -> AnalysisStatusSource:
         created_at=row["created_at"],
         started_at=row["started_at"],
         completed_at=row["completed_at"],
+        new_summary_state=row["new_summary_state"] if isinstance(row["new_summary_state"], dict) else None,
     )
 
 
@@ -478,6 +492,7 @@ def _latest_ic_review_status_summaries(
             AnalysisCheckRun.status.label("status"),
             AnalysisCheckRun.current_stage.label("current_stage"),
             AnalysisCheckRun.error_message.label("error_message"),
+            AnalysisCheckRun.run_parameters.label("run_parameters"),
             AnalysisCheckRun.created_at.label("created_at"),
             AnalysisCheckRun.started_at.label("started_at"),
             AnalysisCheckRun.completed_at.label("completed_at"),
@@ -541,6 +556,7 @@ def _latest_ic_review_status_summaries(
             started_at=row["started_at"],
             completed_at=row["completed_at"],
             steps=steps,
+            new_summary_expected=_ic_review_expects_new_summary(row.get("run_parameters")),
             public_error=build_public_ic_review_error(
                 status=row["status"],
                 error_message=row["error_message"],
@@ -999,6 +1015,15 @@ def cancel_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) ->
                     step.completed_at = cancelled_at
             cancelled_any = True
 
+    latest_ic_review_run = max(
+        [run for run in check_runs if run.check_type == "ic_agentic_review"],
+        key=lambda run: (run.created_at, str(run.id)),
+        default=None,
+    )
+    if latest_ic_review_run is not None:
+        if mark_new_summary_cancelled(analysis=analysis, revision=str(latest_ic_review_run.id)):
+            cancelled_any = True
+
     if cancelled_any:
         record_audit(
             db=db,
@@ -1190,7 +1215,53 @@ def _full_analysis_chain_completed(
         and latest_predicted_run.status == RunStatus.COMPLETED.value
         and latest_ic_review_run is not None
         and latest_ic_review_run.status == RunStatus.COMPLETED.value
+        and _new_summary_completed(
+            analysis.structured_output,
+            latest_ic_review_run=latest_ic_review_run,
+        )
     )
+
+
+def _new_summary_completed(structured_output: dict | None, *, latest_ic_review_run: AnalysisCheckRun | None) -> bool:
+    result = structured_output.get("result") if isinstance(structured_output, dict) else None
+    state = result.get("new_summary") if isinstance(result, dict) else None
+    if not isinstance(state, dict):
+        return not _ic_review_expects_new_summary(
+            latest_ic_review_run.run_parameters if latest_ic_review_run is not None else None
+        )
+    if state.get("available") is False:
+        return True
+    return all((state.get(language) or {}).get("status") == RunStatus.COMPLETED.value for language in ("ru", "en"))
+
+
+def _analysis_new_summary_status(
+    *,
+    source: AnalysisStatusSource,
+    ic_review_run: AnalysisCheckRunStatusRead | None,
+) -> dict:
+    if isinstance(source.new_summary_state, dict) and source.new_summary_state:
+        return read_new_summary_status_state(analysis_id=source.id, state=source.new_summary_state).model_dump(
+            mode="json"
+        )
+    if (
+        ic_review_run is not None
+        and _status_value(ic_review_run.status) == RunStatus.COMPLETED.value
+        and ic_review_run.new_summary_expected
+    ):
+        return read_waiting_new_summary_status(
+            analysis_id=source.id,
+            revision=str(ic_review_run.id),
+        ).model_dump(mode="json")
+    return read_new_summary_status_state(analysis_id=source.id, state={}).model_dump(mode="json")
+
+
+def _ic_review_expects_new_summary(run_parameters: dict | None) -> bool:
+    marker = (run_parameters or {}).get(NEW_SUMMARY_EXPECTED_PARAMETER)
+    return marker is True or marker == NEW_SUMMARY_POSTPROCESSING
+
+
+def _status_value(status: RunStatus | str) -> str:
+    return status.value if isinstance(status, RunStatus) else str(status)
 
 
 def _latest_ic_review_run_read(*, db: Session, actor: User, analysis_id: UUID):

@@ -934,9 +934,12 @@ function NewSummaryPanel({
   const newSummaryRequested = newSummary?.available === true;
   const newSummaryFailed =
     newSummaryRequested && [newSummary.ru.status, newSummary.en.status].some((status) => status === "failed");
+  const newSummaryCancelled =
+    newSummaryRequested && [newSummary.ru.status, newSummary.en.status].some((status) => status === "cancelled");
   const newSummaryPending =
     newSummaryRequested
     && !newSummaryReady
+    && !newSummaryCancelled
     && [newSummary.ru.status, newSummary.en.status].some((status) => status === "waiting" || status === "queued" || status === "running");
   const newSummaryRu = newSummaryReady ? newSummary.ru.payload : null;
   const newSummaryEn = newSummaryReady ? newSummary.en.payload : null;
@@ -967,6 +970,11 @@ function NewSummaryPanel({
       {newSummaryError || newSummaryFailed ? (
         <div className="analysis-alert">
           AI Summary пока не удалось подготовить. Повторная попытка начнётся автоматически при следующем открытии страницы.
+        </div>
+      ) : null}
+      {newSummaryCancelled ? (
+        <div className="analysis-alert">
+          Подготовка AI Summary остановлена пользователем вместе с полным анализом.
         </div>
       ) : null}
       {!newSummaryRequested && !newSummaryError ? (

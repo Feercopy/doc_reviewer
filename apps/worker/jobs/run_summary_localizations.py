@@ -15,6 +15,7 @@ from app.services.provider_keys import get_shared_provider_key, list_shared_prov
 from app.services.new_summaries import (
     NEW_SUMMARY_GENERATION_MODE,
     NEW_SUMMARY_VERSION,
+    mark_new_summary_cancelled,
     mark_new_summary_failed,
     mark_new_summary_progress,
 )
@@ -135,6 +136,19 @@ def run_summary_localizations(analysis_id: str, *, db: Session | None = None) ->
                     )
                     failed_languages.append(f"summary_localization:{target_language}")
         if new_summary_runnable:
+            if _analysis_chain_cancel_requested(analysis):
+                if mark_new_summary_cancelled(analysis=analysis, revision=str(check_run.id)):
+                    session.commit()
+                worker_logger.info(
+                    "summary_generation_skipped",
+                    extra={
+                        "job_type": "run_summary_localizations",
+                        "entity_id": str(analysis_uuid),
+                        "status": "cancelled",
+                        "reason": "analysis_chain_cancel_requested",
+                    },
+                )
+                return
             try:
                 mark_new_summary_progress(
                     analysis=analysis,
@@ -301,3 +315,7 @@ def _available_summary_model(*, provider_key: ProviderKey, historical_model: str
     if historical_model and historical_model in available_models:
         return historical_model
     return provider_key.default_model
+
+
+def _analysis_chain_cancel_requested(analysis: Analysis) -> bool:
+    return bool((analysis.run_parameters or {}).get("analysis_chain_cancel_requested_at"))
