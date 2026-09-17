@@ -27,6 +27,7 @@ export default function AdminUsersPage() {
   const [status, setStatus] = useState<UserStatus>("active");
   const [accessLines, setAccessLines] = useState("");
   const [accessPending, setAccessPending] = useState(false);
+  const [accessError, setAccessError] = useState("");
   const [accessResult, setAccessResult] = useState<DocumentAccessGrantResult | null>(null);
 
   async function refresh() {
@@ -111,13 +112,17 @@ export default function AdminUsersPage() {
 
   async function submitAccess(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError("");
+    setAccessError("");
     setAccessResult(null);
     setAccessPending(true);
     try {
       const items = accessLines.trim().split("\n").map((line) => {
-        const [analysis_id, loginsText] = line.trim().split(/\s+/, 2);
-        const logins = (loginsText ?? "").split(",").map((login) => login.trim()).filter(Boolean);
+        const match = /^([^\s]+)\s+(.+)$/.exec(line.trim());
+        if (!match) {
+          throw new Error("Use one analysis ID and comma-separated logins per line");
+        }
+        const analysis_id = match[1];
+        const logins = match[2].split(",").map((login) => login.trim()).filter(Boolean);
         if (!/^[0-9a-f-]{36}$/i.test(analysis_id) || logins.length === 0) {
           throw new Error("Use one analysis ID and comma-separated logins per line");
         }
@@ -125,7 +130,7 @@ export default function AdminUsersPage() {
       });
       setAccessResult(await grantDocumentAccess(items));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to grant document access");
+      setAccessError(err instanceof Error ? err.message : "Failed to grant document access");
     } finally {
       setAccessPending(false);
     }
@@ -212,6 +217,7 @@ export default function AdminUsersPage() {
             />
           </label>
           <div><button disabled={accessPending || !accessLines.trim()} type="submit">Grant read access</button></div>
+          {accessError ? <div className="error">{accessError}</div> : null}
           {accessResult ? <p className="muted">{accessResult.analyses} analyses; {accessResult.grants_created} new grants; {accessResult.grants_existing} existing.</p> : null}
         </form>
 
