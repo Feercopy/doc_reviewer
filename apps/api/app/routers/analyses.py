@@ -42,9 +42,10 @@ from app.services.analysis_jobs import (
     enqueue_run_analysis_details,
     enqueue_run_summary_localizations,
 )
-from app.services.documents import DocumentNotFoundError
+from app.services.documents import DocumentNotFoundError, get_manageable_document_for_actor
 from app.services.new_summaries import (
     mark_new_summary_enqueue_failed,
+    read_new_summary,
     request_new_summary,
     with_display_stage,
 )
@@ -184,7 +185,8 @@ def ensure_analysis_summary_localizations(
 ) -> SummaryLocalizationsRead:
     try:
         analysis = get_analysis_for_actor(db=db, actor=current_user, analysis_id=analysis_id)
-    except AnalysisNotFoundError as exc:
+        get_manageable_document_for_actor(db=db, actor=current_user, document_id=analysis.document_id)
+    except (AnalysisNotFoundError, DocumentNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
     response, should_enqueue = request_summary_localizations(db=db, analysis=analysis)
     if should_enqueue:
@@ -211,6 +213,8 @@ def get_analysis_new_summary(
         analysis = get_analysis_for_actor(db=db, actor=current_user, analysis_id=analysis_id)
     except AnalysisNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+    if current_user.role != "admin" and analysis.user_id != current_user.id:
+        return with_display_stage(read_new_summary(analysis), _display_stage_for_analysis(db, analysis))
     response, should_enqueue = request_new_summary(db=db, analysis=analysis)
     if should_enqueue:
         try:
@@ -234,7 +238,8 @@ def ensure_analysis_new_summary(
 ) -> NewSummaryRead:
     try:
         analysis = get_analysis_for_actor(db=db, actor=current_user, analysis_id=analysis_id)
-    except AnalysisNotFoundError as exc:
+        get_manageable_document_for_actor(db=db, actor=current_user, document_id=analysis.document_id)
+    except (AnalysisNotFoundError, DocumentNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
     response, should_enqueue = request_new_summary(db=db, analysis=analysis, create_if_missing=True)
     if should_enqueue:

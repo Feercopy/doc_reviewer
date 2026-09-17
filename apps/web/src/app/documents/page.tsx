@@ -5,6 +5,8 @@ import { DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState
 
 import { AppShell } from "@/components/AppShell";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { me } from "@/lib/api/auth";
+import type { User } from "@/lib/api/types";
 import { listAdminAnalyses, listRecoveredAdminDocuments, type AdminAnalysis } from "@/lib/api/admin";
 import {
   getProviderDefaultModel,
@@ -375,6 +377,7 @@ function isCaseStatusActive(document: DocumentRecord, analysis: AnalysisStatusRe
 }
 
 export default function DocumentsPage() {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -412,6 +415,7 @@ export default function DocumentsPage() {
   );
 
   useEffect(() => {
+    me().then(setCurrentUser).catch(() => undefined);
     refresh()
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load documents"))
       .finally(() => setLoading(false));
@@ -922,14 +926,14 @@ export default function DocumentsPage() {
                             <Link className="gc-compact-link" href={`/documents/${document.id}`} target="_blank" rel="noreferrer">
                               Open Case
                             </Link>
-                            <button
+                            {currentUser && (currentUser.role === "admin" || currentUser.id === document.owner_id) ? <button
                               className="gc-compact-danger"
                               disabled={deletingId === document.id}
                               type="button"
                               onClick={() => handleDelete(document)}
                             >
                               {deletingId === document.id ? "Deleting" : "Delete"}
-                            </button>
+                            </button> : null}
                           </div>
                         </td>
                       </tr>

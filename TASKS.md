@@ -21,6 +21,13 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] Share the 17 previously reviewed initiative cases with explicitly matched
+  directorate users without changing document ownership. Added admin-only,
+  idempotent analysis-to-login grants, a document-access table/migration, and
+  read-only visibility in document/analysis lists and detail pages. Shared
+  viewers cannot edit, delete, reparse, or launch analysis/IC Review, including
+  through direct API calls. All 250 API tests and 159 frontend tests pass.
+  Production grant application and verification follow the PR deploy.
 - [~] Keep Progress Review as a presentation-only stage for existing and
   running cases. The Documents table and case page read it from the saved
   parsed document; AI Summary responses and PDF/Word exports show the same

@@ -255,7 +255,7 @@ describe("analysis result page", () => {
     expect(icPanelSource).not.toContain("Скачать MD");
     expect(icPanelSource).toContain('const setupControlsDisabled = analysis.status !== "completed" || isLaunching || runIsActive');
     expect(icPanelSource).toContain("const launchDisabled = launchAvailability.disabled || runIsActive");
-    expect(icPanelSource).toContain("{!runIsActive ? (");
+    expect(icPanelSource).toContain("{!runIsActive && canLaunch ? (");
     expect(icPanelSource).toContain('className="analysis-ic-launch"');
     expect(icPanelSource).not.toContain('className="analysis-secondary-action analysis-ic-launch"');
     expect(icPanelSource).not.toContain("<span>Provider</span>");
@@ -416,7 +416,7 @@ describe("analysis result page", () => {
     expect(pageSource).toContain("ensureNewSummary(params.analysisId)");
     expect(pageSource).toContain("getNewSummary(params.analysisId)");
     expect(pageSource).toContain("newSummaryExportUrl");
-    expect(pageSource).toContain('if (analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed")');
+    expect(pageSource).toContain('analysis.ic_review_run?.status !== "completed" || !currentUser || !analysisDocument');
     expect(pageSource).not.toContain('activeFullReportTab === "legacySummary"');
     expect(pageSource).not.toContain('activeTopTab === "fullReport"');
     expect(pageSource).toContain('import { NewSummaryReportView } from "@/components/new-summary/NewSummaryReport";');

@@ -6,6 +6,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 
 import { AppShell } from "@/components/AppShell";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { me } from "@/lib/api/auth";
+import type { User } from "@/lib/api/types";
 import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { resolveApiBaseUrl } from "@/lib/api/client";
 import {
@@ -420,6 +422,7 @@ function getParseProgressText(status: DocumentRecord["parse_status"]): string {
 }
 
 export default function DocumentDetailPage() {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const params = useParams<{ documentId: string }>();
   const documentId = params.documentId;
   const [document, setDocument] = useState<DocumentRecord | null>(null);
@@ -490,6 +493,7 @@ export default function DocumentDetailPage() {
   }, [documentId, loadParsedText]);
 
   useEffect(() => {
+    me().then(setCurrentUser).catch(() => undefined);
     parsedTextLoadedRef.current = false;
     loadPage().catch((err) => setError(err instanceof Error ? err.message : "Failed to load document"));
   }, [loadPage]);
@@ -521,6 +525,7 @@ export default function DocumentDetailPage() {
   }, [modelEdited, provider, providerModels]);
 
   const configuredProviderModels = useMemo(() => providerModels.filter((item) => item.has_key), [providerModels]);
+  const canManageDocument = Boolean(currentUser && document && (currentUser.role === "admin" || currentUser.id === document.owner_id));
   const selectedProviderModel = useMemo(
     () => providerModels.find((item) => item.provider === provider) ?? null,
     [provider, providerModels],
@@ -757,7 +762,7 @@ export default function DocumentDetailPage() {
                     ) : (
                       <>
                         <h1>{document.title}</h1>
-                        <button
+                        {canManageDocument ? <button
                           aria-label="Edit document title"
                           className="gc-title-edit-button"
                           disabled={titleSaving}
@@ -766,19 +771,19 @@ export default function DocumentDetailPage() {
                           onClick={openTitleEditor}
                         >
                           <span aria-hidden="true">✎</span>
-                        </button>
+                        </button> : null}
                       </>
                     )}
                   </div>
 
-                  <div className="gc-document-actions" aria-label="Document actions">
+                  {canManageDocument ? <div className="gc-document-actions" aria-label="Document actions">
                     <button className="gc-ghost" disabled={pending} type="button" onClick={reparse}>
                       Reparse
                     </button>
                     <button className="gc-danger" disabled={pending} type="button" onClick={removeDocument}>
                       Delete
                     </button>
-                  </div>
+                  </div> : null}
                 </div>
                 <p className="gc-muted">
                   <span>{document.original_filename}</span>
@@ -840,7 +845,7 @@ export default function DocumentDetailPage() {
                   <h2>Analysis history</h2>
                 </div>
 
-                <div className="gc-analysis-toolbar" aria-label="Analysis setup">
+                {canManageDocument ? <div className="gc-analysis-toolbar" aria-label="Analysis setup">
                   <select
                     aria-label="Model"
                     className="gc-analysis-model-button"
@@ -885,7 +890,7 @@ export default function DocumentDetailPage() {
                   >
                     {pending ? "Starting..." : hasPendingFullAnalysis ? "Full analysis running" : "▷ Start analysis"}
                   </button>
-                </div>
+                </div> : null}
 
                 {hasPendingFullAnalysis && pendingFullAnalysis ? (
                   <div className="gc-analysis-progress" aria-live="polite">
@@ -925,14 +930,14 @@ export default function DocumentDetailPage() {
                         </>
                       ) : null}
                     </div>
-                    <button
+                    {canManageDocument ? <button
                       className="gc-stop-analysis"
                       disabled={cancellingAnalysisId === pendingFullAnalysis.id}
                       type="button"
                       onClick={() => stopAnalysis(pendingFullAnalysis)}
                     >
                       {cancellingAnalysisId === pendingFullAnalysis.id ? "Stopping..." : "Stop Analysis"}
-                    </button>
+                    </button> : null}
                   </div>
                 ) : null}
 
@@ -980,14 +985,14 @@ export default function DocumentDetailPage() {
                                   <Link className="gc-compact-link" href={`/analyses/${analysis.id}`}>
                                     Open
                                   </Link>
-                                  <button
+                                  {canManageDocument ? <button
                                     className="gc-compact-danger"
                                     disabled={deletingAnalysisId === analysis.id}
                                     type="button"
                                     onClick={() => requestDeleteAnalysis(analysis)}
                                   >
                                     {deletingAnalysisId === analysis.id ? "Deleting" : "Delete"}
-                                  </button>
+                                  </button> : null}
                                 </div>
                               </td>
                             </tr>

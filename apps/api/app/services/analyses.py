@@ -6,7 +6,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.authz.policies import can_delete_analysis, can_read_analysis
+from app.authz.policies import can_delete_analysis
 from app.core.config import default_skill_source_snapshot_mode, get_settings
 from app.models.base import utc_now
 from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisCheckStep, AnalysisDetailRun, PredictedCommentRun
@@ -35,7 +35,8 @@ from app.schemas.enums import (
     RunStatus,
     SkillType,
 )
-from app.services.documents import DocumentNotFoundError, get_document_for_actor
+from app.services.document_access import can_view_document, readable_document_clause
+from app.services.documents import DocumentNotFoundError, get_document_for_actor, get_manageable_document_for_actor
 from app.services.external_sources import SourceUnavailableError
 from app.services.new_summaries import (
     NEW_SUMMARY_EXPECTED_PARAMETER,
@@ -106,7 +107,7 @@ def create_analysis_for_document(
     run_parameters: dict,
     defer_until_document_parsed: bool = False,
 ) -> Analysis:
-    document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
+    document = get_manageable_document_for_actor(db=db, actor=actor, document_id=document_id)
     parse_completed = document.parse_status == DocumentParseStatus.COMPLETED.value and bool(document.parsed_text)
     if not parse_completed and not defer_until_document_parsed:
         raise AnalysisPreconditionError("Document parse is not completed")
@@ -229,9 +230,18 @@ def get_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) -> An
     if (
         document is None
         or document.status != EntityStatus.ACTIVE.value
-        or not can_read_analysis(actor, analysis, document)
+        or not can_view_document(db=db, actor=actor, document=document)
     ):
         raise AnalysisNotFoundError("Analysis not found")
+    return analysis
+
+
+def get_manageable_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) -> Analysis:
+    analysis = get_analysis_for_actor(db=db, actor=actor, analysis_id=analysis_id)
+    try:
+        get_manageable_document_for_actor(db=db, actor=actor, document_id=analysis.document_id)
+    except DocumentNotFoundError as exc:
+        raise AnalysisNotFoundError("Analysis not found") from exc
     return analysis
 
 
@@ -272,7 +282,7 @@ def get_analysis_status_for_actor(*, db: Session, actor: User, analysis_id: UUID
         )
     )
     if actor.role != "admin":
-        statement = statement.where(Document.owner_id == actor.id)
+        statement = statement.where(readable_document_clause(actor))
     row = db.execute(statement).mappings().first()
     if row is None:
         raise AnalysisNotFoundError("Analysis not found")
@@ -290,7 +300,7 @@ def latest_document_analysis_statuses_for_actor(
 
     status_statement = _analysis_status_select().join(Document, Document.id == Analysis.document_id)
     if actor.role != "admin":
-        status_statement = status_statement.where(Document.owner_id == actor.id)
+        status_statement = status_statement.where(readable_document_clause(actor))
     ranked = (
         status_statement
         .add_columns(
@@ -343,7 +353,7 @@ def latest_document_analyses_for_actor(
         if analysis.document_id in latest_by_document_id:
             continue
         document = db.get(Document, analysis.document_id)
-        if document is None or not can_read_analysis(actor, analysis, document):
+        if document is None or not can_view_document(db=db, actor=actor, document=document):
             continue
         latest_by_document_id[analysis.document_id] = analysis
     return latest_by_document_id
@@ -609,7 +619,7 @@ def delete_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) ->
 
 
 def delete_document_analysis_results_for_actor(*, db: Session, actor: User, document_id: UUID) -> None:
-    document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
+    document = get_manageable_document_for_actor(db=db, actor=actor, document_id=document_id)
     analyses = list(
         db.execute(
             select(Analysis)
@@ -966,7 +976,7 @@ def _safe_ic_review_artifact_paths(
 
 
 def cancel_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) -> Analysis:
-    analysis = get_analysis_for_actor(db=db, actor=actor, analysis_id=analysis_id)
+    analysis = get_manageable_analysis_for_actor(db=db, actor=actor, analysis_id=analysis_id)
     cancelled_at = utc_now()
     cancelled_any = False
     predicted_runs = _analysis_predicted_comment_runs(db=db, analysis_id=analysis.id)
@@ -1077,7 +1087,7 @@ def read_analysis(*, db: Session, actor: User, analysis: Analysis) -> AnalysisRe
 
 
 def request_analysis_detail_run(*, db: Session, actor: User, analysis_id: UUID) -> AnalysisDetailRun:
-    analysis = get_analysis_for_actor(db=db, actor=actor, analysis_id=analysis_id)
+    analysis = get_manageable_analysis_for_actor(db=db, actor=actor, analysis_id=analysis_id)
     if analysis.status != RunStatus.COMPLETED.value:
         raise AnalysisPreconditionError("Analysis is not completed")
     previous_response_id = (analysis.run_parameters or {}).get("gate_challenger_response_id")

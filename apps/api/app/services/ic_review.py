@@ -16,7 +16,7 @@ from app.models.user import User
 from app.schemas.analyses import AnalysisCheckRunPublicErrorRead, AnalysisCheckRunRead, AnalysisCheckStepRead, SourceTrace
 from app.schemas.enums import EntityStatus, Provider, RunStatus, SkillType
 from app.schemas.provider_settings import normalize_available_models
-from app.services.analyses import AnalysisNotFoundError, AnalysisPreconditionError, get_analysis_for_actor
+from app.services.analyses import AnalysisNotFoundError, AnalysisPreconditionError, get_analysis_for_actor, get_manageable_analysis_for_actor
 from app.services.external_sources import SourceUnavailableError
 from app.services.provider_keys import get_shared_provider_key
 from app.services.skill_snapshots import create_skill_source_snapshot
@@ -52,7 +52,7 @@ def create_ic_review_run_for_analysis(
     output_language: str,
     financial_model: UploadFile | None,
 ) -> AnalysisCheckRun:
-    analysis = get_analysis_for_actor(db=db, actor=actor, analysis_id=analysis_id)
+    analysis = get_manageable_analysis_for_actor(db=db, actor=actor, analysis_id=analysis_id)
     if analysis.status != RunStatus.COMPLETED.value:
         raise AnalysisPreconditionError("Analysis is not completed")
 
