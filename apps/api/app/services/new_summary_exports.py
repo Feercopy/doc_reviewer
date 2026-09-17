@@ -31,6 +31,7 @@ from reportlab.platypus import (
 )
 
 from app.models.analysis import Analysis
+from app.services.new_summaries import with_summary_display_stage
 
 
 PDF_MEDIA_TYPE = "application/pdf"
@@ -86,8 +87,8 @@ def build_new_summary_export(*, analysis: Analysis, file_format: str, display_st
     if display_stage is not None:
         report = {
             **report,
-            "ru": {**report["ru"], "stage": display_stage},
-            "en": {**report["en"], "stage": display_stage},
+            "ru": with_summary_display_stage(report["ru"], display_stage),
+            "en": with_summary_display_stage(report["en"], display_stage),
         }
     provenance = _provenance(analysis=analysis, source_revision=report["source_revision"])
     title = _clean_text(report["ru"].get("title") or report["en"].get("title") or "AI Summary")

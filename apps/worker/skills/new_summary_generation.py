@@ -16,6 +16,7 @@ from app.logging import worker_logger
 from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisDetailRun
 from app.models.document import Document
 from app.schemas.enums import Provider, RunStatus
+from app.services.document_type_detector import progress_review_display_stage
 from app.services.new_summaries import (
     NEW_SUMMARY_GENERATION_MODE,
     NEW_SUMMARY_VERSION,
@@ -24,6 +25,7 @@ from app.services.new_summaries import (
     mark_new_summary_progress,
     mark_new_summary_running,
     persist_new_summary_variant,
+    with_summary_display_stage,
 )
 from ic_review.role_runner import apply_ic_review_provider_defaults
 from privacy.model_anonymization import (
@@ -326,6 +328,7 @@ def build_new_summary_source(
     stage = STAGE_LABELS.get(document_type)
     if stage is None:
         raise ValueError(f"unsupported_new_summary_stage:{document_type}")
+    stage = progress_review_display_stage(document.parsed_text, document_type, title=document.title) or stage
     return {
         "initiative_title": _initiative_title(analysis=analysis, document=document),
         "document_stage": stage,
@@ -520,6 +523,7 @@ def _generation_prompt(
             "## Runtime instruction",
             "Собери ровно один bilingual JSON-объект по схеме ниже.",
             "Первая версия в `versions[]` должна быть английской, вторая — русской.",
+            "`document_stage` — текущая стадия инициативы для заголовка и контекста; `document_type` задаёт только набор правил проверки. Если они отличаются, не называй текущую стадию по `document_type`.",
             "Если в источниках нет Traction Summary с числами, не выдумывай значения: используй один период `Not provided`/`Не указано`, одну строку и пустые значения.",
             "Не добавляй Markdown вокруг JSON. Не добавляй пояснения вне JSON.",
             "## JSON Schema",
@@ -683,6 +687,8 @@ def _validated_source_dependent_report(
             generated_payload=version,
         )
         normalized_version["required_details"] = _normalized_required_details(version)
+        if isinstance(expected_stage, str):
+            normalized_version = with_summary_display_stage(normalized_version, expected_stage)
         normalized_versions.append(normalized_version)
     normalized["versions"] = normalized_versions
     validate(instance=normalized, schema=response_schema)

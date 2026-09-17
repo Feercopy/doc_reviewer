@@ -21,6 +21,15 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Distinguish Progress Review presentation from Stream Review 2+ rules in
+  existing and future AI Summaries. When parsed text has no explicit current
+  defense, the case title can supply Progress Review; an explicit conflicting
+  current defense still wins. New bilingual Summary generation saves the
+  presentation stage, and existing API/PDF/Word reads correct only current-stage
+  wording in context, preserving historical mentions and source traces. All
+  251 API tests and 21 summary-worker tests pass; 239 wider worker tests pass
+  with three unrelated local PDF parser failures because `pdfplumber` is absent.
+  `git diff --check` passes; PR/deploy follows CI.
 - [x] Simplify the Financial Analysis presentation for historical and new runs:
   hide its IC Review launch controls and compact verdict/confidence badge, and
   rename the compact result and full-summary download headings. Keep stored

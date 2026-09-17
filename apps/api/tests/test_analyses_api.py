@@ -1539,8 +1539,16 @@ def test_existing_progress_review_displays_correct_stage_without_changing_analys
         "Previous Defense: Stream Review 2+\nCurrent Defense: Progress Review\n"
     )
     document.detected_document_type = DocumentType.STREAM_REVIEW_2_PLUS.value
-    ru_payload = {**_new_summary_payload(language="ru"), "stage": "Stream Review 2+"}
-    en_payload = {**_new_summary_payload(language="en"), "stage": "Stream Review 2+"}
+    ru_payload = {
+        **_new_summary_payload(language="ru"),
+        "stage": "Stream Review 2+",
+        "context": "Ранее был Stream Review 2+. Инициатива находится на стадии Stream Review 2+.",
+    }
+    en_payload = {
+        **_new_summary_payload(language="en"),
+        "stage": "Stream Review 2+",
+        "context": "The stream is at Stream Review 2+ (Progress Review after Gate 3).",
+    }
     analysis = Analysis(
         document_id=document_id,
         user_id=user.id,
@@ -1572,12 +1580,26 @@ def test_existing_progress_review_displays_correct_stage_without_changing_analys
     assert detail.json()["display_stage"] == "Progress Review"
     assert summary.json()["ru"]["payload"]["stage"] == "Progress Review"
     assert summary.json()["en"]["payload"]["stage"] == "Progress Review"
+    assert summary.json()["ru"]["payload"]["context"] == (
+        "Ранее был Stream Review 2+. Инициатива находится на стадии Progress Review."
+    )
+    assert summary.json()["en"]["payload"]["context"] == (
+        "The stream is at Progress Review (after Gate 3)."
+    )
     exported = tmp_path / "progress-summary.docx"
     exported.write_bytes(export.content)
-    assert "Progress Review" in "\n".join(p.text for p in DocxDocument(exported).paragraphs)
+    exported_text = "\n".join(p.text for p in DocxDocument(exported).paragraphs)
+    assert "Инициатива находится на стадии Progress Review" in exported_text
+    assert "The stream is at Progress Review (after Gate 3)" in exported_text
     db_session.refresh(analysis)
     assert analysis.structured_output["result"]["new_summary"]["ru"]["payload"]["stage"] == "Stream Review 2+"
     assert analysis.run_parameters["document_type"] == DocumentType.STREAM_REVIEW_2_PLUS.value
+
+    document.title = "Auction - Progress Review"
+    document.parsed_text = "[Page 1]\nAuction InvCom May'26 [Eng]\nCase properties & validation\n"
+    db_session.commit()
+    assert client.get(f"/documents/{document_id}").json()["display_stage"] == "Progress Review"
+    assert client.get(f"/analyses/{analysis.id}/new-summary").json()["ru"]["payload"]["stage"] == "Progress Review"
 
     document.parsed_text = (
         "Initiative Stream Review 2+\nExecutive Summary\n"

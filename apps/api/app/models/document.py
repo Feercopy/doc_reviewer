@@ -52,4 +52,4 @@ class Document(TimestampMixin, Base):
     @property
     def display_stage(self) -> str | None:
         effective_type = self.manual_document_type or self.detected_document_type
-        return progress_review_display_stage(self.parsed_text, effective_type)
+        return progress_review_display_stage(self.parsed_text, effective_type, title=self.title)

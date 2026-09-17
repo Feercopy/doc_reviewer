@@ -230,6 +230,61 @@ def test_new_summary_variants_are_generated_from_repository_skill(tmp_path, monk
         get_settings.cache_clear()
 
 
+def test_progress_review_summary_is_saved_with_presentation_stage_and_current_stage_context(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
+    get_settings.cache_clear()
+    db = _session()
+    try:
+        analysis, check_run = _seed(db)
+        document = db.get(Document, analysis.document_id)
+        document.title = "Auction - Progress Review"
+        document.parsed_text = "[Page 1]\nAuction InvCom May'26 [Eng]\nCase properties & validation\n"
+        document.manual_document_type = DocumentType.STREAM_REVIEW_2_PLUS.value
+        output = dict(analysis.structured_output)
+        output["result"] = {
+            **output["result"],
+            "new_summary": {
+                "version": 2,
+                "generation_mode": "new_summary_skill",
+                "source_revision": str(check_run.id),
+                "ru": {"status": "queued", "payload": None},
+                "en": {"status": "queued", "payload": None},
+            },
+        }
+        analysis.structured_output = output
+        payload = _new_summary_report_payload(
+            ru_context="Инициатива находится на стадии Stream Review 2+.",
+            en_context="The initiative is at Stream Review 2+.",
+            stage="Stream Review 2+",
+        )
+        check_run.run_parameters = {
+            "new_summary_mock_provider_result": {
+                "structured_text": json.dumps(payload, ensure_ascii=False),
+                "raw_output": "raw bilingual result",
+                "input_tokens": 11,
+                "output_tokens": 22,
+                "latency_ms": 33,
+            }
+        }
+        db.commit()
+
+        source = new_summary_generation.build_new_summary_source(session=db, analysis=analysis, check_run=check_run)
+        assert source["document_type"] == DocumentType.STREAM_REVIEW_2_PLUS.value
+        assert source["document_stage"] == "Progress Review"
+        run_summary_localizations(str(analysis.id), db=db)
+
+        db.refresh(analysis)
+        state = analysis.structured_output["result"]["new_summary"]
+        assert state["ru"]["status"] == state["en"]["status"] == "completed", state
+        assert state["ru"]["payload"]["stage"] == "Progress Review"
+        assert state["en"]["payload"]["stage"] == "Progress Review"
+        assert state["ru"]["payload"]["context"] == "Инициатива находится на стадии Progress Review."
+        assert state["en"]["payload"]["context"] == "The initiative is at Progress Review."
+    finally:
+        db.close()
+        get_settings.cache_clear()
+
+
 def test_new_summary_generation_tolerates_optional_sections_and_stray_appendices(tmp_path, monkeypatch):
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "storage"))
     get_settings.cache_clear()

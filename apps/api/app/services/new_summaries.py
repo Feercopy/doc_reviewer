@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
@@ -32,6 +33,16 @@ NEW_SUMMARY_PROGRESS_PERCENTS = {
     "failed": 100,
     "cancelled": 100,
 }
+_CURRENT_PROGRESS_REVIEW_PHRASES = (
+    re.compile(
+        r"((?:инициатива|стрим)\s+находится\s+на\s+стадии\s+)Stream Review 2\+",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"((?:the\s+)?(?:initiative|stream)\s+is\s+(?:currently\s+)?at\s+(?:the\s+)?(?:stage\s+)?)Stream Review 2\+",
+        re.IGNORECASE,
+    ),
+)
 
 
 def request_new_summary(
@@ -66,8 +77,25 @@ def with_display_stage(response: NewSummaryRead, display_stage: str | None) -> N
         variant = getattr(response, language)
         payload = variant.payload
         if isinstance(payload, dict):
-            variants[language] = variant.model_copy(update={"payload": {**payload, "stage": display_stage}})
+            variants[language] = variant.model_copy(update={"payload": with_summary_display_stage(payload, display_stage)})
     return response.model_copy(update=variants) if variants else response
+
+
+def with_summary_display_stage(payload: dict[str, Any], display_stage: str) -> dict[str, Any]:
+    result = {**payload, "stage": display_stage}
+    if display_stage != "Progress Review" or not isinstance(payload.get("context"), str):
+        return result
+    context = payload["context"]
+    for pattern in _CURRENT_PROGRESS_REVIEW_PHRASES:
+        context = pattern.sub(lambda match: f"{match.group(1)}Progress Review", context)
+    context = re.sub(
+        r"Progress Review\s*\(\s*Progress Review\s+after\b",
+        "Progress Review (after",
+        context,
+        flags=re.IGNORECASE,
+    )
+    result["context"] = context
+    return result
 
 
 def prepare_new_summary_for_check_run(

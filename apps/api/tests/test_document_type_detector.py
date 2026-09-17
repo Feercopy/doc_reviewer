@@ -173,6 +173,21 @@ Current Defense: Stream Review 2+
     assert progress_review_display_stage(None, DocumentType.STREAM_REVIEW_2_PLUS.value) is None
 
 
+def test_progress_review_display_stage_uses_case_title_only_without_a_conflicting_document_stage():
+    auction_text = "[Page 1]\nAuction InvCom May'26 [Eng]\nCase properties & validation\n"
+    stream_text = "Executive Summary\nCurrent Defense: Stream Review 2+\n"
+
+    assert progress_review_display_stage(
+        auction_text, DocumentType.STREAM_REVIEW_2_PLUS.value, title="Auction - Progress Review"
+    ) == "Progress Review"
+    assert progress_review_display_stage(
+        stream_text, DocumentType.STREAM_REVIEW_2_PLUS.value, title="Auction - Progress Review"
+    ) is None
+    assert progress_review_display_stage(
+        auction_text, DocumentType.GATE_3.value, title="Auction - Progress Review"
+    ) is None
+
+
 def test_stream_review_number_with_hash_in_title():
     result = detect_document_type("Initiative - Stream Review #1\nPrevious Gate 2 results")
 
