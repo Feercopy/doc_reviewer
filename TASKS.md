@@ -21,6 +21,12 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] Simplify the Financial Analysis presentation for historical and new runs:
+  hide its IC Review launch controls and compact verdict/confidence badge, and
+  rename the compact result and full-summary download headings. Keep stored
+  results, scoring, provider calls, and PDF artifacts unchanged. All 159 web
+  tests and `git diff --check` pass. TypeScript reports four pre-existing
+  test-fixture errors in untouched files; production PR/deploy follows CI.
 - [~] Share the 17 previously reviewed initiative cases with explicitly matched
   directorate users without changing document ownership. Added admin-only,
   idempotent analysis-to-login grants, a document-access table/migration, and

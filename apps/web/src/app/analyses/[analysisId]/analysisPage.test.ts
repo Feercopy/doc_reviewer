@@ -233,7 +233,7 @@ describe("analysis result page", () => {
     expect(pageSource).toContain("Only .xlsx financial model files are supported.");
   });
 
-  it("keeps IC review tab compact, relaunchable after failure, and shows the IC Review PDF download", () => {
+  it("keeps the Financial Analysis tab compact without launch controls or a verdict badge", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const icPanelSource = pageSource.slice(
       pageSource.indexOf("function IcReviewPanel"),
@@ -250,12 +250,15 @@ describe("analysis result page", () => {
     expect(icPanelSource).toContain('{run.status === "completed" ? <IcReviewPdfDownload run={run} /> : null}');
     expect(icPanelSource).toContain('"artifact:legacy_report_pdf"');
     expect(icPanelSource).not.toContain('"artifact:legacy_report_markdown"');
-    expect(icPanelSource).toContain("IC Review PDF");
+    expect(icPanelSource).toContain("Краткое Summary Financial Analysis");
+    expect(icPanelSource).toContain("Скачать полное Summary");
     expect(icPanelSource).toContain("Скачать PDF");
     expect(icPanelSource).not.toContain("Скачать MD");
     expect(icPanelSource).toContain('const setupControlsDisabled = analysis.status !== "completed" || isLaunching || runIsActive');
     expect(icPanelSource).toContain("const launchDisabled = launchAvailability.disabled || runIsActive");
-    expect(icPanelSource).toContain("{!runIsActive && canLaunch ? (");
+    expect(icPanelSource).toContain("{showIcReviewLaunchControls && !runIsActive && canLaunch ? (");
+    expect(pageSource).toContain("const showIcReviewLaunchControls = false;");
+    expect(icPanelSource.slice(icPanelSource.indexOf("function IcReviewCompletedResult"))).not.toContain("display.confidence");
     expect(icPanelSource).toContain('className="analysis-ic-launch"');
     expect(icPanelSource).not.toContain('className="analysis-secondary-action analysis-ic-launch"');
     expect(icPanelSource).not.toContain("<span>Provider</span>");
