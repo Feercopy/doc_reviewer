@@ -21,6 +21,12 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] Prioritize the current defense stage from the parsed document's
+  Executive Summary row, then its title, before falling back to full-text
+  heuristics. Progress Review uses Stream Review 2+ rules without adding a new
+  persisted document type; explanations retain the source stage. Reproduced
+  Cars TRX, GenAI, Auction, and OFP locally without committing source documents.
+  Focused API/worker upload and parse tests pass (53 tests). PR pending.
 - [x] Add AI Summary PDF and Word downloads backed by the stored
   `new_summary` payload and formatted with the current Stash `New-summary`
   rules. The API now exposes owner-authorized `/analyses/{id}/new-summary/export/pdf`
