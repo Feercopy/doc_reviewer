@@ -93,6 +93,7 @@ const analysisTabs: Array<{ id: AnalysisTopTab; label: string }> = [
 ];
 
 const outputLanguageOptions: readonly OutputLanguage[] = ["ru", "en"];
+const showIcReviewLaunchControls = false;
 
 const feedbackRatings = [
   { value: 1, label: "Not useful" },
@@ -1949,12 +1950,12 @@ function IcReviewPanel({
     <section className="analysis-card analysis-ic-review stack">
       <div className="analysis-section-heading">
         <div>
-          <h2>IC review</h2>
+          <h2>Краткое Summary Financial Analysis</h2>
           {!run ? <p>{IC_REVIEW_EMPTY_STATE}</p> : null}
         </div>
       </div>
 
-      {!runIsActive && canLaunch ? (
+      {showIcReviewLaunchControls && !runIsActive && canLaunch ? (
         <>
           <div className="analysis-ic-review-form" aria-label="IC review launch controls">
             <label className="analysis-ic-field">
@@ -2116,8 +2117,8 @@ function IcReviewPdfDownload({ run }: { run: AnalysisCheckRunRecord }) {
   }
 
   return (
-    <section className="analysis-ic-section analysis-ic-downloads" aria-label="IC review PDF download">
-      <h3>IC Review PDF</h3>
+    <section className="analysis-ic-section analysis-ic-downloads" aria-label="Скачать полное Summary">
+      <h3>Скачать полное Summary</h3>
       <div className="analysis-ic-download-actions">
         <a className="analysis-ic-download" download href={icReviewArtifactUrl(run.id, "artifact:legacy_report_pdf")}>
           Скачать PDF
@@ -2130,10 +2131,6 @@ function IcReviewPdfDownload({ run }: { run: AnalysisCheckRunRecord }) {
 function IcReviewCompletedResult({ display }: { display: ReturnType<typeof buildIcReviewCompactDisplay> }) {
   return (
     <div className="analysis-ic-result stack">
-      <div className="analysis-ic-verdict">
-        <span className={`analysis-verdict analysis-verdict--${icReviewVerdictTone(display.verdict)}`}>{display.verdict}</span>
-        <span>{display.confidence}</span>
-      </div>
       <section className="analysis-short-summary">
         <h3>Executive brief</h3>
         <p>{display.executiveBrief}</p>
