@@ -7,6 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { createUser, deleteUser, listUsers, patchUser, resetPassword } from "@/lib/api/admin-users";
 import { me } from "@/lib/api/auth";
+import { grantDocumentAccess, type DocumentAccessGrantResult } from "@/lib/api/document-access";
 import type { Role, User, UserStatus } from "@/lib/api/types";
 
 const roles: Role[] = ["user", "annotator", "admin"];
@@ -24,6 +25,9 @@ export default function AdminUsersPage() {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("user");
   const [status, setStatus] = useState<UserStatus>("active");
+  const [accessLines, setAccessLines] = useState("");
+  const [accessPending, setAccessPending] = useState(false);
+  const [accessResult, setAccessResult] = useState<DocumentAccessGrantResult | null>(null);
 
   async function refresh() {
     const user = await me();
@@ -105,6 +109,28 @@ export default function AdminUsersPage() {
     }
   }
 
+  async function submitAccess(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setAccessResult(null);
+    setAccessPending(true);
+    try {
+      const items = accessLines.trim().split("\n").map((line) => {
+        const [analysis_id, loginsText] = line.trim().split(/\s+/, 2);
+        const logins = (loginsText ?? "").split(",").map((login) => login.trim()).filter(Boolean);
+        if (!/^[0-9a-f-]{36}$/i.test(analysis_id) || logins.length === 0) {
+          throw new Error("Use one analysis ID and comma-separated logins per line");
+        }
+        return { analysis_id, logins };
+      });
+      setAccessResult(await grantDocumentAccess(items));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to grant document access");
+    } finally {
+      setAccessPending(false);
+    }
+  }
+
   if (currentUser && currentUser.role !== "admin") {
     return (
       <AppShell>
@@ -172,6 +198,21 @@ export default function AdminUsersPage() {
               Create user
             </button>
           </div>
+        </form>
+
+        <form className="panel stack" onSubmit={submitAccess}>
+          <h2>Share analysis results</h2>
+          <label>
+            Analysis ID and user logins, one case per line
+            <textarea
+              rows={5}
+              value={accessLines}
+              onChange={(event) => setAccessLines(event.target.value)}
+              placeholder="analysis-uuid login1,login2"
+            />
+          </label>
+          <div><button disabled={accessPending || !accessLines.trim()} type="submit">Grant read access</button></div>
+          {accessResult ? <p className="muted">{accessResult.analyses} analyses; {accessResult.grants_created} new grants; {accessResult.grants_existing} existing.</p> : null}
         </form>
 
         <section className="panel stack">

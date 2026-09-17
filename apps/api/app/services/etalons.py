@@ -23,7 +23,7 @@ from app.schemas.enums import (
     Verdict,
 )
 from app.schemas.etalons import EtalonDraftCreate, EtalonPayload, EtalonUpdate
-from app.services.analyses import get_analysis_for_actor
+from app.services.analyses import get_manageable_analysis_for_actor
 from app.services.audit import record_audit
 from app.services.documents import create_document_from_local_file, create_document_from_upload
 from app.services.gate2_benchmark_cases import (
@@ -65,7 +65,7 @@ def create_etalon_draft_from_analysis(
     analysis_id: UUID,
     payload: EtalonDraftCreate,
 ) -> Etalon:
-    analysis = get_analysis_for_actor(db=db, actor=actor, analysis_id=analysis_id)
+    analysis = get_manageable_analysis_for_actor(db=db, actor=actor, analysis_id=analysis_id)
     if analysis.status != RunStatus.COMPLETED.value:
         raise EtalonPreconditionError("Analysis is not completed")
     if payload.status == EtalonStatus.ARCHIVED:

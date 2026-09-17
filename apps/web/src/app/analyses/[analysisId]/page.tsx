@@ -7,6 +7,8 @@ import { AppShell } from "@/components/AppShell";
 import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { NewSummaryReportView } from "@/components/new-summary/NewSummaryReport";
 import { StatusBadge } from "@/components/StatusBadge";
+import { me } from "@/lib/api/auth";
+import type { User } from "@/lib/api/types";
 import {
   deleteAnalysis,
   ensureNewSummary,
@@ -106,6 +108,7 @@ const ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY = "analysis_chain_cancel_requested_
 type FeedbackRating = (typeof feedbackRatings)[number]["value"];
 
 export default function AnalysisDetailPage() {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const params = useParams<{ analysisId: string }>();
   const [analysis, setAnalysis] = useState<AnalysisRecord | null>(null);
   const [analysisDocument, setAnalysisDocument] = useState<DocumentRecord | null>(null);
@@ -131,6 +134,10 @@ export default function AnalysisDetailPage() {
   const [newSummaryError, setNewSummaryError] = useState("");
 
   useEffect(() => {
+    me().then(setCurrentUser).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     let ignore = false;
     setAnalysis(null);
     setError("");
@@ -153,7 +160,7 @@ export default function AnalysisDetailPage() {
   }, [params.analysisId]);
 
   useEffect(() => {
-    if (analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed") {
+    if (analysis?.status !== "completed" || analysis.ic_review_run?.status !== "completed" || !currentUser || !analysisDocument) {
       setNewSummary(null);
       setNewSummaryError("");
       return;
@@ -186,14 +193,14 @@ export default function AnalysisDetailPage() {
       }
     }
 
-    void refreshNewSummary(true);
+    void refreshNewSummary(currentUser.role === "admin" || currentUser.id === analysisDocument.owner_id);
     return () => {
       cancelled = true;
       if (timer !== undefined) {
         window.clearTimeout(timer);
       }
     };
-  }, [analysis?.id, analysis?.status, analysis?.ic_review_run?.id, analysis?.ic_review_run?.status, params.analysisId]);
+  }, [analysis?.id, analysis?.status, analysis?.ic_review_run?.id, analysis?.ic_review_run?.status, analysisDocument, currentUser, params.analysisId]);
 
   useEffect(() => {
     let ignore = false;
@@ -312,6 +319,7 @@ export default function AnalysisDetailPage() {
     () => providerModels.find((item) => item.provider === icReviewProvider) ?? null,
     [icReviewProvider, providerModels],
   );
+  const canManageAnalysis = Boolean(currentUser && analysisDocument && (currentUser.role === "admin" || currentUser.id === analysisDocument.owner_id));
 
   useEffect(() => {
     if (configuredProviderModels.length === 0 || configuredProviderModels.some((item) => item.provider === icReviewProvider)) {
@@ -475,14 +483,14 @@ export default function AnalysisDetailPage() {
                     <button className="analysis-secondary-action analysis-run-details-action" type="button" onClick={() => setRunDetailsOpen(true)}>
                       Run details
                     </button>
-                    <button
+                    {canManageAnalysis ? <button
                       className="analysis-danger-action"
                       disabled={isDeletingAnalysis}
                       type="button"
                       onClick={deleteCurrentAnalysis}
                     >
                       {isDeletingAnalysis ? "Deleting" : "Delete"}
-                    </button>
+                    </button> : null}
                   </div>
                 </div>
                 <div className="analysis-chip-row">
@@ -534,6 +542,7 @@ export default function AnalysisDetailPage() {
                     workbookInputKey={icReviewWorkbookInputKey}
                     workbookError={icReviewWorkbookError}
                     isLaunching={isLaunchingIcReview}
+                    canLaunch={canManageAnalysis}
                     onChangeModel={changeIcReviewModel}
                     onChangeOutputLanguage={setIcReviewOutputLanguage}
                     onChangeWorkbook={changeIcReviewWorkbook}
@@ -1897,6 +1906,7 @@ function IcReviewPanel({
   workbookInputKey,
   workbookError,
   isLaunching,
+  canLaunch,
   onChangeModel,
   onChangeOutputLanguage,
   onChangeWorkbook,
@@ -1912,6 +1922,7 @@ function IcReviewPanel({
   workbookInputKey: number;
   workbookError: string;
   isLaunching: boolean;
+  canLaunch: boolean;
   onChangeModel: (model: string) => void;
   onChangeOutputLanguage: (language: OutputLanguage) => void;
   onChangeWorkbook: (file: File | null) => void;
@@ -1943,7 +1954,7 @@ function IcReviewPanel({
         </div>
       </div>
 
-      {!runIsActive ? (
+      {!runIsActive && canLaunch ? (
         <>
           <div className="analysis-ic-review-form" aria-label="IC review launch controls">
             <label className="analysis-ic-field">

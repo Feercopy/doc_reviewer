@@ -50,6 +50,21 @@ class AdminDocumentsListResponse(BaseModel):
     documents: list[AdminDocumentRead]
 
 
+class DocumentAccessGrantItem(BaseModel):
+    analysis_id: UUID
+    logins: list[str]
+
+
+class DocumentAccessGrantBatch(BaseModel):
+    items: list[DocumentAccessGrantItem]
+
+
+class DocumentAccessGrantResult(BaseModel):
+    analyses: int
+    grants_created: int
+    grants_existing: int
+
+
 class AdminAnalysisRead(BaseModel):
     id: UUID
     document_id: UUID

@@ -5,6 +5,7 @@ from app.models.analysis import Analysis, AnalysisCheckRun, AnalysisCheckStep, A
 from app.models.audit_log import AuditLog  # noqa: F401
 from app.models.benchmark import Benchmark  # noqa: F401
 from app.models.document import Document  # noqa: F401
+from app.models.document_access import DocumentAccess  # noqa: F401
 from app.models.etalon import Etalon  # noqa: F401
 from app.models.feedback import Feedback  # noqa: F401
 from app.models.provider_key import ProviderKey  # noqa: F401

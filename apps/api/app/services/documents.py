@@ -7,13 +7,13 @@ from fastapi import UploadFile
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.authz.policies import can_read_document
 from app.models.analysis import Analysis
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus, Role
 from app.services.audit import record_audit
+from app.services.document_access import can_manage_document, can_view_document, readable_document_clause
 from app.storage.local import LocalDocumentStorage, StoredFileTooLargeError, safe_filename
 
 
@@ -302,7 +302,7 @@ def list_documents_for_actor(*, db: Session, actor: User) -> list[Document]:
         )
     )
     if actor.role != Role.ADMIN.value:
-        statement = statement.where(Document.owner_id == actor.id)
+        statement = statement.where(readable_document_clause(actor))
     statement = statement.order_by(Document.created_at.desc())
     documents_by_id = {document.id: document for document in db.execute(statement).scalars().all()}
     for document in _list_active_analyzed_documents_for_actor(db=db, actor=actor):
@@ -327,7 +327,7 @@ def _list_active_analyzed_documents_for_actor(*, db: Session, actor: User) -> li
         )
     )
     if actor.role != Role.ADMIN.value:
-        document_ids = document_ids.where(Document.owner_id == actor.id)
+        document_ids = document_ids.where(readable_document_clause(actor))
 
     statement = (
         select(Document)
@@ -364,7 +364,14 @@ def get_document_for_actor(*, db: Session, actor: User, document_id: UUID) -> Do
         .options(selectinload(Document.linked_fin_summary_document))
         .where(Document.id == document_id)
     ).scalar_one_or_none()
-    if document is None or document.status != EntityStatus.ACTIVE.value or not can_read_document(actor, document):
+    if document is None or document.status != EntityStatus.ACTIVE.value or not can_view_document(db=db, actor=actor, document=document):
+        raise DocumentNotFoundError("Document not found")
+    return document
+
+
+def get_manageable_document_for_actor(*, db: Session, actor: User, document_id: UUID) -> Document:
+    document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
+    if not can_manage_document(actor=actor, document=document):
         raise DocumentNotFoundError("Document not found")
     return document
 
@@ -376,7 +383,7 @@ def update_manual_document_type(
     document_id: UUID,
     manual_document_type: DocumentType | None,
 ) -> Document:
-    document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
+    document = get_manageable_document_for_actor(db=db, actor=actor, document_id=document_id)
     previous = document.manual_document_type
     document.manual_document_type = manual_document_type.value if manual_document_type else None
     record_audit(
@@ -393,7 +400,7 @@ def update_manual_document_type(
 
 
 def update_document_title(*, db: Session, actor: User, document_id: UUID, title: str) -> Document:
-    document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
+    document = get_manageable_document_for_actor(db=db, actor=actor, document_id=document_id)
     previous = document.title
     document.title = title
     record_audit(
@@ -410,7 +417,7 @@ def update_document_title(*, db: Session, actor: User, document_id: UUID, title:
 
 
 def delete_document_for_actor(*, db: Session, actor: User, document_id: UUID) -> None:
-    document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
+    document = get_manageable_document_for_actor(db=db, actor=actor, document_id=document_id)
     previous_status = document.status
     document.status = EntityStatus.DELETED.value
     linked_fin_summary_id = document.linked_fin_summary_document_id
@@ -460,7 +467,7 @@ def attach_fin_summary_document(
 
 
 def reset_document_for_reparse(*, db: Session, actor: User, document_id: UUID) -> Document:
-    document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
+    document = get_manageable_document_for_actor(db=db, actor=actor, document_id=document_id)
     if document.document_role == DocumentRole.FIN_SUMMARY.value:
         raise DocumentReparseNotSupportedError("Fin Summary workbooks do not use document parsing")
     document.parse_status = DocumentParseStatus.QUEUED.value

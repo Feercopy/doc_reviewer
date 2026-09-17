@@ -10,11 +10,12 @@ from app.db.session import get_db
 from app.dependencies.auth import require_admin
 from app.models.analysis import Analysis
 from app.models.document import Document
+from app.models.document_access import DocumentAccess
 from app.models.user import User
 from app.schemas.analyses import AnalysisStatusRead
-from app.schemas.admin import AdminDocumentRead, AdminDocumentsListResponse
+from app.schemas.admin import AdminDocumentRead, AdminDocumentsListResponse, DocumentAccessGrantBatch, DocumentAccessGrantResult
 from app.schemas.documents import DocumentRead, DocumentsListResponse
-from app.schemas.enums import DocumentType, EntityStatus
+from app.schemas.enums import DocumentType, EntityStatus, UserStatus
 from app.services.analyses import (
     ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY,
     AnalysisStatusSource,
@@ -25,6 +26,60 @@ from app.services.audit import record_audit
 from app.services.documents import DocumentNotFoundError, get_document_for_actor
 
 router = APIRouter(prefix="/admin/documents", tags=["admin-documents"])
+
+
+@router.post("/access/batch", response_model=DocumentAccessGrantResult)
+def grant_document_access(
+    payload: DocumentAccessGrantBatch,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> DocumentAccessGrantResult:
+    if not payload.items or len(payload.items) > 100:
+        raise HTTPException(status_code=422, detail="Provide 1 to 100 analyses")
+    analysis_ids = [item.analysis_id for item in payload.items]
+    if len(set(analysis_ids)) != len(analysis_ids):
+        raise HTTPException(status_code=422, detail="Duplicate analysis ID")
+    requested_logins = {login.strip().lower() for item in payload.items for login in item.logins}
+    if not requested_logins or "" in requested_logins:
+        raise HTTPException(status_code=422, detail="Provide valid user logins")
+
+    analyses = {item.id: item for item in db.scalars(select(Analysis).where(Analysis.id.in_(analysis_ids), Analysis.deleted_at.is_(None)))}
+    users = {item.login.lower(): item for item in db.scalars(select(User).where(User.status == UserStatus.ACTIVE.value)) if item.login.lower() in requested_logins}
+    document_ids = {analysis.document_id for analysis in analyses.values()}
+    documents = {item.id: item for item in db.scalars(select(Document).where(Document.id.in_(document_ids)))}
+    if len(analyses) != len(analysis_ids) or len(users) != len(requested_logins) or len(documents) != len(document_ids):
+        raise HTTPException(status_code=422, detail="Analysis, active user, or document not found")
+    if any(document.status != EntityStatus.ACTIVE.value for document in documents.values()):
+        raise HTTPException(status_code=422, detail="Document is not active")
+    linked_ids = {document.linked_fin_summary_document_id for document in documents.values() if document.linked_fin_summary_document_id}
+    linked_documents = {item.id: item for item in db.scalars(select(Document).where(Document.id.in_(linked_ids)))}
+    if any(
+        linked_documents.get(linked_id) is None
+        or linked_documents[linked_id].status != EntityStatus.ACTIVE.value
+        or linked_documents[linked_id].owner_id != document.owner_id
+        for document in documents.values()
+        if (linked_id := document.linked_fin_summary_document_id) is not None
+    ):
+        raise HTTPException(status_code=422, detail="Linked Fin Summary is invalid")
+
+    requested_pairs = set()
+    for item in payload.items:
+        document = documents[analyses[item.analysis_id].document_id]
+        for login in item.logins:
+            user = users[login.strip().lower()]
+            if user.id != document.owner_id:
+                requested_pairs.add((document.id, user.id))
+                if document.linked_fin_summary_document_id is not None:
+                    requested_pairs.add((document.linked_fin_summary_document_id, user.id))
+    if not requested_pairs:
+        return DocumentAccessGrantResult(analyses=len(payload.items), grants_created=0, grants_existing=0)
+    existing = set(db.execute(select(DocumentAccess.document_id, DocumentAccess.user_id).where(DocumentAccess.document_id.in_({pair[0] for pair in requested_pairs}))).all())
+    created = requested_pairs - existing
+    for document_id, user_id in created:
+        db.add(DocumentAccess(document_id=document_id, user_id=user_id, granted_by_id=admin.id))
+        record_audit(db=db, actor_id=admin.id, action="document.access_granted", entity_type="document", entity_id=document_id, metadata={"user_id": str(user_id)})
+    db.commit()
+    return DocumentAccessGrantResult(analyses=len(payload.items), grants_created=len(created), grants_existing=len(requested_pairs & existing))
 
 
 @router.get("", response_model=AdminDocumentsListResponse)
