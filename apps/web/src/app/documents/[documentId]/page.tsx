@@ -930,14 +930,14 @@ export default function DocumentDetailPage() {
                         </>
                       ) : null}
                     </div>
-                    <button
+                    {canManageDocument ? <button
                       className="gc-stop-analysis"
                       disabled={cancellingAnalysisId === pendingFullAnalysis.id}
                       type="button"
                       onClick={() => stopAnalysis(pendingFullAnalysis)}
                     >
                       {cancellingAnalysisId === pendingFullAnalysis.id ? "Stopping..." : "Stop Analysis"}
-                    </button>
+                    </button> : null}
                   </div>
                 ) : null}
 
