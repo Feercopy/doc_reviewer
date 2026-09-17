@@ -25,7 +25,7 @@ import {
   type Provider,
 } from "@/lib/api/documents";
 import { formatDate } from "@/lib/format";
-import { formatDocumentTypeLabel, getDocumentParsePresentation } from "./documentsDisplay";
+import { formatDocumentStage, formatDocumentTypeLabel, getDocumentParsePresentation } from "./documentsDisplay";
 
 type ParseFilter = "all" | ParseStatus;
 
@@ -45,7 +45,7 @@ const parseFilters: { label: string; value: ParseFilter }[] = [
 ];
 
 function getEffectiveType(document: DocumentRecord): string {
-  return formatDocumentTypeLabel(document.manual_document_type ?? document.detected_document_type);
+  return formatDocumentStage(document);
 }
 
 function formatBytes(value: number): string {
@@ -302,6 +302,7 @@ function adminAnalysisToRecoveredDocument(analysis: AdminAnalysis): DocumentReco
     document_type_confidence: null,
     document_type_explanation: null,
     manual_document_type: null,
+    display_stage: null,
     document_role: "primary",
     parse_error: null,
     status: "active",

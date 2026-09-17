@@ -58,6 +58,18 @@ def request_new_summary(
     return response, should_enqueue
 
 
+def with_display_stage(response: NewSummaryRead, display_stage: str | None) -> NewSummaryRead:
+    if display_stage is None:
+        return response
+    variants = {}
+    for language in ("ru", "en"):
+        variant = getattr(response, language)
+        payload = variant.payload
+        if isinstance(payload, dict):
+            variants[language] = variant.model_copy(update={"payload": {**payload, "stage": display_stage}})
+    return response.model_copy(update=variants) if variants else response
+
+
 def prepare_new_summary_for_check_run(
     *,
     analysis: Analysis,

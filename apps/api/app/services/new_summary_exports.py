@@ -77,12 +77,18 @@ class NewSummaryExportProvenance:
     source_revision: str | None
 
 
-def build_new_summary_export(*, analysis: Analysis, file_format: str) -> NewSummaryExport:
+def build_new_summary_export(*, analysis: Analysis, file_format: str, display_stage: str | None = None) -> NewSummaryExport:
     normalized_format = file_format.lower()
     if normalized_format not in EXPORT_FORMATS:
         raise UnsupportedNewSummaryExportFormatError(file_format)
 
     report = _read_completed_report(analysis)
+    if display_stage is not None:
+        report = {
+            **report,
+            "ru": {**report["ru"], "stage": display_stage},
+            "en": {**report["en"], "stage": display_stage},
+        }
     provenance = _provenance(analysis=analysis, source_revision=report["source_revision"])
     title = _clean_text(report["ru"].get("title") or report["en"].get("title") or "AI Summary")
     filename = f"{_safe_filename(title)}.{normalized_format}"

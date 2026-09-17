@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDocumentTypeLabel, getDocumentFileKind, getDocumentParsePresentation } from "./documentsDisplay";
+import { formatDocumentStage, formatDocumentTypeLabel, getDocumentFileKind, getDocumentParsePresentation } from "./documentsDisplay";
 
 describe("documents display helpers", () => {
   it.each([
@@ -30,5 +30,15 @@ describe("documents display helpers", () => {
     [null, "-"],
   ] as const)("formats %s as a reader-facing document type", (value, expected) => {
     expect(formatDocumentTypeLabel(value)).toBe(expected);
+  });
+
+  it("shows Progress Review only when the API identifies the current defense", () => {
+    const streamDocument = {
+      display_stage: null,
+      manual_document_type: "stream_review_2_plus" as const,
+      detected_document_type: "stream_review_2_plus" as const,
+    };
+    expect(formatDocumentStage(streamDocument)).toBe("Stream review 2 plus");
+    expect(formatDocumentStage({ ...streamDocument, display_stage: "Progress Review" })).toBe("Progress Review");
   });
 });
