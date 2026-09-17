@@ -147,6 +147,18 @@ def detect_document_type(text: str) -> DocumentTypeDetection:
     )
 
 
+def progress_review_display_stage(text: str | None, effective_type: str) -> str | None:
+    """Preserve Stream Review 2+ rules while showing an explicit current Progress Review."""
+    if not text or effective_type != DocumentType.STREAM_REVIEW_2_PLUS.value:
+        return None
+    stage = _current_defense_stage(text)
+    if stage is None:
+        stage = _title_stage(text[:2000])
+    if stage is not None and stage[1] == "Progress Review":
+        return "Progress Review"
+    return None
+
+
 def _current_defense_stage(text: str) -> tuple[DocumentType, str] | None:
     lines = text[:16000].replace("\xa0", " ").splitlines()
     last_summary_index: int | None = None

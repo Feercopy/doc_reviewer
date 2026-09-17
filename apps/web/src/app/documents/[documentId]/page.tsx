@@ -102,7 +102,7 @@ function buildWorkflowSteps(document: DocumentRecord, analyses: AnalysisStatusRe
     },
     {
       label: "Ready",
-      note: parseDone ? formatLabel(document.manual_document_type ?? document.detected_document_type) : "Waiting on parser",
+      note: parseDone ? document.display_stage ?? formatLabel(document.manual_document_type ?? document.detected_document_type) : "Waiting on parser",
       state: parseDone ? "done" : "idle",
     },
     {
@@ -476,6 +476,7 @@ export default function DocumentDetailPage() {
             detected_document_type: progress.detected_document_type,
             document_type_confidence: progress.document_type_confidence,
             document_type_explanation: progress.document_type_explanation,
+            display_stage: progress.display_stage,
             manual_document_type: progress.manual_document_type,
             latest_analysis: progress.analyses[0] ?? null,
             updated_at: progress.updated_at,

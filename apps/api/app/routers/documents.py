@@ -191,6 +191,7 @@ def get_document_progress(
         document_type_confidence=document.document_type_confidence,
         document_type_explanation=document.document_type_explanation,
         manual_document_type=document.manual_document_type,
+        display_stage=document.display_stage,
         updated_at=document.updated_at,
         analyses=analyses,
     )

@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from app.schemas.enums import DocumentType
-from app.services.document_type_detector import detect_document_type
+from app.services.document_type_detector import detect_document_type, progress_review_display_stage
 
 
 def test_document_type_enum_matches_gate_challenger_stages():
@@ -153,6 +153,24 @@ def test_progress_review_in_title_uses_stream_review_2_plus_rules():
 
     assert result.document_type == DocumentType.STREAM_REVIEW_2_PLUS
     assert result.explanation.startswith("Document title: Progress Review")
+
+
+def test_progress_review_display_stage_uses_current_defense_not_historical_mentions():
+    progress_text = """Initiative Stream Review 2+
+Executive Summary
+Previous Defense: Stream Review 2+
+Current Defense: Progress Review
+"""
+    stream_text = """Initiative Stream Review 2+
+Executive Summary
+Previous Defense: Progress Review
+Current Defense: Stream Review 2+
+"""
+
+    assert progress_review_display_stage(progress_text, DocumentType.STREAM_REVIEW_2_PLUS.value) == "Progress Review"
+    assert progress_review_display_stage(stream_text, DocumentType.STREAM_REVIEW_2_PLUS.value) is None
+    assert progress_review_display_stage(progress_text, DocumentType.GATE_2.value) is None
+    assert progress_review_display_stage(None, DocumentType.STREAM_REVIEW_2_PLUS.value) is None
 
 
 def test_stream_review_number_with_hash_in_title():

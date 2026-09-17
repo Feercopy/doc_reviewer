@@ -52,6 +52,7 @@ class DocumentRead(BaseModel):
     document_type_confidence: Decimal | None
     document_type_explanation: str | None
     manual_document_type: DocumentType | None
+    display_stage: str | None = None
     document_role: DocumentRole
     parse_error: str | None
     status: EntityStatus
@@ -80,6 +81,7 @@ class DocumentProgressRead(BaseModel):
     document_type_confidence: Decimal | None
     document_type_explanation: str | None
     manual_document_type: DocumentType | None
+    display_stage: str | None = None
     updated_at: datetime
     analyses: list[AnalysisStatusRead]
 

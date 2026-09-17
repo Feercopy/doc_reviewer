@@ -1,4 +1,4 @@
-import type { ParseStatus } from "@/lib/api/documents";
+import type { DocumentRecord, ParseStatus } from "@/lib/api/documents";
 
 export type FileKindTone = "word" | "pdf" | "markdown" | "text" | "generic";
 
@@ -15,6 +15,12 @@ export function formatDocumentTypeLabel(value: string | null | undefined): strin
   }
 
   return documentTypeLabels[value] ?? value.replaceAll("_", " ");
+}
+
+export function formatDocumentStage(
+  document: Pick<DocumentRecord, "display_stage" | "manual_document_type" | "detected_document_type">,
+): string {
+  return document.display_stage ?? formatDocumentTypeLabel(document.manual_document_type ?? document.detected_document_type);
 }
 
 export function getDocumentFileKind(filename: string): { label: string; tone: FileKindTone } {

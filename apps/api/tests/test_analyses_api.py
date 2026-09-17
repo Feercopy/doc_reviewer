@@ -1529,6 +1529,65 @@ def test_new_summary_export_downloads_completed_summary_as_pdf_and_docx(client, 
     assert "Что недостаточно подтверждено" not in text
 
 
+def test_existing_progress_review_displays_correct_stage_without_changing_analysis(client, db_session, tmp_path):
+    user = create_user(db_session, "progress-review-author", "secret")
+    skills = seed_baseline_skills(db_session)
+    document_id = _create_completed_document(client, db_session, user)
+    document = db_session.get(Document, document_id)
+    document.parsed_text = (
+        "Initiative Stream Review 2+\nExecutive Summary\n"
+        "Previous Defense: Stream Review 2+\nCurrent Defense: Progress Review\n"
+    )
+    document.detected_document_type = DocumentType.STREAM_REVIEW_2_PLUS.value
+    ru_payload = {**_new_summary_payload(language="ru"), "stage": "Stream Review 2+"}
+    en_payload = {**_new_summary_payload(language="en"), "stage": "Stream Review 2+"}
+    analysis = Analysis(
+        document_id=document_id,
+        user_id=user.id,
+        skill_id=skills[0].id,
+        skill_version=skills[0].version,
+        provider=Provider.OPENAI_COMPATIBLE.value,
+        model="gpt-test",
+        status=RunStatus.COMPLETED.value,
+        structured_output={"result": {"new_summary": {
+            "version": 2,
+            "generation_mode": "new_summary_skill",
+            "source_revision": str(uuid4()),
+            "ru": {"status": "completed", "payload": ru_payload},
+            "en": {"status": "completed", "payload": en_payload},
+        }}},
+        run_parameters={"document_type": DocumentType.STREAM_REVIEW_2_PLUS.value},
+    )
+    db_session.add(analysis)
+    db_session.commit()
+    login(client, user.login, "secret")
+
+    listed = client.get("/documents")
+    detail = client.get(f"/documents/{document_id}")
+    summary = client.get(f"/analyses/{analysis.id}/new-summary")
+    export = client.get(f"/analyses/{analysis.id}/new-summary/export/docx")
+
+    assert listed.status_code == detail.status_code == summary.status_code == export.status_code == 200
+    assert listed.json()["documents"][0]["display_stage"] == "Progress Review"
+    assert detail.json()["display_stage"] == "Progress Review"
+    assert summary.json()["ru"]["payload"]["stage"] == "Progress Review"
+    assert summary.json()["en"]["payload"]["stage"] == "Progress Review"
+    exported = tmp_path / "progress-summary.docx"
+    exported.write_bytes(export.content)
+    assert "Progress Review" in "\n".join(p.text for p in DocxDocument(exported).paragraphs)
+    db_session.refresh(analysis)
+    assert analysis.structured_output["result"]["new_summary"]["ru"]["payload"]["stage"] == "Stream Review 2+"
+    assert analysis.run_parameters["document_type"] == DocumentType.STREAM_REVIEW_2_PLUS.value
+
+    document.parsed_text = (
+        "Initiative Stream Review 2+\nExecutive Summary\n"
+        "Previous Defense: Progress Review\nCurrent Defense: Stream Review 2+\n"
+    )
+    db_session.commit()
+    assert client.get(f"/documents/{document_id}").json()["display_stage"] is None
+    assert client.get(f"/analyses/{analysis.id}/new-summary").json()["ru"]["payload"]["stage"] == "Stream Review 2+"
+
+
 def test_new_summary_export_requires_completed_summary(client, db_session):
     user = create_user(db_session, "new-summary-export-pending-author", "secret")
     skills = seed_baseline_skills(db_session)

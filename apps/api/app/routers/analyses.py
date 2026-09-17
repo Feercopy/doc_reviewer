@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.dependencies.auth import require_current_user
 from app.models.analysis import Analysis
+from app.models.document import Document
 from app.models.user import User
 from app.schemas.analyses import (
     AnalysesListResponse,
@@ -45,6 +46,7 @@ from app.services.documents import DocumentNotFoundError
 from app.services.new_summaries import (
     mark_new_summary_enqueue_failed,
     request_new_summary,
+    with_display_stage,
 )
 from app.services.new_summary_exports import (
     NewSummaryExportUnavailableError,
@@ -70,6 +72,11 @@ def get_run_analysis_details_enqueue() -> RunAnalysisDetailsEnqueue:
 
 def get_run_summary_localizations_enqueue() -> RunSummaryLocalizationsEnqueue:
     return enqueue_run_summary_localizations
+
+
+def _display_stage_for_analysis(db: Session, analysis: Analysis) -> str | None:
+    document = db.get(Document, analysis.document_id)
+    return document.display_stage if document is not None else None
 
 
 @router.post("/documents/{document_id}/analyses", response_model=AnalysisRead, status_code=status.HTTP_201_CREATED)
@@ -215,7 +222,7 @@ def get_analysis_new_summary(
                 error_message="new_summary_generation_queue_unavailable",
             )
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="New Summary generation queue is unavailable") from exc
-    return response
+    return with_display_stage(response, _display_stage_for_analysis(db, analysis))
 
 
 @router.post("/analyses/{analysis_id}/new-summary", response_model=NewSummaryRead)
@@ -240,7 +247,7 @@ def ensure_analysis_new_summary(
                 error_message="new_summary_generation_queue_unavailable",
             )
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="New Summary generation queue is unavailable") from exc
-    return response
+    return with_display_stage(response, _display_stage_for_analysis(db, analysis))
 
 
 @router.get("/analyses/{analysis_id}/new-summary/export/{file_format}")
@@ -252,7 +259,11 @@ def download_analysis_new_summary_export(
 ) -> Response:
     try:
         analysis = get_analysis_for_actor(db=db, actor=current_user, analysis_id=analysis_id)
-        export = build_new_summary_export(analysis=analysis, file_format=file_format)
+        export = build_new_summary_export(
+            analysis=analysis,
+            file_format=file_format,
+            display_stage=_display_stage_for_analysis(db, analysis),
+        )
     except AnalysisNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
     except UnsupportedNewSummaryExportFormatError as exc:

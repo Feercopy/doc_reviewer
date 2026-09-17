@@ -21,12 +21,22 @@ Primary plan index:
 
 ## Current Focus
 
-- [~] Prioritize the current defense stage from the parsed document's
+- [~] Keep Progress Review as a presentation-only stage for existing and
+  running cases. The Documents table and case page read it from the saved
+  parsed document; AI Summary responses and PDF/Word exports show the same
+  stage without rewriting the stored bilingual result. The persisted
+  Stream Review 2+ document type, rules, and analysis run remain unchanged.
+  API regression tests cover historical Progress Review and genuine Stream
+  Review 2+; 248 API and 159 frontend tests pass. The wider worker run had
+  three unrelated PDF parser failures because local `pdfplumber` is absent;
+  TypeScript checking reports four pre-existing test-fixture type errors in
+  untouched files. PR pending.
+- [x] Prioritize the current defense stage from the parsed document's
   Executive Summary row, then its title, before falling back to full-text
   heuristics. Progress Review uses Stream Review 2+ rules without adding a new
   persisted document type; explanations retain the source stage. Reproduced
   Cars TRX, GenAI, Auction, and OFP locally without committing source documents.
-  Focused API/worker upload and parse tests pass (53 tests). PR pending.
+  Focused API/worker upload and parse tests pass (53 tests). Merged in PR #70.
 - [x] Add AI Summary PDF and Word downloads backed by the stored
   `new_summary` payload and formatted with the current Stash `New-summary`
   rules. The API now exposes owner-authorized `/analyses/{id}/new-summary/export/pdf`

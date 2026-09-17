@@ -7,6 +7,7 @@ from sqlalchemy.types import Uuid
 
 from app.models.base import Base, TimestampMixin
 from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus
+from app.services.document_type_detector import progress_review_display_stage
 
 
 class Document(TimestampMixin, Base):
@@ -47,3 +48,8 @@ class Document(TimestampMixin, Base):
         foreign_keys=[linked_fin_summary_document_id],
         post_update=True,
     )
+
+    @property
+    def display_stage(self) -> str | None:
+        effective_type = self.manual_document_type or self.detected_document_type
+        return progress_review_display_stage(self.parsed_text, effective_type)

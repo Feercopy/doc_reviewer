@@ -92,6 +92,7 @@ export type DocumentRecord = {
   document_type_confidence: string | null;
   document_type_explanation: string | null;
   manual_document_type: DocumentType | null;
+  display_stage: string | null;
   document_role: DocumentRole;
   parse_error: string | null;
   status: "active" | "archived" | "deleted";
@@ -441,6 +442,7 @@ export type DocumentProgressRecord = Pick<
   | "document_type_confidence"
   | "document_type_explanation"
   | "manual_document_type"
+  | "display_stage"
   | "updated_at"
 > & {
   analyses: AnalysisStatusRecord[];
