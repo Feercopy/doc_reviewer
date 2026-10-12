@@ -94,6 +94,42 @@ def test_new_traction_accepts_total_only_from_matching_source_row_and_horizon():
         assert table["total_revenue_provenance"] == {"method": "annual_sum"}
 
 
+def test_new_traction_rejects_ambiguous_grouped_source_numbers():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Total Revenue", "values": ["10", "20", "999"]},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["10,000", "20,000", "30,000"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "30"
+    assert table["total_revenue_provenance"] == {"method": "annual_sum"}
+
+    source[0]["rows"][0]["values"] = ["10", "20", "30,000"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "30"
+
+
+def test_new_traction_recomputes_total_mismatch_after_replacement():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["5", "5", "10"]},
+            {"label": "Revenue non-DTB", "values": ["5", "15", "20"]},
+            {"label": "Total Revenue", "values": ["10", "20", "999"], "mismatch_periods": ["Total"]},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["10", "20", "35"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "35"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+    table = with_traction_totals(payload, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "30"
+    assert table["rows"][-1]["mismatch_periods"] == []
+
+
 def test_saved_same_table_annual_sum_report_is_not_recomputed():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
         "total_source_policy": "same_table_annual_sum",
