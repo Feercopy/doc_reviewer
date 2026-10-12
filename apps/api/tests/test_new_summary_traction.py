@@ -250,6 +250,11 @@ def test_new_traction_uses_decimal_role_from_source_row():
     assert table["rows"][0]["values"][-1] == "1.750"
     assert table["total_revenue_provenance"]["method"] == "same_source_table"
 
+    payload["traction_summary"]["rows"][0]["values"] = ["0,500", "1,25", "999"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "1.750"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
 
 def test_new_traction_reconciles_consistently_grouped_component_totals():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
@@ -368,6 +373,21 @@ def test_new_traction_reconciles_mismatch_when_verified_total_is_unchanged():
     payload["traction_summary"]["rows"][-1]["mismatch_periods"] = ["Total"]
     table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
     assert table["rows"][-1]["mismatch_periods"] == []
+
+
+def test_new_traction_reconciles_using_resolved_verified_total():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["1", "1", "1 000"]},
+            {"label": "Revenue non-DTB", "values": ["1", "1", "2 500"]},
+            {"label": "Total Revenue", "values": ["1,25", "2,25", "3,500"], "mismatch_periods": ["Total"]},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,25", "2,25", "3,500"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "3,500"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
 
 
 def test_saved_same_table_annual_sum_report_is_not_recomputed():

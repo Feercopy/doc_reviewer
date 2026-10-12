@@ -3132,3 +3132,8 @@ Exit criteria:
   reconciliation when the source Total equaled the model's existing text.
   Total mismatch markers are now recomputed on every strict verification,
   including unchanged values. Added both missing- and stale-marker tests.
+- 2026-10-13: Cross-locale source matching now infers display and source
+  separator roles independently. The resolved source Total is passed to marker
+  reconciliation only when its numeric interpretation is itself proved by an
+  unambiguous cell or row convention; exact but ambiguous table matches retain
+  conservative mismatch behavior. The focused tests pass.

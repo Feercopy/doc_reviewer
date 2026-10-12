@@ -216,13 +216,13 @@ def with_traction_totals(
                 if verified:
                     total_revenue["values"][total_index] = verified.value
         if strict_total_source:
-            _verify_or_sum_revenue_total(table, total_index, source_tables or [])
+            verified_total = _verify_or_sum_revenue_total(table, total_index, source_tables or [])
         elif same_table_only:
             _fill_annual_total_revenue(table, total_index)
         if payload.get("schema_version") == "new-summary-v8":
             updated = apply_revenue_from_dtb_fallback(updated)
         if strict_total_source:
-            _reconcile_total_revenue_mismatch(updated["traction_summary"], total_index)
+            _reconcile_total_revenue_mismatch(updated["traction_summary"], total_index, verified_total)
         return updated
     tables = summary.get("tables") if isinstance(summary.get("tables"), list) else [summary]
     language = payload.get("language")
@@ -320,35 +320,37 @@ def with_traction_totals(
 
 def _verify_or_sum_revenue_total(
     table: dict[str, Any], total_index: int | None, source_tables: list[dict[str, Any]],
-) -> bool:
+) -> Decimal | None:
     """Do not persist a model-supplied Total unless its source row is verified."""
     periods = table.get("periods")
     rows = table.get("rows")
     if not isinstance(periods, list) or not isinstance(rows, list) or total_index != len(periods) - 1:
-        return False
+        return None
     row = next((item for item in rows if isinstance(item, dict) and item.get("label") == "Total Revenue"), None)
     values = row.get("values") if isinstance(row, dict) else None
     if not isinstance(values, list) or len(values) != len(periods):
-        return False
+        return None
 
-    model_total = values[total_index]
     verified = _same_row_revenue_total(periods, values, source_tables)
     values[total_index] = "—"
     if verified is not None:
-        values[total_index] = verified.value
+        source_total, resolved_total = verified
+        values[total_index] = source_total.value
         provenance: dict[str, Any] = {"method": "same_source_table"}
-        if verified.source_block_id:
-            provenance["source_block_id"] = verified.source_block_id
-        if verified.source_page is not None:
-            provenance["source_page"] = verified.source_page
+        if source_total.source_block_id:
+            provenance["source_block_id"] = source_total.source_block_id
+        if source_total.source_page is not None:
+            provenance["source_page"] = source_total.source_page
     else:
         _fill_annual_total_revenue(table, total_index)
         provenance = {"method": "annual_sum" if values[total_index] != "—" else "unavailable"}
     table["total_revenue_provenance"] = provenance
-    return values[total_index] != model_total
+    return resolved_total if verified is not None else None
 
 
-def _reconcile_total_revenue_mismatch(table: dict[str, Any], total_index: int | None) -> None:
+def _reconcile_total_revenue_mismatch(
+    table: dict[str, Any], total_index: int | None, verified_total: Decimal | None,
+) -> None:
     if total_index is None:
         return
     rows = {row.get("label"): row for row in table.get("rows", []) if isinstance(row, dict)}
@@ -361,7 +363,7 @@ def _reconcile_total_revenue_mismatch(table: dict[str, Any], total_index: int | 
     values = [row.get("values", []) if isinstance(row, dict) else [] for row in (*components, total_row)]
     if all(total_index < len(row_values) for row_values in values):
         cells = [row_values[total_index] for row_values in values]
-        if _proven_total_mismatch(cells):
+        if _proven_total_mismatch(cells, verified_total=verified_total):
             retained.append(table["periods"][total_index])
     if retained or isinstance(markers, list):
         total_row["mismatch_periods"] = retained
@@ -448,9 +450,11 @@ def _numbers_with_roles(value: Any, roles: dict[str, bool]) -> set[Decimal]:
     return values
 
 
-def _proven_total_mismatch(cells: list[Any]) -> bool:
+def _proven_total_mismatch(cells: list[Any], *, verified_total: Decimal | None = None) -> bool:
     texts = [_normalized_number_syntax(cell) for cell in cells]
     possibilities = [_possible_numbers(text) for text in texts]
+    if verified_total is not None:
+        possibilities[2] = {verified_total}
     if not all(possibilities):
         return False
     pinned_roles = _pinned_roles(texts)
@@ -464,36 +468,41 @@ def _proven_total_mismatch(cells: list[Any]) -> bool:
         grouping_by_separator = dict(zip(ambiguous_separators, choices, strict=True))
         grouping_by_separator.update(pinned_roles)
         coherent = []
-        for text, values in zip(texts, possibilities, strict=True):
-            coherent.append(_numbers_with_roles(text, grouping_by_separator))
+        for index, text in enumerate(texts):
+            coherent.append({verified_total} if index == 2 and verified_total is not None else _numbers_with_roles(text, grouping_by_separator))
         if any(left + right == total for left in coherent[0] for right in coherent[1] for total in coherent[2]):
             return False
     return True
 
 
-def _same_numeric_cell(displayed: Any, source: Any, roles: dict[str, bool]) -> bool:
+def _same_numeric_cell(
+    displayed: Any, source: Any, displayed_roles: dict[str, bool], source_roles: dict[str, bool],
+) -> bool:
     displayed_text = _normalized_number_syntax(displayed)
     source_text = _normalized_number_syntax(source)
     if displayed_text == source_text and _possible_numbers(source_text):
         return True
-    displayed_numbers = _numbers_with_roles(displayed_text, roles)
-    source_numbers = _numbers_with_roles(source_text, roles)
+    displayed_numbers = _numbers_with_roles(displayed_text, displayed_roles)
+    source_numbers = _numbers_with_roles(source_text, source_roles)
     return len(displayed_numbers) == len(source_numbers) == 1 and displayed_numbers == source_numbers
 
 
 def _same_row_revenue_total(
     periods: list[str], values: list[str], source_tables: list[dict[str, Any]],
-) -> VerifiedRevenueTotal | None:
+) -> tuple[VerifiedRevenueTotal, Decimal | None] | None:
     annual_keys = [_period_key(period) for period in periods[:-1]]
     if not annual_keys or any(key is None or key[1:] != (1, 12) for key in annual_keys):
         return None
     if any(not _possible_numbers(value) for value in values[:-1]):
         return None
+    displayed_roles = _pinned_roles([_normalized_number_syntax(value) for value in values[:-1]])
+    if displayed_roles is None:
+        return None
     years = [key[0] for key in annual_keys if key is not None]
     if years != list(range(years[0], years[-1] + 1)):
         return None
 
-    matches: list[tuple[VerifiedRevenueTotal, Decimal]] = []
+    matches: list[tuple[VerifiedRevenueTotal, Decimal, Decimal | None]] = []
     for source in source_tables:
         if not isinstance(source, dict) or source.get("metric") != "revenue":
             continue
@@ -523,6 +532,7 @@ def _same_row_revenue_total(
             if source_roles is None:
                 continue
             separator = _grouped_separator(total_text)
+            proven_total = len(_possible_numbers(total_text)) == 1 or (separator is not None and separator in source_roles)
             if separator is not None and len(_possible_numbers(total_text)) > 1 and separator not in source_roles:
                 if not any(
                     year in columns and columns[year] < len(source_values)
@@ -544,7 +554,7 @@ def _same_row_revenue_total(
             total = next(iter(resolved_total)) if len(resolved_total) == 1 else None
             if total is None or any(
                 columns[year] >= len(source_values)
-                or not _same_numeric_cell(values[index], source_values[columns[year]], source_roles)
+                or not _same_numeric_cell(values[index], source_values[columns[year]], displayed_roles, source_roles)
                 for index, year in enumerate(years)
             ):
                 continue
@@ -552,10 +562,11 @@ def _same_row_revenue_total(
                 value=str(source_values[source_total_index]).strip(),
                 source_block_id=source.get("source_block_id") if isinstance(source.get("source_block_id"), str) else None,
                 source_page=source.get("source_page") if isinstance(source.get("source_page"), int) else None,
-            ), total))
-    if not matches or len({number for _, number in matches}) != 1:
+            ), total, total if proven_total else None))
+    if not matches or len({number for _, number, _ in matches}) != 1:
         return None
-    return matches[0][0]
+    verified, _, proven = matches[0]
+    return verified, proven
 
 
 def _compatible_with_grouped_row(value: Any, separator: str) -> bool:
