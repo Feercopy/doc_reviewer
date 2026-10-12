@@ -3084,6 +3084,8 @@ Exit criteria:
   and embedded spaces, are no longer treated as decimal-equivalent to small
   displayed values when verifying the Total Revenue source row. After a
   corrected Total, the Total mismatch marker is recalculated from both
-  component totals instead of being removed unconditionally. Focused tests and
-  707 API/worker tests pass. Release status to be verified through a follow-up
+  component totals instead of being removed unconditionally. Exact same-row
+  grouped figures remain eligible only when the annual cells and Total use
+  consistent grouping; an isolated ambiguous Total is rejected. Focused tests
+  and 708 API/worker tests pass. Release status to be verified through a follow-up
   PR and production workflow.

@@ -119,6 +119,23 @@ def test_new_traction_rejects_ambiguous_grouped_source_numbers():
         assert table["total_revenue_provenance"] == {"method": "annual_sum"}
 
 
+def test_new_traction_preserves_exact_grouped_values_from_one_source_row():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["1,000", "2,000", "999"]}],
+    }}
+    source = [{"metric": "revenue", "source_block_id": "faq-3-table", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,000", "2,000", "3,000"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "3,000"
+    assert table["total_revenue_provenance"] == {"method": "same_source_table", "source_block_id": "faq-3-table"}
+
+    payload["traction_summary"]["rows"][0]["values"][0] = "1"
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "—"
+    assert table["total_revenue_provenance"] == {"method": "unavailable"}
+
+
 def test_new_traction_recomputes_total_mismatch_after_replacement():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
         "periods": ["2027", "2028", "Total"], "rows": [

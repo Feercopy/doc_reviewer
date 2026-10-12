@@ -366,12 +366,27 @@ def _reconcile_total_revenue_mismatch(table: dict[str, Any], total_index: int | 
 
 
 def _unambiguous_number(value: Any) -> Decimal | None:
-    text = str(value).strip().replace("\u00a0", "").replace(" ", "").replace("−", "-")
-    if text.startswith("(") and text.endswith(")"):
-        text = f"-{text[1:-1]}"
+    text = _normalized_number_syntax(value)
     if _AMBIGUOUS_GROUPING.fullmatch(text):
         return None
     return _number(text)
+
+
+def _normalized_number_syntax(value: Any) -> str:
+    text = str(value).strip().replace("\u00a0", "").replace(" ", "").replace("−", "-")
+    if text.startswith("(") and text.endswith(")"):
+        text = f"-{text[1:-1]}"
+    return text
+
+
+def _same_numeric_cell(displayed: Any, source: Any) -> bool:
+    displayed_text = _normalized_number_syntax(displayed)
+    source_text = _normalized_number_syntax(source)
+    if displayed_text == source_text and _number(source_text) is not None:
+        return True
+    displayed_number = _unambiguous_number(displayed_text)
+    source_number = _unambiguous_number(source_text)
+    return displayed_number is not None and source_number is not None and displayed_number == source_number
 
 
 def _same_row_revenue_total(
@@ -380,8 +395,7 @@ def _same_row_revenue_total(
     annual_keys = [_period_key(period) for period in periods[:-1]]
     if not annual_keys or any(key is None or key[1:] != (1, 12) for key in annual_keys):
         return None
-    annual_values = [_unambiguous_number(value) for value in values[:-1]]
-    if any(value is None for value in annual_values):
+    if any(_number(value) is None for value in values[:-1]):
         return None
     years = [key[0] for key in annual_keys if key is not None]
     if years != list(range(years[0], years[-1] + 1)):
@@ -409,10 +423,20 @@ def _same_row_revenue_total(
             source_values = source_row.get("values") if isinstance(source_row, dict) else None
             if not isinstance(source_values, list) or source_total_index >= len(source_values):
                 continue
-            total = _unambiguous_number(source_values[source_total_index])
+            total_text = _normalized_number_syntax(source_values[source_total_index])
+            total = _number(total_text)
+            if _AMBIGUOUS_GROUPING.fullmatch(total_text):
+                separator = "," if "," in total_text else "."
+                if any(
+                    year not in columns or columns[year] >= len(source_values)
+                    or not _AMBIGUOUS_GROUPING.fullmatch(_normalized_number_syntax(source_values[columns[year]]))
+                    or separator not in _normalized_number_syntax(source_values[columns[year]])
+                    for year in years
+                ):
+                    continue
             if total is None or any(
                 columns[year] >= len(source_values)
-                or _unambiguous_number(source_values[columns[year]]) != annual_values[index]
+                or not _same_numeric_cell(values[index], source_values[columns[year]])
                 for index, year in enumerate(years)
             ):
                 continue
@@ -421,7 +445,7 @@ def _same_row_revenue_total(
                 source_block_id=source.get("source_block_id") if isinstance(source.get("source_block_id"), str) else None,
                 source_page=source.get("source_page") if isinstance(source.get("source_page"), int) else None,
             ))
-    if not matches or len({_unambiguous_number(match.value) for match in matches}) != 1:
+    if not matches or len({_normalized_number_syntax(match.value) for match in matches}) != 1:
         return None
     return matches[0]
 
