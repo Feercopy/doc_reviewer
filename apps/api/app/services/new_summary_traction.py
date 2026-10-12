@@ -360,6 +360,8 @@ def _reconcile_total_revenue_mismatch(table: dict[str, Any], total_index: int | 
     if all(total_index < len(row_values) for row_values in values):
         cells = [row_values[total_index] for row_values in values]
         amounts = [_unambiguous_number(cell) for cell in cells]
+        if amounts[2] is None and table.get("total_revenue_provenance", {}).get("method") == "same_source_table":
+            amounts[2] = _grouped_number(_normalized_number_syntax(cells[2]))
         separators = [_grouped_separator(_normalized_number_syntax(cell)) for cell in cells]
         if any(amount is None for amount in amounts) and separators[0] is not None and len(set(separators)) == 1:
             amounts = [_grouped_number(_normalized_number_syntax(cell)) for cell in cells]
@@ -412,7 +414,10 @@ def _same_row_revenue_total(
     annual_keys = [_period_key(period) for period in periods[:-1]]
     if not annual_keys or any(key is None or key[1:] != (1, 12) for key in annual_keys):
         return None
-    if any(_number(value) is None for value in values[:-1]):
+    if any(
+        _number(value) is None and _grouped_separator(_normalized_number_syntax(value)) is None
+        for value in values[:-1]
+    ):
         return None
     years = [key[0] for key in annual_keys if key is not None]
     if years != list(range(years[0], years[-1] + 1)):

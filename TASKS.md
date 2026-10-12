@@ -3092,3 +3092,8 @@ Exit criteria:
   totals written as `35`/`35.0`; all three are now handled without accepting
   ambiguous cross-format values. The focused tests and 711 API/worker tests
   pass. Merge and production workflow remain to be verified.
+- 2026-10-13: PR #111 exact-head review additionally identified million-scale
+  grouped annual cells and mismatches between a source-verified grouped Total
+  and plain/space-grouped component Totals. Both are now handled after source
+  verification without broadening ambiguous source-row matches. Focused tests
+  pass; full CI and final review are pending.

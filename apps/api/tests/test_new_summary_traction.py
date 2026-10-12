@@ -147,6 +147,12 @@ def test_new_traction_preserves_repeated_grouped_total_from_matching_row():
     assert table["rows"][0]["values"][-1] == "1,000,000"
     assert table["total_revenue_provenance"]["method"] == "same_source_table"
 
+    payload["traction_summary"]["rows"][0]["values"] = ["1,000,000", "2,000,000", "999"]
+    source[0]["rows"][0]["values"] = ["1,000,000", "2,000,000", "3,000,000"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "3,000,000"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
 
 def test_new_traction_accepts_equal_unambiguous_duplicate_source_totals():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
@@ -173,6 +179,11 @@ def test_new_traction_reconciles_consistently_grouped_component_totals():
                "rows": [{"label": "Revenue", "values": ["1,000", "2,000", "3,500"]}]}]
     table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
     assert table["rows"][-1]["values"][-1] == "3,500"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+    payload["traction_summary"]["rows"][0]["values"][-1] = "1 000"
+    payload["traction_summary"]["rows"][1]["values"][-1] = "2 000"
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
     assert table["rows"][-1]["mismatch_periods"] == ["Total"]
 
 
