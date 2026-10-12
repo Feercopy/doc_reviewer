@@ -390,6 +390,36 @@ def test_new_traction_reconciles_using_resolved_verified_total():
     assert table["rows"][-1]["mismatch_periods"] == ["Total"]
 
 
+def test_verified_total_does_not_conflict_with_component_number_locale():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["5", "5", "1.000,00"]},
+            {"label": "Revenue non-DTB", "values": ["5", "5", "2.000,00"]},
+            {"label": "Total Revenue", "values": ["10", "20", "3000.50"], "mismatch_periods": []},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["10", "20", "3000.50"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+
+def test_verified_duplicate_total_is_not_source_order_dependent():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["1", "1", "1.5"]},
+            {"label": "Revenue non-DTB", "values": ["1", "1", "2"]},
+            {"label": "Total Revenue", "values": ["1,500", "2,000", "999"], "mismatch_periods": []},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,500", "2,000", total]}]}
+              for total in ("3,500", "3500")]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "3500"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+
 def test_saved_same_table_annual_sum_report_is_not_recomputed():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
         "total_source_policy": "same_table_annual_sum",

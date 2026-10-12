@@ -3137,3 +3137,8 @@ Exit criteria:
   reconciliation only when its numeric interpretation is itself proved by an
   unambiguous cell or row convention; exact but ambiguous table matches retain
   conservative mismatch behavior. The focused tests pass.
+- 2026-10-13: Review found that a proven Total's raw locale could conflict with
+  component-total locale, and duplicate source rows could yield source-order-
+  dependent marker colors. Once the Total is numerically proved, only the
+  components establish roles for mismatch arithmetic; among equal resolved
+  source totals, an explicitly proved match is preferred. Focused tests pass.

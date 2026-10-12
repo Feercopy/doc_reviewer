@@ -457,11 +457,12 @@ def _proven_total_mismatch(cells: list[Any], *, verified_total: Decimal | None =
         possibilities[2] = {verified_total}
     if not all(possibilities):
         return False
-    pinned_roles = _pinned_roles(texts)
+    pinned_roles = _pinned_roles(texts[:2] if verified_total is not None else texts)
     if pinned_roles is None:
         return False
     ambiguous_separators = sorted({
-        separator for text, values in zip(texts, possibilities, strict=True)
+        separator for text, values in zip(texts[:2] if verified_total is not None else texts,
+                                          possibilities[:2] if verified_total is not None else possibilities, strict=True)
         if len(values) > 1 and (separator := _grouped_separator(text)) is not None and separator not in pinned_roles
     })
     for choices in product((False, True), repeat=len(ambiguous_separators)):
@@ -565,7 +566,7 @@ def _same_row_revenue_total(
             ), total, total if proven_total else None))
     if not matches or len({number for _, number, _ in matches}) != 1:
         return None
-    verified, _, proven = matches[0]
+    verified, _, proven = next((match for match in matches if match[2] is not None), matches[0])
     return verified, proven
 
 
