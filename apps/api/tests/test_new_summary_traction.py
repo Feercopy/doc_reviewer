@@ -21,6 +21,46 @@ def test_v8_missing_traction_cells_use_em_dash_without_touching_numbers_or_misma
     assert result[-1]["mismatch_periods"] == ["2026"]
 
 
+def test_new_traction_total_revenue_sums_complete_annual_values_only():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total 2026–2030"], "rows": [
+            {"label": "DTB Uplift (Cumul)", "values": ["1%", "2%", "—"]},
+            {"label": "Revenue from DTB", "values": ["1", "2", "—"]},
+            {"label": "Revenue non-DTB", "values": ["3", "4", "—"]},
+            {"label": "Total Revenue", "values": ["1 200,5", "2 300,5", "—"]},
+        ],
+    }}
+    source = [{"metadata": {"rows": [
+        ["ToBe P&L", "2027", "2028", "2027-28 total"], ["Revenue", "1 200,5", "2 300,5", "9 999"],
+    ]}}]
+    result = with_traction_totals(payload, source_blocks=source, strict_total_source=True)
+    table = result["traction_summary"]
+    assert table["total_source_policy"] == "same_table_annual_sum"
+    assert table["periods"] == ["2027", "2028", "Total 2027–2028"]
+    assert [row["values"][-1] for row in table["rows"]] == ["—", "—", "—", "3501"]
+    assert not needs_verified_revenue_total(result)
+    assert with_traction_totals(result, source_blocks=source) == result
+    assert payload["traction_summary"]["periods"][-1] == "Total 2026–2030"
+
+
+def test_new_traction_keeps_explicit_total_and_rejects_partial_or_ambiguous_sums():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "DTB Uplift (Cumul)", "values": ["—", "—", "—"]},
+            {"label": "Revenue from DTB", "values": ["—", "—", "—"]},
+            {"label": "Revenue non-DTB", "values": ["—", "—", "—"]},
+            {"label": "Total Revenue", "values": ["10", "20", "99"]},
+        ],
+    }}
+    result = with_traction_totals(payload, strict_total_source=True)
+    assert result["traction_summary"]["rows"][-1]["values"][-1] == "99"
+    for annual in (["10", "—"], ["1,234", "2"], ["10 (H2 2027)", "20"]):
+        missing = deepcopy(payload)
+        missing["traction_summary"]["rows"][-1]["values"] = [*annual, "—"]
+        result = with_traction_totals(missing, strict_total_source=True)
+        assert result["traction_summary"]["rows"][-1]["values"][-1] == "—"
+
+
 def test_v7_single_table_keeps_four_rows_and_mismatch_without_legacy_rewrite():
     table = {"periods": ["2026", "Total"], "rows": [
         {"label": "DTB Uplift (Cumul)", "values": ["2%", "—"]},

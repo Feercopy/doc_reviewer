@@ -118,9 +118,13 @@
       "additionalProperties": false,
       "required": ["periods", "rows"],
       "properties": {
+        "total_source_policy": {
+          "const": "same_table_annual_sum",
+          "description": "Technical marker for newly generated reports. Annual Total Revenue and any explicit Total must come from the same current-scenario Financial Model table when available. Never borrow a Total from another table. If that table has no Total Revenue total, sum every shown, complete numeric annual Total Revenue value; do not calculate totals for other rows. Older saved reports omit this marker and retain their historical display behavior."
+        },
         "periods": {
           "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/non_empty_string" },
-          "description": "Shared periods for all four metrics. Last column is always Total. Start at the later common year and use matching granularity, preserving later years with dashes for unavailable metrics. Label any DTB H2-only value explicitly in its annual cell. Prefer the explicitly marked current-scenario horizon in the source table (including FAQ 3) over a similar Total from another scenario or appendix; never relabel a 2026-2030 Total as 2027-2031."
+          "description": "Shared annual periods for all four metrics. Last column is always Total. Start at the later common year, preserving later years with dashes for unavailable metrics. Do not output quarterly or half-year columns; label any DTB H2-only value explicitly in its annual cell. Never relabel a Total for a different horizon."
         },
         "rows": {
           "type": "array", "minItems": 4, "maxItems": 4,
@@ -131,7 +135,7 @@
             { "allOf": [{ "$ref": "#/$defs/traction_row" }, { "properties": { "label": { "const": "Total Revenue" } } }] }
           ],
           "items": false,
-          "description": "Four rows in fixed order. Revenue rows must come from income, never CoS/COGS/Cost of Sales or another expense section, regardless of row name. Each values array follows periods exactly; missing metrics use dashes. If Revenue non-DTB is entirely absent, copy each sourced Total Revenue value only into an empty Revenue from DTB cell whose period also has cumulative DTB. Copy the Total column only when DTB covers every shown year with sourced Total Revenue. Never copy when cumulative DTB is absent; never replace sourced Revenue from DTB values."
+          "description": "Four rows in fixed order. Revenue rows must come from income, never CoS/COGS/Cost of Sales or another expense section, regardless of row name. For conflicting Total Revenue sources prefer the Financial Model table that shows Revenue and costs; annual values and explicit Total must come from the same current-scenario table. Each values array follows periods exactly; missing metrics use dashes. If Revenue non-DTB is entirely absent, copy each sourced Total Revenue value only into an empty Revenue from DTB cell whose period also has cumulative DTB. Copy the Total column only when DTB covers every shown year with Total Revenue. Never copy when cumulative DTB is absent; never replace sourced Revenue from DTB values."
         }
       }
     },
@@ -147,7 +151,7 @@
         "values": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Values must be in the same order as periods. Every missing or unextractable value is an em dash (—), never an explanatory phrase or a short hyphen. Total values must be explicitly sourced for the shown horizon, not recomputed."
+          "description": "Values must be in the same order as periods. Every missing or unextractable value is an em dash (—), never an explanatory phrase or a short hyphen. Explicit Total values must come from the same source table as that row's annual values. Only an absent Total Revenue total may be computed by summing all complete numeric annual Total Revenue values; other row totals are never computed."
         },
         "mismatch_periods": {
           "type": "array", "items": { "$ref": "#/$defs/non_empty_string" },
