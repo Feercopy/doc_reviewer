@@ -20,6 +20,8 @@ _REVENUE_LABEL = re.compile(r"\b(?:revenue|выручк[а-я]*)\b", re.IGNORECA
 _CUMULATIVE = re.compile(r"\b(?:cum(?:ulative)?|накоплен\w*)\b", re.IGNORECASE)
 _PLAIN_REVENUE = re.compile(r"-?(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[.,]\d{1,2})?")
 _AMBIGUOUS_GROUPING = re.compile(r"-?\d{1,3}(?:[,.]\d{3})+")
+_GROUPED_DECIMAL_COMMA = re.compile(r"-?\d{1,3}(?:,\d{3})+\.\d+")
+_GROUPED_DECIMAL_DOT = re.compile(r"-?\d{1,3}(?:\.\d{3})+,\d+")
 _STRICT_TOTAL_POLICY = "same_table_annual_sum"
 _VERIFIED_TOTAL_POLICY = "same_table_verified_total"
 
@@ -367,11 +369,8 @@ def _reconcile_total_revenue_mismatch(table: dict[str, Any], total_index: int | 
 
 
 def _unambiguous_number(value: Any) -> Decimal | None:
-    text = _normalized_number_syntax(value)
-    separator = _grouped_separator(text)
-    if separator is not None:
-        return _grouped_number(text) if text.count(separator) > 1 else None
-    return _number(text)
+    values = _possible_numbers(value)
+    return next(iter(values)) if len(values) == 1 else None
 
 
 def _normalized_number_syntax(value: Any) -> str:
@@ -393,8 +392,19 @@ def _grouped_number(text: str) -> Decimal | None:
     return _number(text.replace(separator, "")) if separator is not None else None
 
 
+def _grouped_decimal_number(text: str) -> Decimal | None:
+    if _GROUPED_DECIMAL_COMMA.fullmatch(text):
+        return _number(text.replace(",", ""))
+    if _GROUPED_DECIMAL_DOT.fullmatch(text):
+        return _number(text.replace(".", "").replace(",", "."))
+    return None
+
+
 def _possible_numbers(value: Any) -> set[Decimal]:
     text = _normalized_number_syntax(value)
+    grouped_decimal = _grouped_decimal_number(text)
+    if grouped_decimal is not None:
+        return {grouped_decimal}
     separator = _grouped_separator(text)
     if separator is None:
         number = _number(text)
@@ -413,12 +423,19 @@ def _proven_total_mismatch(cells: list[Any]) -> bool:
     possibilities = [_possible_numbers(text) for text in texts]
     if not all(possibilities):
         return False
+    pinned_separators = {
+        separator for text in texts
+        if (separator := _grouped_separator(text)) is not None and text.count(separator) > 1
+    }
+    pinned_separators.update("," for text in texts if _GROUPED_DECIMAL_COMMA.fullmatch(text))
+    pinned_separators.update("." for text in texts if _GROUPED_DECIMAL_DOT.fullmatch(text))
     ambiguous_separators = sorted({
         separator for text, values in zip(texts, possibilities, strict=True)
-        if len(values) > 1 and (separator := _grouped_separator(text)) is not None
+        if len(values) > 1 and (separator := _grouped_separator(text)) is not None and separator not in pinned_separators
     })
     for choices in product((False, True), repeat=len(ambiguous_separators)):
         grouping_by_separator = dict(zip(ambiguous_separators, choices, strict=True))
+        grouping_by_separator.update({separator: True for separator in pinned_separators})
         coherent = []
         for text, values in zip(texts, possibilities, strict=True):
             separator = _grouped_separator(text)
@@ -435,7 +452,7 @@ def _proven_total_mismatch(cells: list[Any]) -> bool:
 def _same_numeric_cell(displayed: Any, source: Any) -> bool:
     displayed_text = _normalized_number_syntax(displayed)
     source_text = _normalized_number_syntax(source)
-    if displayed_text == source_text and (_number(source_text) is not None or _grouped_separator(source_text) is not None):
+    if displayed_text == source_text and _possible_numbers(source_text):
         return True
     displayed_numbers = _possible_numbers(displayed_text)
     source_numbers = _possible_numbers(source_text)
@@ -448,10 +465,7 @@ def _same_row_revenue_total(
     annual_keys = [_period_key(period) for period in periods[:-1]]
     if not annual_keys or any(key is None or key[1:] != (1, 12) for key in annual_keys):
         return None
-    if any(
-        _number(value) is None and _grouped_separator(_normalized_number_syntax(value)) is None
-        for value in values[:-1]
-    ):
+    if any(not _possible_numbers(value) for value in values[:-1]):
         return None
     years = [key[0] for key in annual_keys if key is not None]
     if years != list(range(years[0], years[-1] + 1)):
@@ -485,6 +499,7 @@ def _same_row_revenue_total(
                 if not any(
                     year in columns and columns[year] < len(source_values)
                     and _grouped_separator(_normalized_number_syntax(source_values[columns[year]])) == separator
+                    and len(_possible_numbers(source_values[columns[year]])) > 1
                     for year in years
                 ) or any(
                     year not in columns or columns[year] >= len(source_values)
@@ -492,7 +507,7 @@ def _same_row_revenue_total(
                     for year in years
                 ):
                     continue
-            total = _grouped_number(total_text) if separator is not None else _number(total_text)
+            total = _grouped_number(total_text) if separator is not None else _unambiguous_number(total_text)
             if total is None or any(
                 columns[year] >= len(source_values)
                 or not _same_numeric_cell(values[index], source_values[columns[year]])

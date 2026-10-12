@@ -171,6 +171,12 @@ def test_new_traction_matches_zero_across_grouped_decimal_notation():
     assert table["rows"][0]["values"][-1] == "0,000"
     assert table["total_revenue_provenance"]["method"] == "same_source_table"
 
+    duplicate = deepcopy(source[0])
+    duplicate["rows"][0]["values"][-1] = "0"
+    table = with_traction_totals(payload, source_tables=[source[0], duplicate], strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "0,000"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
 
 def test_new_traction_preserves_repeated_grouped_total_from_matching_row():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
@@ -188,6 +194,23 @@ def test_new_traction_preserves_repeated_grouped_total_from_matching_row():
     table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
     assert table["rows"][0]["values"][-1] == "3,000,000"
     assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
+
+def test_new_traction_accepts_grouping_with_decimal_fraction_from_source():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["1,000.50", "2,000.25", "999"]}],
+    }}
+    source = [{"metric": "revenue", "source_block_id": "financial-model-decimal",
+               "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,000.50", "2,000.25", "3,000.75"]}]}]
+    for first, second, total in (("1,000.50", "2,000.25", "3,000.75"),
+                                 ("1.000,50", "2.000,25", "3.000,75")):
+        payload["traction_summary"]["rows"][0]["values"] = [first, second, "999"]
+        source[0]["rows"][0]["values"] = [first, second, total]
+        table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+        assert table["rows"][0]["values"][-1] == total
+        assert table["total_revenue_provenance"]["source_block_id"] == "financial-model-decimal"
 
 
 def test_new_traction_accepts_equal_unambiguous_duplicate_source_totals():
@@ -251,6 +274,24 @@ def test_new_traction_uses_one_interpretation_for_shared_separator():
     table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
     assert table["rows"][-1]["values"][-1] == "1002"
     assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+    payload["traction_summary"]["rows"][0]["values"][-1] = "1,000,000"
+    payload["traction_summary"]["rows"][1]["values"][-1] = "500,000"
+    source[0]["rows"][0]["values"][-1] = "1,000,500"
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+
+def test_zero_annual_does_not_establish_grouping_for_ambiguous_total():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["0", "20", "999"]}],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["0,000", "20", "3,000"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "20"
+    assert table["total_revenue_provenance"]["method"] == "annual_sum"
 
 
 def test_new_traction_recomputes_total_mismatch_after_replacement():

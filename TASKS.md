@@ -3113,3 +3113,8 @@ Exit criteria:
   zero needs no separator evidence because both interpretations are identical;
   mismatch detection compares one coherent interpretation per separator. The
   focused regression suite passes; final CI/review/merge remain pending.
+- 2026-10-13: PR #111 review also exposed standard grouped decimals, grouping
+  conventions established by repeated separators, zero-only duplicate totals,
+  and zero annuals that must not establish an ambiguous grouping convention.
+  All four now use the shared possible-number parser; 31 focused tests pass.
+  Full tests and remote checks remain pending.
