@@ -3080,8 +3080,9 @@ Exit criteria:
   181 web tests, JSON schema parse, and `git diff --check`. PR/merge/deploy
   status must be updated after remote checks.
 - 2026-10-13: Follow-up to PR #110 review: source cells with ambiguous comma
-  or dot three-digit grouping are no longer treated as decimal-equivalent to
-  small displayed values when verifying the Total Revenue source row. After a
+  or dot three-digit grouping, including accounting parentheses, Unicode minus,
+  and embedded spaces, are no longer treated as decimal-equivalent to small
+  displayed values when verifying the Total Revenue source row. After a
   corrected Total, the Total mismatch marker is recalculated from both
   component totals instead of being removed unconditionally. Focused tests and
   707 API/worker tests pass. Release status to be verified through a follow-up

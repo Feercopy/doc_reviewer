@@ -110,6 +110,14 @@ def test_new_traction_rejects_ambiguous_grouped_source_numbers():
     table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
     assert table["rows"][0]["values"][-1] == "30"
 
+    signed = deepcopy(payload)
+    signed["traction_summary"]["rows"][0]["values"] = ["-1", "-2", "999"]
+    for grouped in ("(1,000)", "−1,000", "-1, 000", "-1.000"):
+        source[0]["rows"][0]["values"] = [grouped, "-2", "-3,000"]
+        table = with_traction_totals(signed, source_tables=source, strict_total_source=True)["traction_summary"]
+        assert table["rows"][0]["values"][-1] == "-3"
+        assert table["total_revenue_provenance"] == {"method": "annual_sum"}
+
 
 def test_new_traction_recomputes_total_mismatch_after_replacement():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {

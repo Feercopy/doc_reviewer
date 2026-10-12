@@ -366,7 +366,9 @@ def _reconcile_total_revenue_mismatch(table: dict[str, Any], total_index: int | 
 
 
 def _unambiguous_number(value: Any) -> Decimal | None:
-    text = str(value).strip()
+    text = str(value).strip().replace("\u00a0", "").replace(" ", "").replace("−", "-")
+    if text.startswith("(") and text.endswith(")"):
+        text = f"-{text[1:-1]}"
     if _AMBIGUOUS_GROUPING.fullmatch(text):
         return None
     return _number(text)
