@@ -35,7 +35,8 @@ def test_new_traction_total_revenue_sums_complete_annual_values_only():
     ]}}]
     result = with_traction_totals(payload, source_blocks=source, strict_total_source=True)
     table = result["traction_summary"]
-    assert table["total_source_policy"] == "same_table_annual_sum"
+    assert table["total_source_policy"] == "same_table_verified_total"
+    assert table["total_revenue_provenance"] == {"method": "annual_sum"}
     assert table["periods"] == ["2027", "2028", "Total 2027–2028"]
     assert [row["values"][-1] for row in table["rows"]] == ["—", "—", "—", "3501"]
     assert not needs_verified_revenue_total(result)
@@ -43,7 +44,7 @@ def test_new_traction_total_revenue_sums_complete_annual_values_only():
     assert payload["traction_summary"]["periods"][-1] == "Total 2026–2030"
 
 
-def test_new_traction_keeps_explicit_total_and_rejects_partial_or_ambiguous_sums():
+def test_new_traction_rejects_unverified_total_even_when_populated():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
         "periods": ["2027", "2028", "Total"], "rows": [
             {"label": "DTB Uplift (Cumul)", "values": ["—", "—", "—"]},
@@ -53,12 +54,53 @@ def test_new_traction_keeps_explicit_total_and_rejects_partial_or_ambiguous_sums
         ],
     }}
     result = with_traction_totals(payload, strict_total_source=True)
-    assert result["traction_summary"]["rows"][-1]["values"][-1] == "99"
+    assert result["traction_summary"]["rows"][-1]["values"][-1] == "30"
+    assert result["traction_summary"]["total_revenue_provenance"] == {"method": "annual_sum"}
+    assert payload["traction_summary"]["rows"][-1]["values"][-1] == "99"
     for annual in (["10", "—"], ["1,234", "2"], ["10 (H2 2027)", "20"]):
-        missing = deepcopy(payload)
-        missing["traction_summary"]["rows"][-1]["values"] = [*annual, "—"]
-        result = with_traction_totals(missing, strict_total_source=True)
+        incomplete = deepcopy(payload)
+        incomplete["traction_summary"]["rows"][-1]["values"] = [*annual, "99"]
+        result = with_traction_totals(incomplete, strict_total_source=True)
         assert result["traction_summary"]["rows"][-1]["values"][-1] == "—"
+        assert result["traction_summary"]["total_revenue_provenance"] == {"method": "unavailable"}
+
+
+def test_new_traction_accepts_total_only_from_matching_source_row_and_horizon():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "DTB Uplift (Cumul)", "values": ["—", "—", "—"]},
+            {"label": "Revenue from DTB", "values": ["—", "—", "—"]},
+            {"label": "Revenue non-DTB", "values": ["—", "—", "—"]},
+            {"label": "Total Revenue", "values": ["10", "20", "999"], "mismatch_periods": ["2027", "Total"]},
+        ],
+    }}
+    correct = [{"metric": "revenue", "source_block_id": "financial-model-4", "source_page": 4,
+                "periods": ["2027", "2028", "Total 2027–2028"],
+                "rows": [{"label": "Revenue", "values": ["10", "20", "35"]}]}]
+    table = with_traction_totals(payload, source_tables=correct, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"] == ["10", "20", "35"]
+    assert table["rows"][-1]["mismatch_periods"] == ["2027"]
+    assert table["total_revenue_provenance"] == {
+        "method": "same_source_table", "source_block_id": "financial-model-4", "source_page": 4,
+    }
+
+    wrong_years = deepcopy(correct)
+    wrong_years[0]["rows"][0]["values"] = ["11", "20", "35"]
+    wrong_horizon = deepcopy(correct)
+    wrong_horizon[0]["periods"][-1] = "Total 2026–2028"
+    for source in (wrong_years, wrong_horizon):
+        table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+        assert table["rows"][-1]["values"][-1] == "30"
+        assert table["total_revenue_provenance"] == {"method": "annual_sum"}
+
+
+def test_saved_same_table_annual_sum_report_is_not_recomputed():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "total_source_policy": "same_table_annual_sum",
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["10", "20", "99"]}],
+    }}
+    assert with_traction_totals(payload) == payload
 
 
 def test_v7_single_table_keeps_four_rows_and_mismatch_without_legacy_rewrite():

@@ -4,7 +4,12 @@ import re
 from copy import deepcopy
 from typing import Any
 
-from app.services.new_summary_source_tables import _number, clean_table_cell, verified_revenue_total
+from app.services.new_summary_source_tables import (
+    VerifiedRevenueTotal,
+    _number,
+    clean_table_cell,
+    verified_revenue_total,
+)
 
 
 _TOTAL_PERIOD = re.compile(r"\b(?:total|ttl|итого|всего)\b", re.IGNORECASE)
@@ -13,6 +18,7 @@ _REVENUE_LABEL = re.compile(r"\b(?:revenue|выручк[а-я]*)\b", re.IGNORECA
 _CUMULATIVE = re.compile(r"\b(?:cum(?:ulative)?|накоплен\w*)\b", re.IGNORECASE)
 _PLAIN_REVENUE = re.compile(r"-?(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[.,]\d{1,2})?")
 _STRICT_TOTAL_POLICY = "same_table_annual_sum"
+_VERIFIED_TOTAL_POLICY = "same_table_verified_total"
 
 
 def _period_key(label: Any) -> tuple[int, int, int] | None:
@@ -143,7 +149,7 @@ def needs_verified_revenue_total(payload: dict[str, Any]) -> bool:
         summary = payload.get("traction_summary")
         if not isinstance(summary, dict):
             return False
-        if summary.get("total_source_policy") == _STRICT_TOTAL_POLICY:
+        if summary.get("total_source_policy") in {_STRICT_TOTAL_POLICY, _VERIFIED_TOTAL_POLICY}:
             return False
         periods = summary.get("periods")
         rows = summary.get("rows")
@@ -189,7 +195,7 @@ def with_traction_totals(
         updated = deepcopy(payload)
         table = updated["traction_summary"]
         if strict_total_source:
-            table["total_source_policy"] = _STRICT_TOTAL_POLICY
+            table["total_source_policy"] = _VERIFIED_TOTAL_POLICY
         same_table_only = table.get("total_source_policy") == _STRICT_TOTAL_POLICY
         table["periods"] = [clean_table_cell(period) for period in table.get("periods", [])]
         for row in table.get("rows", []):
@@ -204,7 +210,9 @@ def with_traction_totals(
                 verified = verified_revenue_total(table["periods"], total_revenue["values"], source_blocks)
                 if verified:
                     total_revenue["values"][total_index] = verified.value
-        if same_table_only:
+        if strict_total_source:
+            _verify_or_sum_revenue_total(table, total_index, source_tables or [])
+        elif same_table_only:
             _fill_annual_total_revenue(table, total_index)
         return apply_revenue_from_dtb_fallback(updated) if payload.get("schema_version") == "new-summary-v8" else updated
     tables = summary.get("tables") if isinstance(summary.get("tables"), list) else [summary]
@@ -299,6 +307,89 @@ def with_traction_totals(
                 row["values"][total_index] = "—"
     updated["traction_summary"] = {**updated_summary, "tables": updated_tables} if "tables" in updated_summary else updated_tables[0]
     return updated
+
+
+def _verify_or_sum_revenue_total(
+    table: dict[str, Any], total_index: int | None, source_tables: list[dict[str, Any]],
+) -> None:
+    """Do not persist a model-supplied Total unless its source row is verified."""
+    periods = table.get("periods")
+    rows = table.get("rows")
+    if not isinstance(periods, list) or not isinstance(rows, list) or total_index != len(periods) - 1:
+        return
+    row = next((item for item in rows if isinstance(item, dict) and item.get("label") == "Total Revenue"), None)
+    values = row.get("values") if isinstance(row, dict) else None
+    if not isinstance(values, list) or len(values) != len(periods):
+        return
+
+    model_total = values[total_index]
+    verified = _same_row_revenue_total(periods, values, source_tables)
+    values[total_index] = "—"
+    if verified is not None:
+        values[total_index] = verified.value
+        provenance: dict[str, Any] = {"method": "same_source_table"}
+        if verified.source_block_id:
+            provenance["source_block_id"] = verified.source_block_id
+        if verified.source_page is not None:
+            provenance["source_page"] = verified.source_page
+    else:
+        _fill_annual_total_revenue(table, total_index)
+        provenance = {"method": "annual_sum" if values[total_index] != "—" else "unavailable"}
+    table["total_revenue_provenance"] = provenance
+    if values[total_index] != model_total and isinstance(row.get("mismatch_periods"), list):
+        row["mismatch_periods"] = [period for period in row["mismatch_periods"] if not _TOTAL_PERIOD.search(str(period))]
+
+
+def _same_row_revenue_total(
+    periods: list[str], values: list[str], source_tables: list[dict[str, Any]],
+) -> VerifiedRevenueTotal | None:
+    annual_keys = [_period_key(period) for period in periods[:-1]]
+    if not annual_keys or any(key is None or key[1:] != (1, 12) for key in annual_keys):
+        return None
+    annual_values = [_number(value) for value in values[:-1]]
+    if any(value is None for value in annual_values):
+        return None
+    years = [key[0] for key in annual_keys if key is not None]
+    if years != list(range(years[0], years[-1] + 1)):
+        return None
+
+    matches: list[VerifiedRevenueTotal] = []
+    for source in source_tables:
+        if not isinstance(source, dict) or source.get("metric") != "revenue":
+            continue
+        source_periods = source.get("periods")
+        if not isinstance(source_periods, list):
+            continue
+        source_total_index = next((i for i, period in enumerate(source_periods) if _TOTAL_PERIOD.search(str(period))), None)
+        if source_total_index is None:
+            continue
+        source_keys = [_period_key(period) for i, period in enumerate(source_periods) if i != source_total_index]
+        if any(key is None or key[1:] != (1, 12) for key in source_keys):
+            continue
+        if not _total_matches_horizon(str(source_periods[source_total_index]), source_keys, annual_keys):
+            continue
+        columns = {key[0]: i for i, key in enumerate(_period_key(period) for period in source_periods) if key is not None}
+        if len(columns) != len(source_keys) or any(year not in columns for year in years):
+            continue
+        for source_row in source.get("rows") or []:
+            source_values = source_row.get("values") if isinstance(source_row, dict) else None
+            if not isinstance(source_values, list) or source_total_index >= len(source_values):
+                continue
+            total = _number(source_values[source_total_index])
+            if total is None or any(
+                columns[year] >= len(source_values)
+                or _number(source_values[columns[year]]) != annual_values[index]
+                for index, year in enumerate(years)
+            ):
+                continue
+            matches.append(VerifiedRevenueTotal(
+                value=str(source_values[source_total_index]).strip(),
+                source_block_id=source.get("source_block_id") if isinstance(source.get("source_block_id"), str) else None,
+                source_page=source.get("source_page") if isinstance(source.get("source_page"), int) else None,
+            ))
+    if not matches or len({_number(match.value) for match in matches}) != 1:
+        return None
+    return matches[0]
 
 
 def _fill_annual_total_revenue(table: dict[str, Any], total_index: int | None) -> None:

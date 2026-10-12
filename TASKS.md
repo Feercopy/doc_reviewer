@@ -3068,3 +3068,14 @@ Exit criteria:
   parsed evidence and the existing source/title contract. Added a focused
   regression test for English and Russian page markers with an image placeholder.
   Production PR and deployment verification are pending.
+- 2026-10-13: New Summary Total Revenue source verification is prepared on
+  `codex/new-summary-verified-total-2026-10-13`. New reports accept an explicit
+  Total only when one verified source-table row matches every displayed annual
+  value and the Total horizon. Otherwise the worker discards even a nonempty
+  model Total, sums a complete annual series, or shows a dash. Server-generated
+  provenance records the method and source block/page when available. Existing
+  `same_table_annual_sum` reports remain unchanged; the skill's user-authored
+  row-selection rule is preserved and its Total/JSON clauses are clarified.
+  Verified locally: 705 API/worker tests with standard localhost CORS origins,
+  181 web tests, JSON schema parse, and `git diff --check`. PR/merge/deploy
+  status must be updated after remote checks.

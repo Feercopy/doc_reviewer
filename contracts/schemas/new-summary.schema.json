@@ -119,8 +119,17 @@
       "required": ["periods", "rows"],
       "properties": {
         "total_source_policy": {
-          "const": "same_table_annual_sum",
-          "description": "Technical marker for newly generated reports. Annual Total Revenue and any explicit Total must come from the same current-scenario Financial Model table when available. Never borrow a Total from another table. If that table has no Total Revenue total, sum every shown, complete numeric annual Total Revenue value; do not calculate totals for other rows. Older saved reports omit this marker and retain their historical display behavior."
+          "enum": ["same_table_annual_sum", "same_table_verified_total"],
+          "description": "Technical marker. New reports use same_table_verified_total: accept an explicit Total Revenue only when the server matches every displayed annual value and the Total horizon to one parsed source-table row. Otherwise sum a complete annual series or show a dash. The legacy marker keeps saved reports unchanged."
+        },
+        "total_revenue_provenance": {
+          "type": "object", "additionalProperties": false, "required": ["method"],
+          "properties": {
+            "method": { "enum": ["same_source_table", "annual_sum", "unavailable"] },
+            "source_block_id": { "type": "string", "minLength": 1 },
+            "source_page": { "type": "integer", "minimum": 0 }
+          },
+          "description": "Server-generated provenance for the Total Revenue Total cell in new reports. The model must not invent it. A source block is recorded only for a verified same-row, same-horizon Total; annual_sum uses exactly the displayed years."
         },
         "periods": {
           "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/non_empty_string" },
@@ -135,7 +144,7 @@
             { "allOf": [{ "$ref": "#/$defs/traction_row" }, { "properties": { "label": { "const": "Total Revenue" } } }] }
           ],
           "items": false,
-          "description": "Four rows in fixed order. Revenue rows must come from income, never CoS/COGS/Cost of Sales or another expense section, regardless of row name. For conflicting Total Revenue sources prefer the Financial Model table that shows Revenue and costs; annual values and explicit Total must come from the same current-scenario table. Each values array follows periods exactly; missing metrics use dashes. If Revenue non-DTB is entirely absent, copy each sourced Total Revenue value only into an empty Revenue from DTB cell whose period also has cumulative DTB. Copy the Total column only when DTB covers every shown year with Total Revenue. Never copy when cumulative DTB is absent; never replace sourced Revenue from DTB values."
+          "description": "Four rows in fixed order. Revenue rows must come from income, never CoS/COGS/Cost of Sales or another expense section, regardless of row name. When sources conflict, prefer the complete Total Revenue row from the current Financial Model, not its Total cell in isolation. An explicit Total must match that row's source table and displayed horizon; otherwise sum the complete displayed annual Total Revenue values or use a dash. Each values array follows periods exactly; missing metrics use dashes. If Revenue non-DTB is entirely absent, copy each sourced Total Revenue value only into an empty Revenue from DTB cell whose period also has cumulative DTB. Copy the Total column only when DTB covers every shown year with Total Revenue. Never copy when cumulative DTB is absent; never replace sourced Revenue from DTB values."
         }
       }
     },
@@ -151,7 +160,7 @@
         "values": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Values must be in the same order as periods. Every missing or unextractable value is an em dash (—), never an explanatory phrase or a short hyphen. Explicit Total values must come from the same source table as that row's annual values. Only an absent Total Revenue total may be computed by summing all complete numeric annual Total Revenue values; other row totals are never computed."
+          "description": "Values must be in the same order as periods. Every missing or unextractable value is an em dash (—), never an explanatory phrase or a short hyphen. An explicit Total Revenue Total is accepted only if every displayed annual value and the Total horizon match one verified source-table row. An unverified model-supplied Total is discarded, even when nonempty; sum complete numeric displayed annual Total Revenue values or use a dash. Other row totals are never computed."
         },
         "mismatch_periods": {
           "type": "array", "items": { "$ref": "#/$defs/non_empty_string" },
