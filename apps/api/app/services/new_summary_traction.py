@@ -458,9 +458,13 @@ def _same_row_revenue_total(
             total_text = _normalized_number_syntax(source_values[source_total_index])
             separator = _grouped_separator(total_text)
             if separator is not None and total_text.count(separator) == 1:
-                if any(
+                if not any(
+                    year in columns and columns[year] < len(source_values)
+                    and _grouped_separator(_normalized_number_syntax(source_values[columns[year]])) == separator
+                    for year in years
+                ) or any(
                     year not in columns or columns[year] >= len(source_values)
-                    or _grouped_separator(_normalized_number_syntax(source_values[columns[year]])) != separator
+                    or not _compatible_with_grouped_row(source_values[columns[year]], separator)
                     for year in years
                 ):
                     continue
@@ -485,6 +489,14 @@ def _same_row_revenue_total(
     elif len({_normalized_number_syntax(match.value) for match in matches}) != 1:
         return None
     return matches[0]
+
+
+def _compatible_with_grouped_row(value: Any, separator: str) -> bool:
+    text = _normalized_number_syntax(value)
+    if _grouped_separator(text) == separator:
+        return True
+    number = _unambiguous_number(text)
+    return number is not None and abs(number) < 1000
 
 
 def _fill_annual_total_revenue(table: dict[str, Any], total_index: int | None) -> None:

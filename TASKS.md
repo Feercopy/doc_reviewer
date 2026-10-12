@@ -3098,4 +3098,8 @@ Exit criteria:
   verification without broadening ambiguous source-row matches. A later review
   caught a possible false mismatch for decimal comma notation (`3,500` as 3.5);
   a Total mismatch is now recorded only if no plausible decimal/grouping reading
-  reconciles the components. Focused tests pass; full CI and final review are pending.
+  reconciles the components. The latest review also found that a source row may
+  mix a plain sub-thousand annual cell with grouped larger cells. This is now
+  allowed only when at least one annual cell establishes the same grouping as
+  Total; an isolated grouped Total remains untrusted. Focused tests pass; full
+  CI and final review are pending.
