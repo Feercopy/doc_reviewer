@@ -232,6 +232,25 @@ def test_new_traction_accepts_equal_unambiguous_duplicate_source_totals():
     assert table["total_revenue_provenance"]["method"] == "same_source_table"
 
 
+def test_new_traction_uses_decimal_role_from_source_row():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["0.5", "1.25", "999"]}],
+    }}
+    source = [{"metric": "revenue", "source_block_id": "decimal-source",
+               "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["0.500", "1.25", "1.750"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "1.750"
+    assert table["total_revenue_provenance"]["source_block_id"] == "decimal-source"
+
+    duplicate = deepcopy(source[0])
+    duplicate["rows"][0]["values"][-1] = "1.75"
+    table = with_traction_totals(payload, source_tables=[*source, duplicate], strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "1.750"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
+
 def test_new_traction_reconciles_consistently_grouped_component_totals():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
         "periods": ["2027", "2028", "Total"], "rows": [
@@ -279,6 +298,12 @@ def test_new_traction_uses_one_interpretation_for_shared_separator():
                "rows": [{"label": "Revenue", "values": ["1", "1", "1002"]}]}]
     table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
     assert table["rows"][-1]["values"][-1] == "1002"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+    payload["traction_summary"]["rows"][0]["values"][-1] = "1000.50"
+    payload["traction_summary"]["rows"][1]["values"][-1] = "2.000"
+    source[0]["rows"][0]["values"][-1] = "3000.50"
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
     assert table["rows"][-1]["mismatch_periods"] == ["Total"]
 
     payload["traction_summary"]["rows"][0]["values"][-1] = "1,000.50"

@@ -418,24 +418,45 @@ def _possible_numbers(value: Any) -> set[Decimal]:
     return {grouped, decimal} if decimal is not None else {grouped}
 
 
+def _pinned_roles(texts: list[str]) -> dict[str, bool] | None:
+    roles: dict[str, bool] = {}
+    for text in texts:
+        cell_roles: dict[str, bool] = {}
+        separator = _grouped_separator(text)
+        if separator is not None and text.count(separator) > 1:
+            cell_roles[separator] = True
+        if _GROUPED_DECIMAL_COMMA.fullmatch(text):
+            cell_roles.update({",": True, ".": False})
+        elif _GROUPED_DECIMAL_DOT.fullmatch(text):
+            cell_roles.update({".": True, ",": False})
+        elif separator is None and _number(text) is not None:
+            for decimal_separator in ",.":
+                if decimal_separator in text:
+                    cell_roles[decimal_separator] = False
+        if any(key in roles and roles[key] != role for key, role in cell_roles.items()):
+            return None
+        roles.update(cell_roles)
+    return roles
+
+
+def _numbers_with_roles(value: Any, roles: dict[str, bool]) -> set[Decimal]:
+    text = _normalized_number_syntax(value)
+    values = _possible_numbers(text)
+    separator = _grouped_separator(text)
+    if len(values) > 1 and separator in roles:
+        number = _grouped_number(text) if roles[separator] else _number(text)
+        return {number} if number is not None else set()
+    return values
+
+
 def _proven_total_mismatch(cells: list[Any]) -> bool:
     texts = [_normalized_number_syntax(cell) for cell in cells]
     possibilities = [_possible_numbers(text) for text in texts]
     if not all(possibilities):
         return False
-    pinned_roles: dict[str, bool] = {}
-    for text in texts:
-        roles: dict[str, bool] = {}
-        separator = _grouped_separator(text)
-        if separator is not None and text.count(separator) > 1:
-            roles[separator] = True
-        if _GROUPED_DECIMAL_COMMA.fullmatch(text):
-            roles.update({",": True, ".": False})
-        if _GROUPED_DECIMAL_DOT.fullmatch(text):
-            roles.update({".": True, ",": False})
-        if any(key in pinned_roles and pinned_roles[key] != role for key, role in roles.items()):
-            return False
-        pinned_roles.update(roles)
+    pinned_roles = _pinned_roles(texts)
+    if pinned_roles is None:
+        return False
     ambiguous_separators = sorted({
         separator for text, values in zip(texts, possibilities, strict=True)
         if len(values) > 1 and (separator := _grouped_separator(text)) is not None and separator not in pinned_roles
@@ -445,24 +466,19 @@ def _proven_total_mismatch(cells: list[Any]) -> bool:
         grouping_by_separator.update(pinned_roles)
         coherent = []
         for text, values in zip(texts, possibilities, strict=True):
-            separator = _grouped_separator(text)
-            if len(values) > 1 and separator in grouping_by_separator:
-                number = _grouped_number(text) if grouping_by_separator[separator] else _number(text)
-                coherent.append({number} if number is not None else set())
-            else:
-                coherent.append(values)
+            coherent.append(_numbers_with_roles(text, grouping_by_separator))
         if any(left + right == total for left in coherent[0] for right in coherent[1] for total in coherent[2]):
             return False
     return True
 
 
-def _same_numeric_cell(displayed: Any, source: Any) -> bool:
+def _same_numeric_cell(displayed: Any, source: Any, roles: dict[str, bool]) -> bool:
     displayed_text = _normalized_number_syntax(displayed)
     source_text = _normalized_number_syntax(source)
     if displayed_text == source_text and _possible_numbers(source_text):
         return True
-    displayed_numbers = _possible_numbers(displayed_text)
-    source_numbers = _possible_numbers(source_text)
+    displayed_numbers = _numbers_with_roles(displayed_text, roles)
+    source_numbers = _numbers_with_roles(source_text, roles)
     return len(displayed_numbers) == len(source_numbers) == 1 and displayed_numbers == source_numbers
 
 
@@ -478,7 +494,7 @@ def _same_row_revenue_total(
     if years != list(range(years[0], years[-1] + 1)):
         return None
 
-    matches: list[VerifiedRevenueTotal] = []
+    matches: list[tuple[VerifiedRevenueTotal, Decimal]] = []
     for source in source_tables:
         if not isinstance(source, dict) or source.get("metric") != "revenue":
             continue
@@ -501,8 +517,14 @@ def _same_row_revenue_total(
             if not isinstance(source_values, list) or source_total_index >= len(source_values):
                 continue
             total_text = _normalized_number_syntax(source_values[source_total_index])
+            source_cells = [source_values[columns[year]] for year in years if columns[year] < len(source_values)]
+            if len(source_cells) != len(years):
+                continue
+            source_roles = _pinned_roles([_normalized_number_syntax(cell) for cell in [*source_cells, total_text]])
+            if source_roles is None:
+                continue
             separator = _grouped_separator(total_text)
-            if separator is not None and len(_possible_numbers(total_text)) > 1:
+            if separator is not None and len(_possible_numbers(total_text)) > 1 and separator not in source_roles:
                 if not any(
                     year in columns and columns[year] < len(source_values)
                     and _source_grouping_separator(_normalized_number_syntax(source_values[columns[year]])) == separator
@@ -518,27 +540,23 @@ def _same_row_revenue_total(
                     for year in years
                 ):
                     continue
-            total = _grouped_number(total_text) if separator is not None else _unambiguous_number(total_text)
+                source_roles[separator] = True
+            resolved_total = _numbers_with_roles(total_text, source_roles)
+            total = next(iter(resolved_total)) if len(resolved_total) == 1 else None
             if total is None or any(
                 columns[year] >= len(source_values)
-                or not _same_numeric_cell(values[index], source_values[columns[year]])
+                or not _same_numeric_cell(values[index], source_values[columns[year]], source_roles)
                 for index, year in enumerate(years)
             ):
                 continue
-            matches.append(VerifiedRevenueTotal(
+            matches.append((VerifiedRevenueTotal(
                 value=str(source_values[source_total_index]).strip(),
                 source_block_id=source.get("source_block_id") if isinstance(source.get("source_block_id"), str) else None,
                 source_page=source.get("source_page") if isinstance(source.get("source_page"), int) else None,
-            ))
-    if not matches:
+            ), total))
+    if not matches or len({number for _, number in matches}) != 1:
         return None
-    totals = [_unambiguous_number(match.value) for match in matches]
-    if all(total is not None for total in totals):
-        if len(set(totals)) != 1:
-            return None
-    elif len({_normalized_number_syntax(match.value) for match in matches}) != 1:
-        return None
-    return matches[0]
+    return matches[0][0]
 
 
 def _compatible_with_grouped_row(value: Any, separator: str) -> bool:

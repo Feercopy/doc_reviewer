@@ -3123,3 +3123,8 @@ Exit criteria:
   grouping compatibility now recognizes grouped decimals, while mismatch checks
   pin both grouping and decimal roles consistently across the row. Conflicting
   conventions do not produce an unsupported red mismatch. Focused tests pass.
+- 2026-10-13: PR #111 review exposed three-decimal source values whose decimal
+  role is established by another source cell (`0.500` / `1.25`), plus mismatch
+  checks where plain `1000.50` establishes dot as decimal. The same row-level
+  role inference now drives source matching and arithmetic; duplicate explicit
+  totals are compared by the resolved numeric value. Focused tests pass.
