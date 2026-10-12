@@ -852,7 +852,8 @@ def test_new_summary_persists_clean_title_and_revenue_fallback_in_both_languages
     assert normalized["title"] == "From People to People - AI Summary"
     for version in normalized["versions"]:
         assert version["traction_summary"]["rows"][1]["values"] == ["10", "10"]
-        assert version["traction_summary"]["total_source_policy"] == "same_table_annual_sum"
+        assert version["traction_summary"]["total_source_policy"] == "same_table_verified_total"
+        assert version["traction_summary"]["total_revenue_provenance"] == {"method": "annual_sum"}
 
 
 def test_new_summary_retries_old_or_partial_traction_tables():
