@@ -16,7 +16,7 @@
     "title": {
       "type": "string",
       "pattern": "^.+ - AI Summary$",
-      "description": "Document title: <initiative title> - AI Summary. The initiative title excludes 3Sigma/Trisigma links, URLs, source-link annotations, defense stage or request labels, and document language labels."
+      "description": "Document title: <initiative title> - AI Summary. The initiative title excludes 3Sigma/Trisigma links, URLs, source-link annotations, defense stage or request labels, document language labels, and literal or escaped HTML line breaks (such as <br> before Gate 2)."
     },
     "versions": {
       "type": "array",
@@ -120,7 +120,7 @@
       "properties": {
         "periods": {
           "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/non_empty_string" },
-          "description": "Shared periods for all four metrics. Last column is always Total. Start at the later common year and use matching granularity, preserving later years with dashes for unavailable metrics. Label any DTB H2-only value explicitly in its annual cell."
+          "description": "Shared periods for all four metrics. Last column is always Total. Start at the later common year and use matching granularity, preserving later years with dashes for unavailable metrics. Label any DTB H2-only value explicitly in its annual cell. Prefer the explicitly marked current-scenario horizon in the source table (including FAQ 3) over a similar Total from another scenario or appendix; never relabel a 2026-2030 Total as 2027-2031."
         },
         "rows": {
           "type": "array", "minItems": 4, "maxItems": 4,
@@ -203,7 +203,7 @@
             { "enum": ["есть", "частично подтверждено", "нет"] },
             { "pattern": "^[0-9]+/[0-9]+$" }
           ],
-          "description": "Use есть/частично подтверждено/нет. Gate 2 hypotheses and Stream Review 1 solution checks may use a technical numerator/denominator; visible headings always count detail.items verdicts instead of showing the fraction when items exist. Gate 2 and Stream Review 1 metric linkage is есть only when at least 80 percent of listed input/output metrics have confirmed binding. For Progress Review next-half-year plan, outputs and metrics must both be nonempty for есть; one nonempty group means частично подтверждено, neither means нет. For Progress Review plan-vs-actual, apply the same rule to launches and metrics, regardless of whether individual launch targets were met. If the model omits structured detail, retain the Gate Challenger evidence status rather than treating extraction failure as absence."
+          "description": "Use есть/частично подтверждено/нет. Gate 2 hypotheses and Stream Review 1 solution checks may use a technical numerator/denominator; visible headings always count detail.items verdicts instead of showing the fraction when items exist. Gate 2 and Stream Review 1 metric linkage is есть only when at least 80 percent of listed input/output metrics have confirmed binding. For Progress Review next-half-year plan, outputs and metrics must both be nonempty for есть; one nonempty group means частично подтверждено, neither means нет. For Progress Review and Stream Review 2+ plan-vs-actual, apply the same rule to launches and metrics, regardless of whether individual launch targets were met. If the model omits structured detail, retain the Gate Challenger evidence status rather than treating extraction failure as absence."
         },
         "evidence": {
           "type": "string",
@@ -371,7 +371,7 @@
     },
     "plan_fact_detail": {
       "type": "object", "additionalProperties": false,
-      "description": "For Progress Review, nonempty launches and metrics groups make the required element present; one populated group is partial, neither is missing. A not_completed launch still counts as a documented plan-vs-actual row.",
+      "description": "For Progress Review and Stream Review 2+, nonempty launches and metrics groups make the required element present; one populated group is partial, neither is missing. A not_completed launch still counts as a documented plan-vs-actual row.",
       "required": ["type", "launches", "metrics"],
       "properties": {
         "type": { "const": "plan_fact" },

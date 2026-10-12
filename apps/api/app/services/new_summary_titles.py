@@ -10,6 +10,7 @@ _TRAILING_SOURCE = re.compile(
     re.IGNORECASE,
 )
 _URL = re.compile(r"https?://\S+", re.IGNORECASE)
+_BREAK_TAG = re.compile(r"(?:<br\s*/?>|&lt;br\s*/?&gt;)", re.IGNORECASE)
 _SUMMARY_SUFFIX = re.compile(r"\s*[-–—]\s*AI Summary\s*$", re.IGNORECASE)
 _TITLE_STAGE = (
     r"(?:gate\s*[1-4]|progress\s+review|stream\s+review(?:\s*#?\s*(?:1|2\+?))?"
@@ -31,7 +32,7 @@ _LEADING_TITLE_ANNOTATION = re.compile(
 
 
 def clean_initiative_title(value: str) -> str:
-    title = value.strip()
+    title = _BREAK_TAG.sub(" ", value).strip()
     if title.lower().startswith("ai summary "):
         title = title[len("AI Summary "):]
     title = _SUMMARY_SUFFIX.sub("", title)
@@ -47,7 +48,7 @@ def clean_initiative_title(value: str) -> str:
         if cleaned == title:
             break
         title = cleaned
-    title = re.sub(r"\s+", " ", title).strip(" \t-–—,;:()[]")
+    title = re.sub(r"\s+", " ", title).strip(" \t-–—,;:")
     if re.fullmatch(_TITLE_ANNOTATION_GROUP, title, flags=re.IGNORECASE):
         title = ""
     return title or "Untitled initiative"

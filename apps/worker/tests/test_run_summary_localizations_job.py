@@ -730,6 +730,8 @@ def test_new_summary_title_excludes_trisigma_link_annotations():
         ("English Garden - AI Summary", "English Garden"),
         ("Learning English - AI Summary", "Learning English"),
         ("Progress Review - AI Summary", "Untitled initiative"),
+        ("External Ad Network (inc. AdRiver) -<br>Gate 2 - AI Summary", "External Ad Network (inc. AdRiver)"),
+        ("External Ad Network (inc. AdRiver) -&lt;br/&gt;Gate 2 - AI Summary", "External Ad Network (inc. AdRiver)"),
     ],
 )
 def test_new_summary_title_excludes_stage_and_language_annotations(source, expected):
@@ -1092,6 +1094,61 @@ def test_progress_review_missing_detail_keeps_gate_challenger_evidence_status():
         generated_item={"status": "нет"},
         required_details={},
     ) == "частично подтверждено"
+
+
+@pytest.mark.parametrize(
+    ("has_launches", "has_metrics", "expected_status"),
+    [
+        (True, True, "есть"),
+        (True, False, "частично подтверждено"),
+        (False, True, "частично подтверждено"),
+        (False, False, "нет"),
+    ],
+)
+def test_stream_review_two_plus_plan_fact_uses_structured_groups(
+    has_launches, has_metrics, expected_status,
+):
+    item_id = "stream_review_2_plus_plan_fact_last_half_year"
+    checklist = new_summary_generation._new_summary_stage_checklists()["stream_review_2_plus"]
+    report = _new_summary_report_payload(
+        ru_context="Контекст.", en_context="Context.",
+        stage="Stream Review 2+", required_elements=checklist,
+    )
+    detail = {
+        "type": "plan_fact",
+        "launches": [{"output": "Launch pilot", "status": "completed"}] if has_launches else [],
+        "metrics": [{"metric": "Activation", "planned": "20%", "actual": "10%"}] if has_metrics else [],
+    }
+    for version in report["versions"]:
+        item = next(element for element in version["required_elements"] if element["id"] == item_id)
+        item["status"] = "есть"
+        item["detail"] = detail
+    source_payload = {
+        "document_type": "stream_review_2_plus",
+        "document_stage": "Stream Review 2+",
+        "gate_challenger": {"stage_checklist": [
+            {"id": item["id"], "status": "green", "evidence": "Source evidence"}
+            for item in checklist
+        ]},
+    }
+
+    normalized = new_summary_generation._validated_source_dependent_report(
+        payload=report, source_payload=source_payload,
+        response_schema=new_summary_generation._new_summary_schema(),
+    )
+
+    for version in normalized["versions"]:
+        item = next(element for element in version["required_elements"] if element["id"] == item_id)
+        assert item["status"] == expected_status
+        assert item["detail"]["type"] == "plan_fact"
+
+
+def test_stream_review_two_plus_legacy_required_detail_is_retained():
+    item_id = "stream_review_2_plus_plan_fact_last_half_year"
+    details = new_summary_generation._normalized_required_details({"required_details": {
+        item_id: {"type": "plan_fact", "launches": [{"output": "Launch pilot", "status": "completed"}], "metrics": []},
+    }})
+    assert details[item_id]["launches"][0]["output"] == "Launch pilot"
 
 
 def test_stream_review_two_plus_keeps_its_existing_plan_status_policy():

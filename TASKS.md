@@ -21,6 +21,18 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] 2026-10-12: Clean literal/escaped line-break markers and trailing stage
+  annotations from New Summary titles, including saved reports on the web.
+  Prefer the current-scenario source table and its explicit Total horizon in
+  Traction Summary (FAQ 3 in the reported case); do not recalculate old report
+  numbers. Preserve the user's local Stream Review 2+ plan/fact prose and route
+  its structured launches/metrics to the existing web and PDF/Word renderers.
+  Verification: 385 worker, 314 API and 181 web tests passed; Next.js
+  production build passed. The API suite used explicit local CORS origins
+  because this machine's .env omits the test-only port 3100. Docker web rebuild
+  is unavailable while the local daemon is stopped. PR and production
+  deployment are pending.
+
 - [~] 2026-10-09: Publish the user's local New Summary title and Traction
   clarifications. Keep the authored prose, align the technical JSON guidance and
   schema descriptions, remove stage/language annotations from generated and

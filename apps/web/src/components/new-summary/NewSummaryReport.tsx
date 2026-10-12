@@ -620,6 +620,7 @@ function displayTitle(title: string): string {
   const trailingAnnotation = new RegExp(`(?:\\s*[-–—_|:]\\s*|\\s*\\()\\s*${annotationGroup}\\s*\\)?\\s*$|\\s+(?:${stage}|${shortLanguage})\\s*$`, "i");
   const leadingAnnotation = new RegExp(`^\\s*(?:${annotationGroup}\\s*[-–—_|:]\\s*|${stage}\\s+)`, "i");
   let initiative = title
+    .replace(/(?:<br\s*\/?>|&lt;br\s*\/?&gt;)/gi, " ")
     .replace(/^AI Summary\s+/i, "")
     .replace(/\s*[-–—]\s*AI Summary\s*$/i, "")
     .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/gi, (_, label: string) =>
@@ -634,7 +635,7 @@ function displayTitle(title: string): string {
     if (cleaned === initiative) break;
     initiative = cleaned;
   }
-  initiative = initiative.replace(/\s+/g, " ").replace(/^[\s\-–—,;:()[\]]+|[\s\-–—,;:()[\]]+$/g, "");
+  initiative = initiative.replace(/\s+/g, " ").replace(/^[\s\-–—,;:]+|[\s\-–—,;:]+$/g, "");
   if (new RegExp(`^${annotationGroup}$`, "i").test(initiative)) initiative = "";
   return `${initiative || "Untitled initiative"} - AI Summary`;
 }

@@ -61,6 +61,13 @@ describe("new-summary-v4 rendering", () => {
     expect(html).not.toContain("IC update request");
   });
 
+  it("removes a literal line break and stage from an existing saved title", () => {
+    const updated = { ...content, title: "External Ad Network (inc. AdRiver) -<br>Gate 2 - AI Summary" };
+    const html = renderToStaticMarkup(React.createElement(NewSummaryReportView, { report: { analysis_id: "test", ru: updated, en: { ...updated, language: "en" } } }));
+    expect(html).toContain("<h1>External Ad Network (inc. AdRiver) - AI Summary</h1>");
+    expect(html).not.toContain("&lt;br&gt;");
+  });
+
   it("keeps English when it is part of the initiative name", () => {
     const updated = { ...content, title: "Learning English - AI Summary" };
     const html = renderToStaticMarkup(React.createElement(NewSummaryReportView, { report: { analysis_id: "test", ru: updated, en: { ...updated, language: "en" } } }));
@@ -147,6 +154,19 @@ describe("new-summary-v4 rendering", () => {
     expect(html).not.toContain("javascript:");
     expect(html).not.toContain("<h2>Выявленные проблемы</h2>");
     expect(html).not.toContain("<span>Качество документа");
+  });
+
+  it("renders Stream Review 2+ plan-vs-actual details in both groups", () => {
+    const updated: NewSummaryContent = { ...content, schema_version: "new-summary-v8", stage: "Stream Review 2+", required_elements: [{
+      id: "stream_review_2_plus_plan_fact_last_half_year", label: "План-факт", status: "есть", detail: {
+        type: "plan_fact", launches: [{ output: "Пилот", status: "completed" }],
+        metrics: [{ metric: "Активация", planned: "20%", actual: "21%" }],
+      },
+    }] };
+    const html = renderToStaticMarkup(React.createElement(NewSummaryReportView, { report: { analysis_id: "test", ru: updated, en: { ...updated, language: "en" } } }));
+    expect(html).toContain("План-факт по запускам");
+    expect(html).toContain("План-факт по метрикам");
+    expect(html).toContain("<th>Активация</th><td>20%</td><td>21%</td>");
   });
 
   it("preserves distinguishing labels when a table has multiple source rows", () => {
