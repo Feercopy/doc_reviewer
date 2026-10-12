@@ -359,13 +359,8 @@ def _reconcile_total_revenue_mismatch(table: dict[str, Any], total_index: int | 
     values = [row.get("values", []) if isinstance(row, dict) else [] for row in (*components, total_row)]
     if all(total_index < len(row_values) for row_values in values):
         cells = [row_values[total_index] for row_values in values]
-        amounts = [_unambiguous_number(cell) for cell in cells]
-        if amounts[2] is None and table.get("total_revenue_provenance", {}).get("method") == "same_source_table":
-            amounts[2] = _grouped_number(_normalized_number_syntax(cells[2]))
-        separators = [_grouped_separator(_normalized_number_syntax(cell)) for cell in cells]
-        if any(amount is None for amount in amounts) and separators[0] is not None and len(set(separators)) == 1:
-            amounts = [_grouped_number(_normalized_number_syntax(cell)) for cell in cells]
-        if all(amount is not None for amount in amounts) and amounts[0] + amounts[1] != amounts[2]:
+        amounts = [_possible_numbers(cell) for cell in cells]
+        if all(amounts) and not any(left + right == total for left in amounts[0] for right in amounts[1] for total in amounts[2]):
             retained.append(table["periods"][total_index])
     if retained or isinstance(markers, list):
         total_row["mismatch_periods"] = retained
@@ -396,6 +391,21 @@ def _grouped_separator(text: str) -> str | None:
 def _grouped_number(text: str) -> Decimal | None:
     separator = _grouped_separator(text)
     return _number(text.replace(separator, "")) if separator is not None else None
+
+
+def _possible_numbers(value: Any) -> set[Decimal]:
+    text = _normalized_number_syntax(value)
+    separator = _grouped_separator(text)
+    if separator is None:
+        number = _number(text)
+        return {number} if number is not None else set()
+    grouped = _grouped_number(text)
+    if grouped is None:
+        return set()
+    if text.count(separator) > 1:
+        return {grouped}
+    decimal = _number(text)
+    return {grouped, decimal} if decimal is not None else {grouped}
 
 
 def _same_numeric_cell(displayed: Any, source: Any) -> bool:

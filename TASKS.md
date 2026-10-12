@@ -3095,5 +3095,7 @@ Exit criteria:
 - 2026-10-13: PR #111 exact-head review additionally identified million-scale
   grouped annual cells and mismatches between a source-verified grouped Total
   and plain/space-grouped component Totals. Both are now handled after source
-  verification without broadening ambiguous source-row matches. Focused tests
-  pass; full CI and final review are pending.
+  verification without broadening ambiguous source-row matches. A later review
+  caught a possible false mismatch for decimal comma notation (`3,500` as 3.5);
+  a Total mismatch is now recorded only if no plausible decimal/grouping reading
+  reconciles the components. Focused tests pass; full CI and final review are pending.
