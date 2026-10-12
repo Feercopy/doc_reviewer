@@ -699,6 +699,21 @@ def test_new_summary_traction_summary_filters_blank_period_values_together():
     assert normalized["rows"][0]["values"] == ["1", "3", "—"]
 
 
+def test_new_summary_traction_uses_annual_columns_and_labeled_dtb_h2_only():
+    normalized = new_summary_generation._normalize_traction_summary(
+        {"periods": ["Q3 2026", "H2 2026", "CY27", "Total"], "rows": [
+            {"label": "DTB Uplift (Cumul)", "values": ["1%", "2%", "3%", "—"]},
+            {"label": "Revenue from DTB", "values": ["10", "20", "30", "—"]},
+            {"label": "Revenue non-DTB", "values": ["—", "—", "—", "—"]},
+            {"label": "Total Revenue", "values": ["40", "50", "60", "—"], "mismatch_periods": ["CY27"]},
+        ]}, language="en",
+    )
+    assert normalized["periods"] == ["2026", "2027", "Total"]
+    assert normalized["rows"][0]["values"] == ["2% (H2 2026)", "3%", "—"]
+    assert normalized["rows"][3]["values"] == ["—", "60", "—"]
+    assert normalized["rows"][3]["mismatch_periods"] == ["2027"]
+
+
 def test_new_summary_generated_blank_cell_records_extraction_uncertainty():
     normalized = new_summary_generation._normalize_traction_summary(
         {"periods": ["2026", "2027", "Total"], "rows": [
@@ -837,6 +852,7 @@ def test_new_summary_persists_clean_title_and_revenue_fallback_in_both_languages
     assert normalized["title"] == "From People to People - AI Summary"
     for version in normalized["versions"]:
         assert version["traction_summary"]["rows"][1]["values"] == ["10", "10"]
+        assert version["traction_summary"]["total_source_policy"] == "same_table_annual_sum"
 
 
 def test_new_summary_retries_old_or_partial_traction_tables():

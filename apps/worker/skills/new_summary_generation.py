@@ -21,7 +21,7 @@ from app.models.document import Document
 from app.schemas.enums import Provider, RunStatus
 from app.services.document_type_detector import progress_review_display_stage
 from app.services.new_summary_titles import clean_initiative_title, display_new_summary_title
-from app.services.new_summary_traction import with_traction_totals
+from app.services.new_summary_traction import _period_key, with_traction_totals
 from app.services.new_summaries import (
     NEW_SUMMARY_GENERATION_MODE,
     NEW_SUMMARY_VERSION,
@@ -711,7 +711,7 @@ def _generation_prompt(
             "В фоновом запуске нет MCP или браузера: не утверждай, что открыл внешнюю ссылку. Оценивай её содержимое только если оно уже присутствует во входных результатах.",
             "Для Mockups, видео, дизайна или пользовательского flow выбирай подходящие ссылки из source_document.links по label/context, включая FAQ 1 и подписи See full design here или MLP. Верни source_link_id, точно равный id выбранной ссылки, вместо url. Адреса скрыты анонимизатором: это НЕ означает, что ссылки невозможно скопировать; сервер восстановит их по id. Не выбирай финансовые модели, исследования и другие ссылки только потому, что они рядом. Наличие ссылки не доказывает содержимое файла по ней.",
             "Для статуса пункта Mockups достаточно хотя бы одной такой исходной ссылки: поставь Есть, не проверяя содержимое по адресу.",
-            "Для Traction Summary верни одну таблицу: `traction_summary` с `periods` и четырьмя строками `rows` в порядке схемы. Даже при отсутствии чисел оставь эти строки и `Total`, поставь прочерки; не выдумывай периоды и значения.",
+            "Для Traction Summary верни одну таблицу: `traction_summary` с годовыми `periods` и четырьмя строками `rows` в порядке схемы. При конфликте исходных таблиц для Total Revenue выбирай Financial Model текущего сценария; не бери годовые значения из одной таблицы, а Total из другой. Если у этой строки нет исходного Total, вычисляй его только из полного ряда её годовых чисел. Даже при отсутствии чисел оставь эти строки и `Total`, поставь прочерки; не выдумывай периоды и значения.",
             "Не добавляй Markdown вокруг JSON. Не добавляй пояснения вне JSON.",
             "## JSON Schema",
             json.dumps(response_schema, ensure_ascii=False, indent=2),
@@ -886,6 +886,7 @@ def _validated_source_dependent_report(
         normalized_version = with_traction_totals(
             {**normalized_version, "schema_version": normalized["schema_version"]},
             source_tables=source_tables if isinstance(source_tables, list) and source_tables else None,
+            strict_total_source=True,
         )
         normalized_version.pop("schema_version", None)
         if isinstance(expected_stage, str):
@@ -995,9 +996,21 @@ def _normalize_traction_summary(value: Any, *, language: str) -> dict[str, Any]:
     if "tables" in value:
         raise ValueError("new_summary_traction_format_mismatch")
     raw_periods = value.get("periods")
-    periods = [str(period).strip() for period in raw_periods if str(period).strip()] if isinstance(raw_periods, list) else []
-    if not periods or not re.search(r"\b(?:total|итого|всего)\b", periods[-1], re.IGNORECASE):
-        periods.append("Total")
+    raw_periods = [str(period).strip() for period in raw_periods] if isinstance(raw_periods, list) else []
+    selected: dict[int, tuple[int, bool]] = {}
+    total_index: int | None = None
+    for index, period in enumerate(raw_periods):
+        if re.search(r"\b(?:total|итого|всего)\b", period, re.IGNORECASE):
+            total_index = index
+            continue
+        key = _period_key(period)
+        if key is None or key[1:] not in {(1, 12), (7, 12)}:
+            continue
+        is_h2 = key[1:] == (7, 12)
+        if key[0] not in selected or (selected[key[0]][1] and not is_h2):
+            selected[key[0]] = (index, is_h2)
+    annual_columns = [(year, *selected[year]) for year in sorted(selected)]
+    periods = [str(year) for year, _, _ in annual_columns] + ["Total"]
     raw_rows = value.get("rows") if isinstance(value.get("rows"), list) else []
     labels = ("DTB Uplift (Cumul)", "Revenue from DTB", "Revenue non-DTB", "Total Revenue")
     if raw_rows and (len(raw_rows) != len(labels) or {row.get("label") for row in raw_rows if isinstance(row, dict)} != set(labels)):
@@ -1007,17 +1020,27 @@ def _normalize_traction_summary(value: Any, *, language: str) -> dict[str, Any]:
     for label in labels:
         source = by_label.get(label) or {}
         raw_values = source.get("values") if isinstance(source.get("values"), list) else []
-        values = [
-            _traction_cell(raw_values[index]) if index < len(raw_values) else "—"
-            for index in range(len(periods))
-        ]
+        values = []
+        for year, index, is_h2 in annual_columns:
+            cell = _traction_cell(raw_values[index]) if index < len(raw_values) else "—"
+            if is_h2:
+                cell = f"{cell} (H2 {year})" if label == labels[0] and cell != "—" else "—"
+            values.append(cell)
+        values.append(_traction_cell(raw_values[total_index]) if total_index is not None and total_index < len(raw_values) else "—")
         if label == labels[0]:
             values[-1] = "—"
         row = {"label": label, "values": values}
         if label == labels[-1]:
             mismatches = source.get("mismatch_periods")
             if isinstance(mismatches, list):
-                row["mismatch_periods"] = [period for period in periods if period in mismatches]
+                normalized_mismatches: set[str] = set()
+                for period in mismatches:
+                    key = _period_key(period)
+                    if key and key[1:] == (1, 12):
+                        normalized_mismatches.add(str(key[0]))
+                    elif re.search(r"\b(?:total|итого|всего)\b", str(period), re.IGNORECASE):
+                        normalized_mismatches.add("Total")
+                row["mismatch_periods"] = [period for period in periods if period in normalized_mismatches]
         rows.append(row)
     return {"periods": periods, "rows": rows}
 

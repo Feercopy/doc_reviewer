@@ -4,13 +4,15 @@ import re
 from copy import deepcopy
 from typing import Any
 
-from app.services.new_summary_source_tables import clean_table_cell, verified_revenue_total
+from app.services.new_summary_source_tables import _number, clean_table_cell, verified_revenue_total
 
 
 _TOTAL_PERIOD = re.compile(r"\b(?:total|ttl|итого|всего)\b", re.IGNORECASE)
 _YEAR = re.compile(r"\b20\d{2}\b")
 _REVENUE_LABEL = re.compile(r"\b(?:revenue|выручк[а-я]*)\b", re.IGNORECASE)
 _CUMULATIVE = re.compile(r"\b(?:cum(?:ulative)?|накоплен\w*)\b", re.IGNORECASE)
+_PLAIN_REVENUE = re.compile(r"-?(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[.,]\d{1,2})?")
+_STRICT_TOTAL_POLICY = "same_table_annual_sum"
 
 
 def _period_key(label: Any) -> tuple[int, int, int] | None:
@@ -141,6 +143,8 @@ def needs_verified_revenue_total(payload: dict[str, Any]) -> bool:
         summary = payload.get("traction_summary")
         if not isinstance(summary, dict):
             return False
+        if summary.get("total_source_policy") == _STRICT_TOTAL_POLICY:
+            return False
         periods = summary.get("periods")
         rows = summary.get("rows")
         if not isinstance(periods, list) or not isinstance(rows, list):
@@ -175,14 +179,18 @@ def needs_verified_revenue_total(payload: dict[str, Any]) -> bool:
 def with_traction_totals(
     payload: dict[str, Any], *, source_tables: list[dict[str, Any]] | None = None,
     source_blocks: list[dict[str, Any]] | None = None,
+    strict_total_source: bool = False,
 ) -> dict[str, Any]:
-    """Normalize display periods and Total cells without calculating source figures."""
+    """Normalize display periods and Total cells; new reports may sum annual Revenue."""
     summary = payload.get("traction_summary")
     if not isinstance(summary, dict):
         return payload
     if payload.get("schema_version") in {"new-summary-v7", "new-summary-v8"}:
         updated = deepcopy(payload)
         table = updated["traction_summary"]
+        if strict_total_source:
+            table["total_source_policy"] = _STRICT_TOTAL_POLICY
+        same_table_only = table.get("total_source_policy") == _STRICT_TOTAL_POLICY
         table["periods"] = [clean_table_cell(period) for period in table.get("periods", [])]
         for row in table.get("rows", []):
             if not isinstance(row, dict):
@@ -190,12 +198,14 @@ def with_traction_totals(
             row["label"] = clean_table_cell(row.get("label", ""))
             row["values"] = [display_traction_cell(value, payload.get("schema_version")) for value in row.get("values", [])]
         total_index = next((i for i, period in enumerate(table["periods"]) if _TOTAL_PERIOD.search(str(period))), None)
-        if total_index is not None and source_blocks:
+        if total_index is not None and source_blocks and not same_table_only:
             total_revenue = next((row for row in table.get("rows", []) if row.get("label") == "Total Revenue"), None)
             if isinstance(total_revenue, dict) and total_index < len(total_revenue["values"]) and _missing_total(total_revenue["values"][total_index], include_dashes=payload.get("schema_version") == "new-summary-v8"):
                 verified = verified_revenue_total(table["periods"], total_revenue["values"], source_blocks)
                 if verified:
                     total_revenue["values"][total_index] = verified.value
+        if same_table_only:
+            _fill_annual_total_revenue(table, total_index)
         return apply_revenue_from_dtb_fallback(updated) if payload.get("schema_version") == "new-summary-v8" else updated
     tables = summary.get("tables") if isinstance(summary.get("tables"), list) else [summary]
     language = payload.get("language")
@@ -289,6 +299,36 @@ def with_traction_totals(
                 row["values"][total_index] = "—"
     updated["traction_summary"] = {**updated_summary, "tables": updated_tables} if "tables" in updated_summary else updated_tables[0]
     return updated
+
+
+def _fill_annual_total_revenue(table: dict[str, Any], total_index: int | None) -> None:
+    """Sum complete, unambiguous annual values only for a missing Total Revenue total."""
+    periods = table.get("periods")
+    rows = table.get("rows")
+    if not isinstance(periods, list) or not isinstance(rows, list) or total_index != len(periods) - 1:
+        return
+    row = next((item for item in rows if isinstance(item, dict) and item.get("label") == "Total Revenue"), None)
+    values = row.get("values") if isinstance(row, dict) else None
+    if not isinstance(values, list) or len(values) != len(periods) or not _missing_total(values[total_index], include_dashes=True):
+        return
+    keys = [_period_key(period) for period in periods[:total_index]]
+    if not keys or any(key is None or key[1:] != (1, 12) for key in keys):
+        return
+    years = [key[0] for key in keys if key is not None]
+    if years != list(range(years[0], years[-1] + 1)):
+        return
+    annual_values = [str(value).strip() for value in values[:total_index]]
+    if any(_PLAIN_REVENUE.fullmatch(value) is None for value in annual_values):
+        return
+    numbers = [_number(value) for value in annual_values]
+    if any(number is None for number in numbers):
+        return
+    calculated = format(sum(numbers).normalize(), "f")
+    if any("," in value for value in annual_values) and not any("." in value for value in annual_values):
+        calculated = calculated.replace(".", ",")
+    values[total_index] = calculated
+    if _YEAR.search(str(periods[total_index])):
+        periods[total_index] = f"Total {years[0]}–{years[-1]}"
 
 
 def apply_revenue_from_dtb_fallback(payload: dict[str, Any]) -> dict[str, Any]:

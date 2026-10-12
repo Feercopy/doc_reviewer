@@ -21,6 +21,16 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] 2026-10-12: Publish the user's revised New Summary Traction rules. New
+  generated v8 reports carry `total_source_policy=same_table_annual_sum`, use
+  annual columns, prefer the current Financial Model Revenue row in structured
+  source candidates, never borrow a ToBe P&L Total, and calculate only a
+  missing Total Revenue from a complete contiguous numeric annual row. Older
+  saved reports without the marker keep their existing read/export behavior.
+  Updated skill technical guidance, shared schema, worker and API normalization
+  with focused tests. Verification: 703 API/worker and 181 web tests passed;
+  JSON syntax and diff check passed. PR, merge and production deploy pending.
+
 - [~] 2026-10-12: Clean literal/escaped line-break markers and trailing stage
   annotations from New Summary titles, including saved reports on the web.
   Prefer the current-scenario source table and its explicit Total horizon in

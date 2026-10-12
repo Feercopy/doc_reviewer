@@ -7,7 +7,6 @@ from app.services.new_summary_source_tables import (
     _number as source_number,
     block_rows as _block_rows,
     expense_row_indices,
-    verified_revenue_total,
     verified_table_blocks,
 )
 from app.services.new_summary_traction import _period_key
@@ -22,6 +21,7 @@ _INCREMENT = re.compile(r"\b(?:increment(?:al)?|incr\.?|uplift|прирост|и
 _EXCLUDED = re.compile(r"\b(?:tobe|to.be|baseline|before|previous|prior|diff|delta|разниц|до\s+изменен)\b", re.IGNORECASE)
 _METRICS = {"revenue": re.compile(r"\b(?:revenue|выручк[а-я]*)\b", re.IGNORECASE), "dtb": re.compile(r"\bDTB\b", re.IGNORECASE)}
 _CUMULATIVE = re.compile(r"\b(?:cum(?:mul(?:ative)?|ulative)?|накоплен\w*)\b", re.IGNORECASE)
+_FINANCIAL_MODEL = re.compile(r"(?:financial\s+model|финансов\w*\s+модел\w*)", re.IGNORECASE)
 
 
 def source_traction_tables(document: Document) -> list[dict[str, Any]]:
@@ -49,36 +49,7 @@ def source_traction_tables(document: Document) -> list[dict[str, Any]]:
                     for row in table["rows"]:
                         if row not in selected["rows"]:
                             selected["rows"].append(row)
-    tables = [best[metric][1] for metric in ("revenue", "dtb") if metric in best]
-    for table in tables:
-        if table["metric"] != "revenue":
-            continue
-        total_index = next((index for index, period in enumerate(table["periods"]) if _TOTAL.search(period)), None)
-        if total_index is not None and all(
-            total_index < len(row["values"]) and row["values"][total_index]
-            for row in table["rows"]
-        ):
-            continue
-        totals = [
-            verified_revenue_total(table["periods"], row["values"], blocks)
-            if total_index is None or total_index >= len(row["values"]) or not row["values"][total_index]
-            else None
-            for row in table["rows"]
-        ]
-        if not any(totals):
-            continue
-        if total_index is None:
-            years = [period for period in table["periods"] if re.fullmatch(r"20\d{2}", period)]
-            table["periods"].append(f"Total {years[0]}–{years[-1]}")
-        for row, total in zip(table["rows"], totals, strict=True):
-            if total_index is None:
-                row["values"].append(total.value if total else "")
-            elif total:
-                row["values"][total_index] = total.value
-        matched = next(total for total in totals if total is not None)
-        table["total_source_block_id"] = matched.source_block_id
-        table["total_source_page"] = matched.source_page
-    return tables
+    return [best[metric][1] for metric in ("revenue", "dtb") if metric in best]
 
 
 def _incremental_rows(rows: list[list[str]]) -> list[tuple[int, dict[str, Any]]]:
@@ -101,7 +72,8 @@ def _incremental_rows(rows: list[list[str]]) -> list[tuple[int, dict[str, Any]]]
             continue
         context_incremental = bool(_INCREMENT.search(active_context))
         row_incremental = bool(_INCREMENT.search(first))
-        if not (context_incremental or row_incremental):
+        financial_revenue = bool(_FINANCIAL_MODEL.search(active_context) and _METRICS["revenue"].search(first))
+        if not (context_incremental or row_incremental or financial_revenue):
             continue
         if _EXCLUDED.search(first):
             continue
@@ -120,6 +92,10 @@ def _incremental_rows(rows: list[list[str]]) -> list[tuple[int, dict[str, Any]]]
             continue
         periods = [active_header[i].strip() for i in indices]
         score = 10 if context_incremental else 5
+        if financial_revenue:
+            score += 20
+            if re.fullmatch(r"(?:total\s+)?revenue|выручка", first, re.IGNORECASE):
+                score += 5
         if _TOTAL.search(first):
             score += 3
         if any(_TOTAL.search(period) for period in periods):

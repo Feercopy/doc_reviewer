@@ -200,7 +200,7 @@ def test_source_tables_use_matching_owned_artifact_and_ignore_stale_parse(tmp_pa
     assert source_traction_tables(document) == []
 
 
-def test_revenue_total_can_use_matching_faq_tobe_total_but_not_another_scenario(tmp_path, monkeypatch):
+def test_source_traction_tables_never_borrows_total_from_tobe(tmp_path, monkeypatch):
     import app.core.config as config
 
     monkeypatch.setattr(config, "get_settings", lambda: SimpleNamespace(storage_root=tmp_path))
@@ -229,13 +229,42 @@ def test_revenue_total_can_use_matching_faq_tobe_total_but_not_another_scenario(
     (parsed_dir / "structured.json").write_text(json.dumps(artifact))
     revenue = source_traction_tables(document)[0]
     assert revenue["metric"] == "revenue"
-    assert revenue["periods"][-1] == "Total 2026–2030"
-    assert revenue["rows"][0]["values"][-1] == "9 318"
-    assert revenue["total_source_block_id"] == "b0089"
+    assert revenue["periods"][-1] == "2030"
+    assert revenue["rows"][0]["values"][-1] == "4 250"
+    assert revenue["source_block_id"] == "b0082"
 
     tobe["metadata"]["rows"][1][3] = "236"
     (parsed_dir / "structured.json").write_text(json.dumps(artifact))
     assert source_traction_tables(document)[0]["periods"][-1] == "2030"
+
+
+def test_financial_model_revenue_beats_conflicting_incremental_table(tmp_path, monkeypatch):
+    import app.core.config as config
+
+    monkeypatch.setattr(config, "get_settings", lambda: SimpleNamespace(storage_root=tmp_path))
+    document = SimpleNamespace(owner_id=uuid4(), id=uuid4(), parsed_text="Parsed source", file_hash_sha256="a" * 64)
+    parsed_dir = tmp_path / "documents" / str(document.owner_id) / str(document.id) / "parsed"
+    parsed_dir.mkdir(parents=True)
+    artifact = {
+        "source": {"sha256": document.file_hash_sha256},
+        "outputs": {"plain_text_sha256": hashlib.sha256(document.parsed_text.encode()).hexdigest()},
+        "blocks": [
+            {"id": "old", "type": "table", "metadata": {"rows": [
+                ["Increment P&L", "2027", "2028", "Total"], ["Revenue", "10", "20", "30"],
+            ]}},
+            {"id": "current", "type": "table", "metadata": {"rows": [
+                ["Financial Model", "2027", "2028", "Total"],
+                ["Revenue", "12", "22", "34"],
+                ["CoS", "", "", ""], ["Partner revenue", "2", "3", "5"],
+            ]}},
+        ],
+    }
+    (parsed_dir / "structured.json").write_text(json.dumps(artifact))
+
+    revenue = source_traction_tables(document)[0]
+    assert revenue["source_block_id"] == "current"
+    assert revenue["rows"][0]["values"] == ["12", "22", "34"]
+    assert all(row["label"] != "Partner revenue" for row in revenue["rows"])
 
 
 def test_verified_revenue_total_rejects_wrong_horizon_or_ambiguous_totals():
