@@ -3118,3 +3118,8 @@ Exit criteria:
   and zero annuals that must not establish an ambiguous grouping convention.
   All four now use the shared possible-number parser; 31 focused tests pass.
   Full tests and remote checks remain pending.
+- 2026-10-13: Follow-up review exposed mixed grouped/integer annual rows and
+  a decimal separator that must constrain an ambiguous component Total. Source
+  grouping compatibility now recognizes grouped decimals, while mismatch checks
+  pin both grouping and decimal roles consistently across the row. Conflicting
+  conventions do not produce an unsupported red mismatch. Focused tests pass.

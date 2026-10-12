@@ -212,6 +212,12 @@ def test_new_traction_accepts_grouping_with_decimal_fraction_from_source():
         assert table["rows"][0]["values"][-1] == total
         assert table["total_revenue_provenance"]["source_block_id"] == "financial-model-decimal"
 
+    payload["traction_summary"]["rows"][0]["values"] = ["1,000", "2,000.00", "999"]
+    source[0]["rows"][0]["values"] = ["1,000", "2,000.00", "3,000"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "3,000"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
 
 def test_new_traction_accepts_equal_unambiguous_duplicate_source_totals():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
@@ -273,6 +279,12 @@ def test_new_traction_uses_one_interpretation_for_shared_separator():
                "rows": [{"label": "Revenue", "values": ["1", "1", "1002"]}]}]
     table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
     assert table["rows"][-1]["values"][-1] == "1002"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+    payload["traction_summary"]["rows"][0]["values"][-1] = "1,000.50"
+    payload["traction_summary"]["rows"][1]["values"][-1] = "2.000"
+    source[0]["rows"][0]["values"][-1] = "3,000.50"
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
     assert table["rows"][-1]["mismatch_periods"] == ["Total"]
 
     payload["traction_summary"]["rows"][0]["values"][-1] = "1,000,000"

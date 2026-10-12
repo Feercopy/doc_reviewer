@@ -423,19 +423,26 @@ def _proven_total_mismatch(cells: list[Any]) -> bool:
     possibilities = [_possible_numbers(text) for text in texts]
     if not all(possibilities):
         return False
-    pinned_separators = {
-        separator for text in texts
-        if (separator := _grouped_separator(text)) is not None and text.count(separator) > 1
-    }
-    pinned_separators.update("," for text in texts if _GROUPED_DECIMAL_COMMA.fullmatch(text))
-    pinned_separators.update("." for text in texts if _GROUPED_DECIMAL_DOT.fullmatch(text))
+    pinned_roles: dict[str, bool] = {}
+    for text in texts:
+        roles: dict[str, bool] = {}
+        separator = _grouped_separator(text)
+        if separator is not None and text.count(separator) > 1:
+            roles[separator] = True
+        if _GROUPED_DECIMAL_COMMA.fullmatch(text):
+            roles.update({",": True, ".": False})
+        if _GROUPED_DECIMAL_DOT.fullmatch(text):
+            roles.update({".": True, ",": False})
+        if any(key in pinned_roles and pinned_roles[key] != role for key, role in roles.items()):
+            return False
+        pinned_roles.update(roles)
     ambiguous_separators = sorted({
         separator for text, values in zip(texts, possibilities, strict=True)
-        if len(values) > 1 and (separator := _grouped_separator(text)) is not None and separator not in pinned_separators
+        if len(values) > 1 and (separator := _grouped_separator(text)) is not None and separator not in pinned_roles
     })
     for choices in product((False, True), repeat=len(ambiguous_separators)):
         grouping_by_separator = dict(zip(ambiguous_separators, choices, strict=True))
-        grouping_by_separator.update({separator: True for separator in pinned_separators})
+        grouping_by_separator.update(pinned_roles)
         coherent = []
         for text, values in zip(texts, possibilities, strict=True):
             separator = _grouped_separator(text)
@@ -498,8 +505,12 @@ def _same_row_revenue_total(
             if separator is not None and len(_possible_numbers(total_text)) > 1:
                 if not any(
                     year in columns and columns[year] < len(source_values)
-                    and _grouped_separator(_normalized_number_syntax(source_values[columns[year]])) == separator
-                    and len(_possible_numbers(source_values[columns[year]])) > 1
+                    and _source_grouping_separator(_normalized_number_syntax(source_values[columns[year]])) == separator
+                    and (
+                        len(_possible_numbers(source_values[columns[year]])) > 1
+                        or _grouped_decimal_number(_normalized_number_syntax(source_values[columns[year]])) is not None
+                        or _normalized_number_syntax(source_values[columns[year]]).count(separator) > 1
+                    )
                     for year in years
                 ) or any(
                     year not in columns or columns[year] >= len(source_values)
@@ -532,10 +543,18 @@ def _same_row_revenue_total(
 
 def _compatible_with_grouped_row(value: Any, separator: str) -> bool:
     text = _normalized_number_syntax(value)
-    if _grouped_separator(text) == separator:
+    if _source_grouping_separator(text) == separator:
         return True
     number = _unambiguous_number(text)
     return number is not None and abs(number) < 1000
+
+
+def _source_grouping_separator(text: str) -> str | None:
+    if _GROUPED_DECIMAL_COMMA.fullmatch(text):
+        return ","
+    if _GROUPED_DECIMAL_DOT.fullmatch(text):
+        return "."
+    return _grouped_separator(text)
 
 
 def _fill_annual_total_revenue(table: dict[str, Any], total_index: int | None) -> None:
