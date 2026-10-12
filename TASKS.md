@@ -3107,3 +3107,9 @@ Exit criteria:
   provenance. Numeric-cell comparison now accepts a non-exact notation only
   when both possible-value sets collapse to one identical number, preserving
   the rejection of ambiguous `1` versus `1,000`.
+- 2026-10-13: Another review caught malformed trailing groups (`3,000,5`),
+  zero-only source rows, and mixed interpretations of the same separator across
+  component totals. Repeated grouping now requires exact three-digit groups;
+  zero needs no separator evidence because both interpretations are identical;
+  mismatch detection compares one coherent interpretation per separator. The
+  focused regression suite passes; final CI/review/merge remain pending.

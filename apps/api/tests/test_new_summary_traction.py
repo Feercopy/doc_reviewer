@@ -118,6 +118,11 @@ def test_new_traction_rejects_ambiguous_grouped_source_numbers():
         assert table["rows"][0]["values"][-1] == "-3"
         assert table["total_revenue_provenance"] == {"method": "annual_sum"}
 
+    source[0]["rows"][0]["values"] = ["10", "20", "3,000,5"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "30"
+    assert table["total_revenue_provenance"] == {"method": "annual_sum"}
+
 
 def test_new_traction_preserves_exact_grouped_values_from_one_source_row():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
@@ -160,6 +165,11 @@ def test_new_traction_matches_zero_across_grouped_decimal_notation():
     table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
     assert table["rows"][0]["values"][-1] == "0,000"
     assert table["total_revenue_provenance"] == {"method": "same_source_table", "source_block_id": "financial-model-zero"}
+
+    source[0]["rows"][0]["values"] = ["0", "0", "0,000"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "0,000"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
 
 
 def test_new_traction_preserves_repeated_grouped_total_from_matching_row():
@@ -226,6 +236,21 @@ def test_new_traction_does_not_claim_mismatch_for_ambiguous_decimal_total():
     table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
     assert table["rows"][-1]["values"][-1] == "3,500"
     assert table["rows"][-1]["mismatch_periods"] == []
+
+
+def test_new_traction_uses_one_interpretation_for_shared_separator():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["0", "0", "1,000"]},
+            {"label": "Revenue non-DTB", "values": ["0", "0", "2,000"]},
+            {"label": "Total Revenue", "values": ["1", "1", "999"], "mismatch_periods": []},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1", "1", "1002"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "1002"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
 
 
 def test_new_traction_recomputes_total_mismatch_after_replacement():

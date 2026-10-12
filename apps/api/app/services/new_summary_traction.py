@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from copy import deepcopy
 from decimal import Decimal
+from itertools import product
 from typing import Any
 
 from app.services.new_summary_source_tables import (
@@ -18,7 +19,7 @@ _YEAR = re.compile(r"\b20\d{2}\b")
 _REVENUE_LABEL = re.compile(r"\b(?:revenue|выручк[а-я]*)\b", re.IGNORECASE)
 _CUMULATIVE = re.compile(r"\b(?:cum(?:ulative)?|накоплен\w*)\b", re.IGNORECASE)
 _PLAIN_REVENUE = re.compile(r"-?(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[.,]\d{1,2})?")
-_AMBIGUOUS_GROUPING = re.compile(r"-?\d{1,3}(?:[,.]\d{3})+(?:[,.]\d+)?")
+_AMBIGUOUS_GROUPING = re.compile(r"-?\d{1,3}(?:[,.]\d{3})+")
 _STRICT_TOTAL_POLICY = "same_table_annual_sum"
 _VERIFIED_TOTAL_POLICY = "same_table_verified_total"
 
@@ -359,8 +360,7 @@ def _reconcile_total_revenue_mismatch(table: dict[str, Any], total_index: int | 
     values = [row.get("values", []) if isinstance(row, dict) else [] for row in (*components, total_row)]
     if all(total_index < len(row_values) for row_values in values):
         cells = [row_values[total_index] for row_values in values]
-        amounts = [_possible_numbers(cell) for cell in cells]
-        if all(amounts) and not any(left + right == total for left in amounts[0] for right in amounts[1] for total in amounts[2]):
+        if _proven_total_mismatch(cells):
             retained.append(table["periods"][total_index])
     if retained or isinstance(markers, list):
         total_row["mismatch_periods"] = retained
@@ -406,6 +406,30 @@ def _possible_numbers(value: Any) -> set[Decimal]:
         return {grouped}
     decimal = _number(text)
     return {grouped, decimal} if decimal is not None else {grouped}
+
+
+def _proven_total_mismatch(cells: list[Any]) -> bool:
+    texts = [_normalized_number_syntax(cell) for cell in cells]
+    possibilities = [_possible_numbers(text) for text in texts]
+    if not all(possibilities):
+        return False
+    ambiguous_separators = sorted({
+        separator for text, values in zip(texts, possibilities, strict=True)
+        if len(values) > 1 and (separator := _grouped_separator(text)) is not None
+    })
+    for choices in product((False, True), repeat=len(ambiguous_separators)):
+        grouping_by_separator = dict(zip(ambiguous_separators, choices, strict=True))
+        coherent = []
+        for text, values in zip(texts, possibilities, strict=True):
+            separator = _grouped_separator(text)
+            if len(values) > 1 and separator in grouping_by_separator:
+                number = _grouped_number(text) if grouping_by_separator[separator] else _number(text)
+                coherent.append({number} if number is not None else set())
+            else:
+                coherent.append(values)
+        if any(left + right == total for left in coherent[0] for right in coherent[1] for total in coherent[2]):
+            return False
+    return True
 
 
 def _same_numeric_cell(displayed: Any, source: Any) -> bool:
@@ -457,7 +481,7 @@ def _same_row_revenue_total(
                 continue
             total_text = _normalized_number_syntax(source_values[source_total_index])
             separator = _grouped_separator(total_text)
-            if separator is not None and total_text.count(separator) == 1:
+            if separator is not None and len(_possible_numbers(total_text)) > 1:
                 if not any(
                     year in columns and columns[year] < len(source_values)
                     and _grouped_separator(_normalized_number_syntax(source_values[columns[year]])) == separator
