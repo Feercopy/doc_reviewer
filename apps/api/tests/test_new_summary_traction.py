@@ -149,6 +149,19 @@ def test_new_traction_allows_sub_thousand_cell_in_grouped_source_row():
     assert table["total_revenue_provenance"] == {"method": "same_source_table", "source_block_id": "financial-model-5"}
 
 
+def test_new_traction_matches_zero_across_grouped_decimal_notation():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["0", "0", "999"]}],
+    }}
+    source = [{"metric": "revenue", "source_block_id": "financial-model-zero",
+               "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["0,000", "0,000", "0,000"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "0,000"
+    assert table["total_revenue_provenance"] == {"method": "same_source_table", "source_block_id": "financial-model-zero"}
+
+
 def test_new_traction_preserves_repeated_grouped_total_from_matching_row():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
         "periods": ["2027", "2028", "Total"],

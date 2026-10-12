@@ -3103,3 +3103,7 @@ Exit criteria:
   allowed only when at least one annual cell establishes the same grouping as
   Total; an isolated grouped Total remains untrusted. Focused tests pass; full
   CI and final review are pending.
+- 2026-10-13: PR #111 review found `0` versus `0,000` loses valid same-row
+  provenance. Numeric-cell comparison now accepts a non-exact notation only
+  when both possible-value sets collapse to one identical number, preserving
+  the rejection of ambiguous `1` versus `1,000`.

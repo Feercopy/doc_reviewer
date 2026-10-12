@@ -413,9 +413,9 @@ def _same_numeric_cell(displayed: Any, source: Any) -> bool:
     source_text = _normalized_number_syntax(source)
     if displayed_text == source_text and (_number(source_text) is not None or _grouped_separator(source_text) is not None):
         return True
-    displayed_number = _unambiguous_number(displayed_text)
-    source_number = _unambiguous_number(source_text)
-    return displayed_number is not None and source_number is not None and displayed_number == source_number
+    displayed_numbers = _possible_numbers(displayed_text)
+    source_numbers = _possible_numbers(source_text)
+    return len(displayed_numbers) == len(source_numbers) == 1 and displayed_numbers == source_numbers
 
 
 def _same_row_revenue_total(
