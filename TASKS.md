@@ -3128,3 +3128,7 @@ Exit criteria:
   checks where plain `1000.50` establishes dot as decimal. The same row-level
   role inference now drives source matching and arithmetic; duplicate explicit
   totals are compared by the resolved numeric value. Focused tests pass.
+- 2026-10-13: Latest review found that strict verification skipped mismatch
+  reconciliation when the source Total equaled the model's existing text.
+  Total mismatch markers are now recomputed on every strict verification,
+  including unchanged values. Added both missing- and stale-marker tests.

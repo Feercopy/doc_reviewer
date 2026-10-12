@@ -350,6 +350,26 @@ def test_new_traction_recomputes_total_mismatch_after_replacement():
     assert table["rows"][-1]["mismatch_periods"] == []
 
 
+def test_new_traction_reconciles_mismatch_when_verified_total_is_unchanged():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["200,000", "200,000", "400,000"]},
+            {"label": "Revenue non-DTB", "values": ["250,000", "250,000", "500,000"]},
+            {"label": "Total Revenue", "values": ["450,000", "450,000", "1,000,000"], "mismatch_periods": []},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["450,000", "450,000", "1,000,000"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "1,000,000"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+    payload["traction_summary"]["rows"][1]["values"][-1] = "600,000"
+    payload["traction_summary"]["rows"][-1]["mismatch_periods"] = ["Total"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["mismatch_periods"] == []
+
+
 def test_saved_same_table_annual_sum_report_is_not_recomputed():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
         "total_source_policy": "same_table_annual_sum",

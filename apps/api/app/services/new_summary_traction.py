@@ -215,14 +215,13 @@ def with_traction_totals(
                 verified = verified_revenue_total(table["periods"], total_revenue["values"], source_blocks)
                 if verified:
                     total_revenue["values"][total_index] = verified.value
-        total_changed = False
         if strict_total_source:
-            total_changed = _verify_or_sum_revenue_total(table, total_index, source_tables or [])
+            _verify_or_sum_revenue_total(table, total_index, source_tables or [])
         elif same_table_only:
             _fill_annual_total_revenue(table, total_index)
         if payload.get("schema_version") == "new-summary-v8":
             updated = apply_revenue_from_dtb_fallback(updated)
-        if total_changed:
+        if strict_total_source:
             _reconcile_total_revenue_mismatch(updated["traction_summary"], total_index)
         return updated
     tables = summary.get("tables") if isinstance(summary.get("tables"), list) else [summary]
