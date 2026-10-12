@@ -92,6 +92,7 @@ INLINE_REQUIRED_DETAIL_TYPES = {
     "gate3_stop_criteria": "stop_criteria",
     "progress_review_stop_criteria": "stop_criteria",
     "progress_review_plan_fact_last_half_year": "plan_fact",
+    "stream_review_2_plus_plan_fact_last_half_year": "plan_fact",
     "progress_review_next_half_year_plan": "next_review_plan",
     "stream_review_1_stop_criteria": "stop_criteria",
     "stream_review_1_solution_validation": "solution_validation",
@@ -107,6 +108,7 @@ DETAIL_REPLACES_EVIDENCE = {
     "gate3_pmf_criteria",
     "progress_review_next_half_year_plan",
     "progress_review_plan_fact_last_half_year",
+    "stream_review_2_plus_plan_fact_last_half_year",
     "stream_review_1_solution_validation",
     "stream_review_1_input_output_metric_link",
     "stream_review_1_half_year_plan_with_metrics",
@@ -1151,6 +1153,7 @@ def _normalized_required_details(payload: dict[str, Any]) -> dict[str, Any]:
             continue
         normalized_detail = _normalized_required_detail(detail)
         if normalized_detail is not None:
+            normalized[item_id] = normalized_detail
             normalized[_canonical_required_element_id(item_id)] = normalized_detail
     return normalized
 
@@ -1235,7 +1238,7 @@ def _normalized_required_detail(detail: Any) -> dict[str, Any] | None:
             for metric in [_non_empty_string(item.get("metric"))]
             if metric and isinstance(item.get("planned"), str) and isinstance(item.get("actual"), str)
         ] if isinstance(detail.get("metrics"), list) else []
-        return {"type": detail_type, "launches": launches, "metrics": metrics} if launches or metrics else None
+        return {"type": detail_type, "launches": launches, "metrics": metrics}
     if detail_type == "source_links":
         links = [
             {"label": label, **({"source_link_id": link_id} if link_id else {"url": url})}
@@ -1403,6 +1406,7 @@ def _required_element_status(
     progress_groups = {
         "progress_review_next_half_year_plan": ("next_review_plan", "outputs_until_next_review", "metrics_until_next_review"),
         "progress_review_plan_fact_last_half_year": ("plan_fact", "launches", "metrics"),
+        "stream_review_2_plus_plan_fact_last_half_year": ("plan_fact", "launches", "metrics"),
     }
     if item_id in progress_groups:
         detail_type, first_group, second_group = progress_groups[item_id]

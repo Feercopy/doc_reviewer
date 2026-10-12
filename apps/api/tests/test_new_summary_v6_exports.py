@@ -44,3 +44,31 @@ def test_v6_exports_counts_stops_and_launch_colors(language):
     assert text.count(additional) == 1
     assert "Stop if funding ends." in text
     assert report == original
+
+
+def test_stream_review_two_plus_plan_fact_exports_to_word_and_pdf():
+    content = {
+        "schema_version": "new-summary-v8", "language": "ru", "title": "Example - AI Summary",
+        "stage": "Stream Review 2+", "context": "Контекст.",
+        "traction_summary": {"periods": ["2027", "Total"], "rows": [
+            {"label": label, "values": ["—", "—"]} for label in (
+                "DTB Uplift (Cumul)", "Revenue from DTB", "Revenue non-DTB", "Total Revenue",
+            )
+        ]},
+        "required_elements": [{
+            "id": "stream_review_2_plus_plan_fact_last_half_year", "label": "План-факт", "status": "есть",
+            "detail": {"type": "plan_fact", "launches": [{"output": "Пилот", "status": "completed"}],
+                       "metrics": [{"metric": "Активация", "planned": "20%", "actual": "21%"}]},
+        }],
+    }
+    report = {"ru": content, "en": {**content, "language": "en"}}
+    provenance = NewSummaryExportProvenance("a", "d", "skill", "1", "test", "mock", None)
+    docx = Document(BytesIO(_build_docx(report, provenance)))
+    text = "\n".join(paragraph.text for paragraph in docx.paragraphs)
+    assert "План-факт по запускам" in text
+    assert "Пилот" in text
+    assert any("Активация" in cell.text for table in docx.tables for row in table.rows for cell in row.cells)
+    pdf = PdfReader(BytesIO(_build_pdf(report, provenance)))
+    pdf_text = "\n".join(page.extract_text() for page in pdf.pages)
+    assert "План-факт по запускам" in pdf_text
+    assert "Активация" in pdf_text
