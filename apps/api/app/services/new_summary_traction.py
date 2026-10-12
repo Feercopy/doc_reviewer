@@ -358,7 +358,11 @@ def _reconcile_total_revenue_mismatch(table: dict[str, Any], total_index: int | 
     components = (rows.get("Revenue from DTB"), rows.get("Revenue non-DTB"))
     values = [row.get("values", []) if isinstance(row, dict) else [] for row in (*components, total_row)]
     if all(total_index < len(row_values) for row_values in values):
-        amounts = [_unambiguous_number(row_values[total_index]) for row_values in values]
+        cells = [row_values[total_index] for row_values in values]
+        amounts = [_unambiguous_number(cell) for cell in cells]
+        separators = [_grouped_separator(_normalized_number_syntax(cell)) for cell in cells]
+        if any(amount is None for amount in amounts) and separators[0] is not None and len(set(separators)) == 1:
+            amounts = [_grouped_number(_normalized_number_syntax(cell)) for cell in cells]
         if all(amount is not None for amount in amounts) and amounts[0] + amounts[1] != amounts[2]:
             retained.append(table["periods"][total_index])
     if retained or isinstance(markers, list):
@@ -367,8 +371,9 @@ def _reconcile_total_revenue_mismatch(table: dict[str, Any], total_index: int | 
 
 def _unambiguous_number(value: Any) -> Decimal | None:
     text = _normalized_number_syntax(value)
-    if _AMBIGUOUS_GROUPING.fullmatch(text):
-        return None
+    separator = _grouped_separator(text)
+    if separator is not None:
+        return _grouped_number(text) if text.count(separator) > 1 else None
     return _number(text)
 
 
@@ -379,10 +384,22 @@ def _normalized_number_syntax(value: Any) -> str:
     return text
 
 
+def _grouped_separator(text: str) -> str | None:
+    if not _AMBIGUOUS_GROUPING.fullmatch(text):
+        return None
+    separators = {char for char in text if char in ",."}
+    return next(iter(separators)) if len(separators) == 1 else None
+
+
+def _grouped_number(text: str) -> Decimal | None:
+    separator = _grouped_separator(text)
+    return _number(text.replace(separator, "")) if separator is not None else None
+
+
 def _same_numeric_cell(displayed: Any, source: Any) -> bool:
     displayed_text = _normalized_number_syntax(displayed)
     source_text = _normalized_number_syntax(source)
-    if displayed_text == source_text and _number(source_text) is not None:
+    if displayed_text == source_text and (_number(source_text) is not None or _grouped_separator(source_text) is not None):
         return True
     displayed_number = _unambiguous_number(displayed_text)
     source_number = _unambiguous_number(source_text)
@@ -424,16 +441,15 @@ def _same_row_revenue_total(
             if not isinstance(source_values, list) or source_total_index >= len(source_values):
                 continue
             total_text = _normalized_number_syntax(source_values[source_total_index])
-            total = _number(total_text)
-            if _AMBIGUOUS_GROUPING.fullmatch(total_text):
-                separator = "," if "," in total_text else "."
+            separator = _grouped_separator(total_text)
+            if separator is not None and total_text.count(separator) == 1:
                 if any(
                     year not in columns or columns[year] >= len(source_values)
-                    or not _AMBIGUOUS_GROUPING.fullmatch(_normalized_number_syntax(source_values[columns[year]]))
-                    or separator not in _normalized_number_syntax(source_values[columns[year]])
+                    or _grouped_separator(_normalized_number_syntax(source_values[columns[year]])) != separator
                     for year in years
                 ):
                     continue
+            total = _grouped_number(total_text) if separator is not None else _number(total_text)
             if total is None or any(
                 columns[year] >= len(source_values)
                 or not _same_numeric_cell(values[index], source_values[columns[year]])
@@ -445,7 +461,13 @@ def _same_row_revenue_total(
                 source_block_id=source.get("source_block_id") if isinstance(source.get("source_block_id"), str) else None,
                 source_page=source.get("source_page") if isinstance(source.get("source_page"), int) else None,
             ))
-    if not matches or len({_normalized_number_syntax(match.value) for match in matches}) != 1:
+    if not matches:
+        return None
+    totals = [_unambiguous_number(match.value) for match in matches]
+    if all(total is not None for total in totals):
+        if len(set(totals)) != 1:
+            return None
+    elif len({_normalized_number_syntax(match.value) for match in matches}) != 1:
         return None
     return matches[0]
 

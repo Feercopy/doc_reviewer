@@ -3087,5 +3087,8 @@ Exit criteria:
   component totals instead of being removed unconditionally. Exact same-row
   grouped figures remain eligible only when the annual cells and Total use
   consistent grouping; an isolated ambiguous Total is rejected. Focused tests
-  and 708 API/worker tests pass. Release status to be verified through a follow-up
-  PR and production workflow.
+  and 708 API/worker tests pass. A further PR #111 review found repeated
+  grouping, consistently grouped component totals, and equivalent duplicate
+  totals written as `35`/`35.0`; all three are now handled without accepting
+  ambiguous cross-format values. The focused tests and 711 API/worker tests
+  pass. Merge and production workflow remain to be verified.
