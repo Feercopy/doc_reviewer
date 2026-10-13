@@ -16,6 +16,7 @@ export type SharedAnalysis = {
   id: string;
   title: string;
   status: string;
+  processing: boolean;
   created_at: string;
   product_markdown: string | null;
   summary_ru: NewSummaryContent | null;
