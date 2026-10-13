@@ -3157,3 +3157,9 @@ Exit criteria:
   and its block/page provenance survive the regression example. Verified 39
   focused and 725 API/worker tests locally; remote review, merge and deploy
   remain pending.
+- 2026-10-13: PR #111 admin-merge surfaced unresolved review threads; the
+  paginated GitHub API had hidden two recent findings. An ambiguous sourced
+  Total is now compared independently from component-row locale, and a plain
+  four-digit annual value can coexist with grouped values in one source row.
+  Both have focused regressions. Verified 41 focused and 727 API/worker tests;
+  review-thread resolution, merge and production deployment remain pending.

@@ -470,15 +470,15 @@ def _proven_total_mismatch(cells: list[Any], *, verified_total: Decimal | None =
         possibilities[2] = {verified_total}
     if not all(possibilities):
         return False
-    role_texts = texts[:2] if verified_total is not None else texts
+    # An unresolved source Total may use a different locale from the component rows.
+    role_texts = texts[:2]
     pinned_roles, conflicts = _pinned_roles(role_texts)
     if _ambiguous_conflict(role_texts, conflicts):
         return all(len(values) == 1 for values in possibilities) and (
             next(iter(possibilities[0])) + next(iter(possibilities[1])) != next(iter(possibilities[2]))
         )
     ambiguous_separators = sorted({
-        separator for text, values in zip(texts[:2] if verified_total is not None else texts,
-                                          possibilities[:2] if verified_total is not None else possibilities, strict=True)
+        separator for text, values in zip(texts[:2], possibilities[:2], strict=True)
         if len(values) > 1 and (separator := _grouped_separator(text)) is not None and separator not in pinned_roles
     })
     for choices in product((False, True), repeat=len(ambiguous_separators)):
@@ -486,7 +486,10 @@ def _proven_total_mismatch(cells: list[Any], *, verified_total: Decimal | None =
         grouping_by_separator.update(pinned_roles)
         coherent = []
         for index, text in enumerate(texts):
-            coherent.append({verified_total} if index == 2 and verified_total is not None else _numbers_with_roles(text, grouping_by_separator))
+            if index == 2:
+                coherent.append({verified_total} if verified_total is not None else possibilities[2])
+            else:
+                coherent.append(_numbers_with_roles(text, grouping_by_separator))
         if any(left + right == total for left in coherent[0] for right in coherent[1] for total in coherent[2]):
             return False
     return True
@@ -592,8 +595,7 @@ def _compatible_with_grouped_row(value: Any, separator: str) -> bool:
     text = _normalized_number_syntax(value)
     if _source_grouping_separator(text) == separator:
         return True
-    number = _unambiguous_number(text)
-    return number is not None and abs(number) < 1000
+    return _unambiguous_number(text) is not None
 
 
 def _source_grouping_separator(text: str) -> str | None:
