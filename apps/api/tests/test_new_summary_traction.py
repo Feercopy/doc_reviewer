@@ -428,6 +428,13 @@ def test_verified_total_does_not_conflict_with_component_number_locale():
     table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
     assert table["rows"][-1]["mismatch_periods"] == ["Total"]
 
+    payload["traction_summary"]["rows"][0]["values"][-1] = "1,000.50"
+    payload["traction_summary"]["rows"][1]["values"][-1] = "2.000,00"
+    payload["traction_summary"]["rows"][-1]["values"][-1] = "3500"
+    source[0]["rows"][0]["values"][-1] = "3500"
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
 
 def test_verified_duplicate_total_is_not_source_order_dependent():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {

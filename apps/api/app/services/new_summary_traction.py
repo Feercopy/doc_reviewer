@@ -459,7 +459,9 @@ def _proven_total_mismatch(cells: list[Any], *, verified_total: Decimal | None =
         return False
     pinned_roles = _pinned_roles(texts[:2] if verified_total is not None else texts)
     if pinned_roles is None:
-        return False
+        return all(len(values) == 1 for values in possibilities) and (
+            next(iter(possibilities[0])) + next(iter(possibilities[1])) != next(iter(possibilities[2]))
+        )
     ambiguous_separators = sorted({
         separator for text, values in zip(texts[:2] if verified_total is not None else texts,
                                           possibilities[:2] if verified_total is not None else possibilities, strict=True)

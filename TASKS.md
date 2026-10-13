@@ -3147,3 +3147,6 @@ Exit criteria:
   is eligible if every affected cell has one unambiguous numeric value;
   conflicting roles veto only rows with unresolved ambiguous cells. Focused
   tests pass, including the cross-locale and same-text/different-number cases.
+- 2026-10-13: Marker reconciliation now also compares individually unambiguous
+  component totals directly when their locale styles conflict. A role conflict
+  only suppresses a red mismatch when at least one cell remains ambiguous.
