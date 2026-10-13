@@ -3142,3 +3142,8 @@ Exit criteria:
   dependent marker colors. Once the Total is numerically proved, only the
   components establish roles for mismatch arithmetic; among equal resolved
   source totals, an explicitly proved match is preferred. Focused tests pass.
+- 2026-10-13: Source/display annual cells now compare role-resolved numeric
+  possibilities even when their text matches. A row with mixed locale notation
+  is eligible if every affected cell has one unambiguous numeric value;
+  conflicting roles veto only rows with unresolved ambiguous cells. Focused
+  tests pass, including the cross-locale and same-text/different-number cases.

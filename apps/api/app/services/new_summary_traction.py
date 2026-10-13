@@ -481,10 +481,10 @@ def _same_numeric_cell(
 ) -> bool:
     displayed_text = _normalized_number_syntax(displayed)
     source_text = _normalized_number_syntax(source)
-    if displayed_text == source_text and _possible_numbers(source_text):
-        return True
     displayed_numbers = _numbers_with_roles(displayed_text, displayed_roles)
     source_numbers = _numbers_with_roles(source_text, source_roles)
+    if displayed_text == source_text and displayed_numbers & source_numbers:
+        return True
     return len(displayed_numbers) == len(source_numbers) == 1 and displayed_numbers == source_numbers
 
 
@@ -498,7 +498,9 @@ def _same_row_revenue_total(
         return None
     displayed_roles = _pinned_roles([_normalized_number_syntax(value) for value in values[:-1]])
     if displayed_roles is None:
-        return None
+        if any(len(_possible_numbers(value)) > 1 for value in values[:-1]):
+            return None
+        displayed_roles = {}
     years = [key[0] for key in annual_keys if key is not None]
     if years != list(range(years[0], years[-1] + 1)):
         return None
@@ -531,7 +533,9 @@ def _same_row_revenue_total(
                 continue
             source_roles = _pinned_roles([_normalized_number_syntax(cell) for cell in [*source_cells, total_text]])
             if source_roles is None:
-                continue
+                if any(len(_possible_numbers(cell)) > 1 for cell in [*source_cells, total_text]):
+                    continue
+                source_roles = {}
             separator = _grouped_separator(total_text)
             proven_total = len(_possible_numbers(total_text)) == 1 or (separator is not None and separator in source_roles)
             if separator is not None and len(_possible_numbers(total_text)) > 1 and separator not in source_roles:
