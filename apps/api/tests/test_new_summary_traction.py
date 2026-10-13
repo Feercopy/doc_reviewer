@@ -94,6 +94,409 @@ def test_new_traction_accepts_total_only_from_matching_source_row_and_horizon():
         assert table["total_revenue_provenance"] == {"method": "annual_sum"}
 
 
+def test_new_traction_rejects_ambiguous_grouped_source_numbers():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Total Revenue", "values": ["10", "20", "999"]},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["10,000", "20,000", "30,000"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "30"
+    assert table["total_revenue_provenance"] == {"method": "annual_sum"}
+
+    source[0]["rows"][0]["values"] = ["10", "20", "30,000"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "30"
+
+    signed = deepcopy(payload)
+    signed["traction_summary"]["rows"][0]["values"] = ["-1", "-2", "999"]
+    for grouped in ("(1,000)", "−1,000", "-1, 000", "-1.000"):
+        source[0]["rows"][0]["values"] = [grouped, "-2", "-3,000"]
+        table = with_traction_totals(signed, source_tables=source, strict_total_source=True)["traction_summary"]
+        assert table["rows"][0]["values"][-1] == "-3"
+        assert table["total_revenue_provenance"] == {"method": "annual_sum"}
+
+    source[0]["rows"][0]["values"] = ["10", "20", "3,000,5"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "30"
+    assert table["total_revenue_provenance"] == {"method": "annual_sum"}
+
+
+def test_new_traction_preserves_exact_grouped_values_from_one_source_row():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["1,000", "2,000", "999"]}],
+    }}
+    source = [{"metric": "revenue", "source_block_id": "faq-3-table", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,000", "2,000", "3,000"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "3,000"
+    assert table["total_revenue_provenance"] == {"method": "same_source_table", "source_block_id": "faq-3-table"}
+
+    payload["traction_summary"]["rows"][0]["values"][0] = "1"
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "—"
+    assert table["total_revenue_provenance"] == {"method": "unavailable"}
+
+
+def test_new_traction_allows_sub_thousand_cell_in_grouped_source_row():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["500", "1,000", "999"]}],
+    }}
+    source = [{"metric": "revenue", "source_block_id": "financial-model-5",
+               "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["500", "1,000", "1,500"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "1,500"
+    assert table["total_revenue_provenance"] == {"method": "same_source_table", "source_block_id": "financial-model-5"}
+
+
+def test_new_traction_allows_plain_thousands_in_grouped_source_row():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["1000", "2,000", "999"]}],
+    }}
+    source = [{"metric": "revenue", "source_block_id": "financial-model-mixed",
+               "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1000", "2,000", "3,000"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "3,000"
+    assert table["total_revenue_provenance"] == {
+        "method": "same_source_table", "source_block_id": "financial-model-mixed",
+    }
+
+
+def test_new_traction_matches_zero_across_grouped_decimal_notation():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["0", "0", "999"]}],
+    }}
+    source = [{"metric": "revenue", "source_block_id": "financial-model-zero",
+               "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["0,000", "0,000", "0,000"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "0,000"
+    assert table["total_revenue_provenance"] == {"method": "same_source_table", "source_block_id": "financial-model-zero"}
+
+    source[0]["rows"][0]["values"] = ["0", "0", "0,000"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "0,000"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
+    duplicate = deepcopy(source[0])
+    duplicate["rows"][0]["values"][-1] = "0"
+    table = with_traction_totals(payload, source_tables=[source[0], duplicate], strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "0,000"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
+
+def test_new_traction_preserves_repeated_grouped_total_from_matching_row():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["400,000", "600,000", "999"]}],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["400,000", "600,000", "1,000,000"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "1,000,000"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
+    payload["traction_summary"]["rows"][0]["values"] = ["1,000,000", "2,000,000", "999"]
+    source[0]["rows"][0]["values"] = ["1,000,000", "2,000,000", "3,000,000"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "3,000,000"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
+
+def test_new_traction_accepts_grouping_with_decimal_fraction_from_source():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["1,000.50", "2,000.25", "999"]}],
+    }}
+    source = [{"metric": "revenue", "source_block_id": "financial-model-decimal",
+               "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,000.50", "2,000.25", "3,000.75"]}]}]
+    for first, second, total in (("1,000.50", "2,000.25", "3,000.75"),
+                                 ("1.000,50", "2.000,25", "3.000,75")):
+        payload["traction_summary"]["rows"][0]["values"] = [first, second, "999"]
+        source[0]["rows"][0]["values"] = [first, second, total]
+        table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+        assert table["rows"][0]["values"][-1] == total
+        assert table["total_revenue_provenance"]["source_block_id"] == "financial-model-decimal"
+
+    payload["traction_summary"]["rows"][0]["values"] = ["1,000", "2,000.00", "999"]
+    source[0]["rows"][0]["values"] = ["1,000", "2,000.00", "3,000"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "3,000"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
+
+def test_new_traction_accepts_equal_unambiguous_duplicate_source_totals():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["10", "20", "999"]}],
+    }}
+    sources = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+                "rows": [{"label": "Revenue", "values": ["10", "20", total]}]}
+               for total in ("35", "35.0")]
+    table = with_traction_totals(payload, source_tables=sources, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "35"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
+
+def test_new_traction_uses_decimal_role_from_source_row():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["0.5", "1.25", "999"]}],
+    }}
+    source = [{"metric": "revenue", "source_block_id": "decimal-source",
+               "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["0.500", "1.25", "1.750"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "1.750"
+    assert table["total_revenue_provenance"]["source_block_id"] == "decimal-source"
+
+    duplicate = deepcopy(source[0])
+    duplicate["rows"][0]["values"][-1] = "1.75"
+    table = with_traction_totals(payload, source_tables=[*source, duplicate], strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "1.750"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
+    payload["traction_summary"]["rows"][0]["values"] = ["0,500", "1,25", "999"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "1.750"
+    assert table["total_revenue_provenance"]["method"] == "same_source_table"
+
+
+def test_same_text_with_conflicting_resolved_roles_does_not_verify_source():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["1,000", "2,00", "999"]}],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,000", "2", "1,002"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "—"
+    assert table["total_revenue_provenance"]["method"] == "unavailable"
+
+
+def test_unambiguous_mixed_locale_source_row_can_verify_total():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["1,000.50", "2.000,00", "999"]}],
+    }}
+    source = [{"metric": "revenue", "source_block_id": "mixed-locale",
+               "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,000.50", "2.000,00", "3 000.50"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "3 000.50"
+    assert table["total_revenue_provenance"]["source_block_id"] == "mixed-locale"
+
+
+def test_source_row_retains_unconflicted_separator_role_across_mixed_locales():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["1", "2499", "999"]}],
+    }}
+    source = [{"metric": "revenue", "source_block_id": "mixed-role", "source_page": 7,
+               "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,000", "2499.0", "2.500,00"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "2.500,00"
+    assert table["total_revenue_provenance"] == {
+        "method": "same_source_table", "source_block_id": "mixed-role", "source_page": 7,
+    }
+
+
+def test_new_traction_reconciles_consistently_grouped_component_totals():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["500", "500", "1,000"]},
+            {"label": "Revenue non-DTB", "values": ["1,000", "1,000", "2,000"]},
+            {"label": "Total Revenue", "values": ["1,000", "2,000", "999"], "mismatch_periods": []},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,000", "2,000", "3,500"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "3,500"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+    payload["traction_summary"]["rows"][0]["values"][-1] = "1 000"
+    payload["traction_summary"]["rows"][1]["values"][-1] = "2 000"
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+
+def test_new_traction_does_not_claim_mismatch_for_ambiguous_decimal_total():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["1.0", "0.5", "1.5"]},
+            {"label": "Revenue non-DTB", "values": ["1.0", "1.0", "2.0"]},
+            {"label": "Total Revenue", "values": ["1,500", "2,000", "999"], "mismatch_periods": ["Total"]},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,500", "2,000", "3,500"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "3,500"
+    assert table["rows"][-1]["mismatch_periods"] == []
+
+
+def test_unresolved_source_total_does_not_inherit_component_locale():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["0", "0", "1,00"]},
+            {"label": "Revenue non-DTB", "values": ["0", "0", "3499"]},
+            {"label": "Total Revenue", "values": ["1,500", "2,000", "999"], "mismatch_periods": ["Total"]},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,500", "2,000", "3,500"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "3,500"
+    assert table["rows"][-1]["mismatch_periods"] == []
+
+
+def test_new_traction_uses_one_interpretation_for_shared_separator():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["0", "0", "1,000"]},
+            {"label": "Revenue non-DTB", "values": ["0", "0", "2,000"]},
+            {"label": "Total Revenue", "values": ["1", "1", "999"], "mismatch_periods": []},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1", "1", "1002"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "1002"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+    payload["traction_summary"]["rows"][0]["values"][-1] = "1000.50"
+    payload["traction_summary"]["rows"][1]["values"][-1] = "2.000"
+    source[0]["rows"][0]["values"][-1] = "3000.50"
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+    payload["traction_summary"]["rows"][0]["values"][-1] = "1,000.50"
+    payload["traction_summary"]["rows"][1]["values"][-1] = "2.000"
+    source[0]["rows"][0]["values"][-1] = "3,000.50"
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+    payload["traction_summary"]["rows"][0]["values"][-1] = "1,000,000"
+    payload["traction_summary"]["rows"][1]["values"][-1] = "500,000"
+    source[0]["rows"][0]["values"][-1] = "1,000,500"
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+
+def test_zero_annual_does_not_establish_grouping_for_ambiguous_total():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["0", "20", "999"]}],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["0,000", "20", "3,000"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "20"
+    assert table["total_revenue_provenance"]["method"] == "annual_sum"
+
+
+def test_new_traction_recomputes_total_mismatch_after_replacement():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["5", "5", "10"]},
+            {"label": "Revenue non-DTB", "values": ["5", "15", "20"]},
+            {"label": "Total Revenue", "values": ["10", "20", "999"], "mismatch_periods": ["Total"]},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["10", "20", "35"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "35"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+    table = with_traction_totals(payload, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "30"
+    assert table["rows"][-1]["mismatch_periods"] == []
+
+
+def test_new_traction_reconciles_mismatch_when_verified_total_is_unchanged():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["200,000", "200,000", "400,000"]},
+            {"label": "Revenue non-DTB", "values": ["250,000", "250,000", "500,000"]},
+            {"label": "Total Revenue", "values": ["450,000", "450,000", "1,000,000"], "mismatch_periods": []},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["450,000", "450,000", "1,000,000"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "1,000,000"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+    payload["traction_summary"]["rows"][1]["values"][-1] = "600,000"
+    payload["traction_summary"]["rows"][-1]["mismatch_periods"] = ["Total"]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["mismatch_periods"] == []
+
+
+def test_new_traction_reconciles_using_resolved_verified_total():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["1", "1", "1 000"]},
+            {"label": "Revenue non-DTB", "values": ["1", "1", "2 500"]},
+            {"label": "Total Revenue", "values": ["1,25", "2,25", "3,500"], "mismatch_periods": ["Total"]},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,25", "2,25", "3,500"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "3,500"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+
+def test_verified_total_does_not_conflict_with_component_number_locale():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["5", "5", "1.000,00"]},
+            {"label": "Revenue non-DTB", "values": ["5", "5", "2.000,00"]},
+            {"label": "Total Revenue", "values": ["10", "20", "3000.50"], "mismatch_periods": []},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["10", "20", "3000.50"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+    payload["traction_summary"]["rows"][0]["values"][-1] = "1,000.50"
+    payload["traction_summary"]["rows"][1]["values"][-1] = "2.000,00"
+    payload["traction_summary"]["rows"][-1]["values"][-1] = "3500"
+    source[0]["rows"][0]["values"][-1] = "3500"
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+
+def test_verified_duplicate_total_is_not_source_order_dependent():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"], "rows": [
+            {"label": "Revenue from DTB", "values": ["1", "1", "1.5"]},
+            {"label": "Revenue non-DTB", "values": ["1", "1", "2"]},
+            {"label": "Total Revenue", "values": ["1,500", "2,000", "999"], "mismatch_periods": []},
+        ],
+    }}
+    source = [{"metric": "revenue", "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,500", "2,000", total]}]}
+              for total in ("3,500", "3500")]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][-1]["values"][-1] == "3500"
+    assert table["rows"][-1]["mismatch_periods"] == ["Total"]
+
+
 def test_saved_same_table_annual_sum_report_is_not_recomputed():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
         "total_source_policy": "same_table_annual_sum",

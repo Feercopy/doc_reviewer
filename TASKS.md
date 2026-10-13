@@ -3079,3 +3079,87 @@ Exit criteria:
   Verified locally: 705 API/worker tests with standard localhost CORS origins,
   181 web tests, JSON schema parse, and `git diff --check`. PR/merge/deploy
   status must be updated after remote checks.
+- 2026-10-13: Follow-up to PR #110 review: source cells with ambiguous comma
+  or dot three-digit grouping, including accounting parentheses, Unicode minus,
+  and embedded spaces, are no longer treated as decimal-equivalent to small
+  displayed values when verifying the Total Revenue source row. After a
+  corrected Total, the Total mismatch marker is recalculated from both
+  component totals instead of being removed unconditionally. Exact same-row
+  grouped figures remain eligible only when the annual cells and Total use
+  consistent grouping; an isolated ambiguous Total is rejected. Focused tests
+  and 708 API/worker tests pass. A further PR #111 review found repeated
+  grouping, consistently grouped component totals, and equivalent duplicate
+  totals written as `35`/`35.0`; all three are now handled without accepting
+  ambiguous cross-format values. The focused tests and 711 API/worker tests
+  pass. Merge and production workflow remain to be verified.
+- 2026-10-13: PR #111 exact-head review additionally identified million-scale
+  grouped annual cells and mismatches between a source-verified grouped Total
+  and plain/space-grouped component Totals. Both are now handled after source
+  verification without broadening ambiguous source-row matches. A later review
+  caught a possible false mismatch for decimal comma notation (`3,500` as 3.5);
+  a Total mismatch is now recorded only if no plausible decimal/grouping reading
+  reconciles the components. The latest review also found that a source row may
+  mix a plain sub-thousand annual cell with grouped larger cells. This is now
+  allowed only when at least one annual cell establishes the same grouping as
+  Total; an isolated grouped Total remains untrusted. Focused tests pass; full
+  CI and final review are pending.
+- 2026-10-13: PR #111 review found `0` versus `0,000` loses valid same-row
+  provenance. Numeric-cell comparison now accepts a non-exact notation only
+  when both possible-value sets collapse to one identical number, preserving
+  the rejection of ambiguous `1` versus `1,000`.
+- 2026-10-13: Another review caught malformed trailing groups (`3,000,5`),
+  zero-only source rows, and mixed interpretations of the same separator across
+  component totals. Repeated grouping now requires exact three-digit groups;
+  zero needs no separator evidence because both interpretations are identical;
+  mismatch detection compares one coherent interpretation per separator. The
+  focused regression suite passes; final CI/review/merge remain pending.
+- 2026-10-13: PR #111 review also exposed standard grouped decimals, grouping
+  conventions established by repeated separators, zero-only duplicate totals,
+  and zero annuals that must not establish an ambiguous grouping convention.
+  All four now use the shared possible-number parser; 31 focused tests pass.
+  Full tests and remote checks remain pending.
+- 2026-10-13: Follow-up review exposed mixed grouped/integer annual rows and
+  a decimal separator that must constrain an ambiguous component Total. Source
+  grouping compatibility now recognizes grouped decimals, while mismatch checks
+  pin both grouping and decimal roles consistently across the row. Conflicting
+  conventions do not produce an unsupported red mismatch. Focused tests pass.
+- 2026-10-13: PR #111 review exposed three-decimal source values whose decimal
+  role is established by another source cell (`0.500` / `1.25`), plus mismatch
+  checks where plain `1000.50` establishes dot as decimal. The same row-level
+  role inference now drives source matching and arithmetic; duplicate explicit
+  totals are compared by the resolved numeric value. Focused tests pass.
+- 2026-10-13: Latest review found that strict verification skipped mismatch
+  reconciliation when the source Total equaled the model's existing text.
+  Total mismatch markers are now recomputed on every strict verification,
+  including unchanged values. Added both missing- and stale-marker tests.
+- 2026-10-13: Cross-locale source matching now infers display and source
+  separator roles independently. The resolved source Total is passed to marker
+  reconciliation only when its numeric interpretation is itself proved by an
+  unambiguous cell or row convention; exact but ambiguous table matches retain
+  conservative mismatch behavior. The focused tests pass.
+- 2026-10-13: Review found that a proven Total's raw locale could conflict with
+  component-total locale, and duplicate source rows could yield source-order-
+  dependent marker colors. Once the Total is numerically proved, only the
+  components establish roles for mismatch arithmetic; among equal resolved
+  source totals, an explicitly proved match is preferred. Focused tests pass.
+- 2026-10-13: Source/display annual cells now compare role-resolved numeric
+  possibilities even when their text matches. A row with mixed locale notation
+  is eligible if every affected cell has one unambiguous numeric value;
+  conflicting roles veto only rows with unresolved ambiguous cells. Focused
+  tests pass, including the cross-locale and same-text/different-number cases.
+- 2026-10-13: Marker reconciliation now also compares individually unambiguous
+  component totals directly when their locale styles conflict. A role conflict
+  only suppresses a red mismatch when at least one cell remains ambiguous.
+- 2026-10-13: PR #111 review found that a conflict over the dot separator
+  discarded an independent comma-decimal role in a mixed-locale source row.
+  Role inference now retains nonconflicting separators and rejects only an
+  unresolved ambiguous cell using a conflicted separator. The source Total
+  and its block/page provenance survive the regression example. Verified 39
+  focused and 725 API/worker tests locally; remote review, merge and deploy
+  remain pending.
+- 2026-10-13: PR #111 admin-merge surfaced unresolved review threads; the
+  paginated GitHub API had hidden two recent findings. An ambiguous sourced
+  Total is now compared independently from component-row locale, and a plain
+  four-digit annual value can coexist with grouped values in one source row.
+  Both have focused regressions. Verified 41 focused and 727 API/worker tests;
+  review-thread resolution, merge and production deployment remain pending.
