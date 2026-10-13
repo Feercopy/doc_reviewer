@@ -1,8 +1,5 @@
 from io import BytesIO
 
-import pdfplumber
-import pytest
-
 from docx import Document
 from pypdf import PdfReader
 
@@ -104,11 +101,17 @@ def test_v8_exports_keep_contextual_problem_fact_in_word_and_pdf():
     pdf_bytes = _build_pdf(report, provenance)
     pdf_text = " ".join(page.extract_text() for page in PdfReader(BytesIO(pdf_bytes)).pages)
     assert fact in pdf_text.replace("\n", " ")
-    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-        issue = pdf.pages[0].search("The return estimate fell.")[0]["chars"]
-        explanation = pdf.pages[0].search("Earlier review projected IRR 126%.")[0]["chars"]
-        expected_color = (17 / 255, 24 / 255, 39 / 255)
-        for character in [*issue, *explanation]:
-            assert character["non_stroking_color"] == pytest.approx(expected_color, abs=0.01)
-        assert "Bold" in issue[0]["fontname"]
-        assert "Bold" not in explanation[0]["fontname"]
+    page = PdfReader(BytesIO(pdf_bytes)).pages[0]
+    operations = page.get_contents().operations
+    fonts = page["/Resources"]["/Font"]
+    for marker, should_be_bold in (
+        ("The return estimate fell.", True),
+        ("Earlier review projected IRR 126%.", False),
+    ):
+        position = next(index for index, (args, operator) in enumerate(operations)
+                        if operator == b"Tj" and marker in str(args[0]))
+        color = next(args for args, operator in reversed(operations[:position]) if operator == b"rg")
+        font = next(args[0] for args, operator in reversed(operations[:position]) if operator == b"Tf")
+        assert all(abs(float(actual) - expected) < 0.01
+                   for actual, expected in zip(color, (17 / 255, 24 / 255, 39 / 255)))
+        assert ("Bold" in str(fonts[font].get_object()["/BaseFont"])) is should_be_bold

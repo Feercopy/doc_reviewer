@@ -30,7 +30,10 @@ Primary plan index:
   tests (730 with standard CORS test origins), web tests (183), and Next.js
   production build passed. Local Alembic upgrade and Docker web restart remain
   unverified because Alembic is not installed and Docker daemon is stopped.
-  PR, CI review, merge and production verification pending.
+  PR #112 opened; first CI found a test-only `pdfplumber` import absent from the
+  API image. Replaced it with a PDF content-stream assertion using existing
+  `pypdf`; focused tests pass again. CI rerun, review, merge and production
+  verification pending.
 
 - [~] 2026-10-12: Publish the user's revised New Summary Traction rules. New
   generated v8 reports carry `total_source_policy=same_table_annual_sum`, use
