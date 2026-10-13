@@ -1,5 +1,8 @@
 from io import BytesIO
 
+import pdfplumber
+import pytest
+
 from docx import Document
 from pypdf import PdfReader
 
@@ -93,5 +96,19 @@ def test_v8_exports_keep_contextual_problem_fact_in_word_and_pdf():
 
     document = Document(BytesIO(_build_docx(report, provenance)))
     assert any(fact in paragraph.text for paragraph in document.paragraphs)
-    pdf_text = " ".join(page.extract_text() for page in PdfReader(BytesIO(_build_pdf(report, provenance))).pages)
+    problem = next(paragraph for paragraph in document.paragraphs if paragraph.text.startswith("The return estimate fell."))
+    assert problem.runs[0].bold is True
+    assert problem.runs[1].bold is not True
+    assert all(str(run.font.color.rgb) == "111827" for run in problem.runs)
+
+    pdf_bytes = _build_pdf(report, provenance)
+    pdf_text = " ".join(page.extract_text() for page in PdfReader(BytesIO(pdf_bytes)).pages)
     assert fact in pdf_text.replace("\n", " ")
+    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        issue = pdf.pages[0].search("The return estimate fell.")[0]["chars"]
+        explanation = pdf.pages[0].search("Earlier review projected IRR 126%.")[0]["chars"]
+        expected_color = (17 / 255, 24 / 255, 39 / 255)
+        for character in [*issue, *explanation]:
+            assert character["non_stroking_color"] == pytest.approx(expected_color, abs=0.01)
+        assert "Bold" in issue[0]["fontname"]
+        assert "Bold" not in explanation[0]["fontname"]

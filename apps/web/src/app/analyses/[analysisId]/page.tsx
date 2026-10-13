@@ -8,6 +8,7 @@ import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { NewSummaryReportView } from "@/components/new-summary/NewSummaryReport";
 import { StatusBadge } from "@/components/StatusBadge";
 import { me } from "@/lib/api/auth";
+import { createAnalysisShare, revokeAnalysisShare } from "@/lib/api/analysis-shares";
 import type { User } from "@/lib/api/types";
 import {
   ensureNewSummary,
@@ -38,6 +39,7 @@ import {
 import { submitFeedback } from "@/lib/api/feedback";
 import { createIcReviewRun, icReviewArtifactUrl } from "@/lib/api/ic-review";
 import type { NewSummaryReport } from "@/lib/newSummary";
+import { appPath } from "@/lib/routing";
 import {
   getProviderDefaultModel,
   listProviderModels,
@@ -129,6 +131,19 @@ export default function AnalysisDetailPage() {
   const [isLaunchingIcReview, setIsLaunchingIcReview] = useState(false);
   const [newSummary, setNewSummary] = useState<NewSummaryRecord | null>(null);
   const [newSummaryError, setNewSummaryError] = useState("");
+  const [shareMessage, setShareMessage] = useState("");
+  const [shareBusy, setShareBusy] = useState(false);
+  const [hasSharedLink, setHasSharedLink] = useState(false);
+  const shareMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (shareMessageTimer.current) clearTimeout(shareMessageTimer.current);
+  }, []);
+
+  useEffect(() => {
+    setHasSharedLink(false);
+    setShareMessage("");
+  }, [params.analysisId]);
 
   useEffect(() => {
     me().then(setCurrentUser).catch(() => undefined);
@@ -318,6 +333,42 @@ export default function AnalysisDetailPage() {
   );
   const canManageAnalysis = Boolean(currentUser && analysisDocument && (currentUser.role === "admin" || currentUser.id === analysisDocument.owner_id));
 
+  function showShareMessage(message: string) {
+    if (shareMessageTimer.current) clearTimeout(shareMessageTimer.current);
+    setShareMessage(message);
+    shareMessageTimer.current = setTimeout(() => setShareMessage(""), 3500);
+  }
+
+  async function shareAnalysis() {
+    if (!analysis || shareBusy) return;
+    setShareBusy(true);
+    try {
+      const token = await createAnalysisShare(analysis.id);
+      const url = `${window.location.origin}${appPath(`/shared/analyses/${analysis.id}`)}#share=${encodeURIComponent(token)}`;
+      await navigator.clipboard.writeText(url);
+      setHasSharedLink(true);
+      showShareMessage("Ссылка на анализ скопирована");
+    } catch {
+      showShareMessage("Не удалось скопировать ссылку. Проверьте доступ к буферу обмена.");
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function revokeShare() {
+    if (!analysis || shareBusy) return;
+    setShareBusy(true);
+    try {
+      await revokeAnalysisShare(analysis.id);
+      setHasSharedLink(false);
+      showShareMessage("Доступ по ссылке отключён");
+    } catch {
+      showShareMessage("Не удалось отключить доступ по ссылке.");
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
   useEffect(() => {
     if (configuredProviderModels.length === 0 || configuredProviderModels.some((item) => item.provider === icReviewProvider)) {
       return;
@@ -458,11 +509,26 @@ export default function AnalysisDetailPage() {
                 </nav>
 
                 {activeTopTab === "executiveSummary" ? (
-                  <NewSummaryPanel
-                    analysis={analysis}
-                    newSummary={newSummary}
-                    newSummaryError={newSummaryError}
-                  />
+                  <div className="analysis-summary-stack">
+                    {canManageAnalysis ? (
+                      <div className="analysis-share-row">
+                        <button className="analysis-share-button" disabled={shareBusy} onClick={shareAnalysis} type="button">
+                          Поделиться результатами анализа
+                        </button>
+                        {hasSharedLink ? (
+                          <button className="analysis-share-revoke" disabled={shareBusy} onClick={revokeShare} type="button">
+                            Отключить доступ по ссылке
+                          </button>
+                        ) : null}
+                        {shareMessage ? <span className="analysis-share-tooltip" role="status">{shareMessage}</span> : null}
+                      </div>
+                    ) : null}
+                    <NewSummaryPanel
+                      analysis={analysis}
+                      newSummary={newSummary}
+                      newSummaryError={newSummaryError}
+                    />
+                  </div>
                 ) : null}
                 {activeTopTab === "mainOutput" ? <MainSkillMarkdownPanel analysis={analysis} /> : null}
                 {activeTopTab === "icReview" ? (
@@ -4732,6 +4798,12 @@ const analysisStyles = `
 `;
 
 const paperAnalysisOverrides = `
+.analysis-summary-stack { display: grid; gap: 14px; min-width: 0; }
+.analysis-share-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; position: relative; min-height: 40px; }
+.analysis-workbench .analysis-share-button { min-height: 36px; padding: 8px 12px; border: 1px solid var(--accent-strong); border-radius: 6px; background: var(--accent-strong); color: #fff; font-size: 13px; font-weight: 750; }
+.analysis-workbench .analysis-share-button:hover:not(:disabled) { background: #075e45; color: #fff; }
+.analysis-workbench .analysis-share-revoke { min-height: 36px; color: var(--muted-strong); font-size: 12px; }
+.analysis-share-tooltip { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; max-width: min(340px, 100%); padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--foreground); box-shadow: var(--shadow); font-size: 13px; }
 .analysis-workbench {
   width: min(100%, 1536px);
   padding: 28px 36px 48px;

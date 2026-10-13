@@ -138,6 +138,59 @@ class NewSummaryRead(BaseModel):
     progress: NewSummaryProgressRead | None = None
 
 
+class AnalysisShareRead(BaseModel):
+    token: str
+
+
+class SharedFinancialFindingRead(BaseModel):
+    title: str = ""
+    severity: str = ""
+    summary: str = ""
+    evidence: str = ""
+    recommendation: str = ""
+
+
+class SharedFinancialNumberRead(BaseModel):
+    label: str = ""
+    value: str = ""
+    unit: str = ""
+    source: str = ""
+
+
+class SharedFinancialAuditRead(BaseModel):
+    status: str = "not_provided"
+    summary: str = ""
+
+
+class SharedFinancialValidationRead(BaseModel):
+    status: str = "not_run"
+    summary: str = ""
+    warnings_count: int = 0
+    failures_count: int = 0
+
+
+class SharedFinancialRead(BaseModel):
+    executive_brief: str
+    top_findings: list[SharedFinancialFindingRead]
+    key_numbers: list[SharedFinancialNumberRead]
+    spreadsheet_audit: SharedFinancialAuditRead
+    validation: SharedFinancialValidationRead
+    critical_risks: list[str]
+    data_gaps: list[str]
+    required_actions: list[str]
+
+
+class SharedAnalysisRead(BaseModel):
+    id: UUID
+    title: str
+    status: RunStatus
+    created_at: datetime
+    product_markdown: str | None
+    summary_ru: dict | None
+    summary_en: dict | None
+    financial: SharedFinancialRead | None
+
+
 class AnalysisRead(BaseModel):
     id: UUID
     document_id: UUID

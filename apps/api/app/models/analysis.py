@@ -40,6 +40,7 @@ class Analysis(Base):
     run_parameters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    public_share_nonce: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class PredictedCommentRun(Base):
