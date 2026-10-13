@@ -46,11 +46,15 @@ describe("analysis share API", () => {
     global.fetch = vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 404 })
       .mockResolvedValueOnce({ ok: false, status: 422 })
+      .mockResolvedValueOnce({ ok: false, status: 408 })
+      .mockResolvedValueOnce({ ok: false, status: 425 })
       .mockResolvedValueOnce({ ok: false, status: 429 })
       .mockResolvedValueOnce({ ok: false, status: 502 });
 
     await expect(getSharedAnalysis("analysis-id", "token")).rejects.toBeInstanceOf(SharedAnalysisLinkUnavailableError);
     await expect(getSharedAnalysis("analysis-id", "token")).rejects.toBeInstanceOf(SharedAnalysisLinkUnavailableError);
+    await expect(getSharedAnalysis("analysis-id", "token")).rejects.toThrow("Не удалось обновить результаты");
+    await expect(getSharedAnalysis("analysis-id", "token")).rejects.toThrow("Не удалось обновить результаты");
     await expect(getSharedAnalysis("analysis-id", "token")).rejects.toThrow("Не удалось обновить результаты");
     await expect(getSharedAnalysis("analysis-id", "token")).rejects.toThrow("Не удалось обновить результаты");
   });
