@@ -49,6 +49,14 @@ Primary plan index:
   tests (730), web tests (183) and Next.js build passed locally. PR and
   production verification pending.
 
+- [~] 2026-10-14: Codex review of merged PR #113 found two narrow guest-view
+  races. Preserve polling during the committed product-to-IC handoff using a
+  bounded, explicit expected-IC marker, and keep the last rendered guest result
+  while retrying transient refresh failures. Only a revoked/invalid link ends
+  viewing. Focused API/worker tests (25), web tests (184), and Next.js build
+  passed. Full API/worker suite (731) also passed. PR and production deployment
+  pending.
+
 - [~] 2026-10-12: Publish the user's revised New Summary Traction rules. New
   generated v8 reports carry `total_source_policy=same_table_annual_sum`, use
   annual columns, prefer the current Financial Model Revenue row in structured

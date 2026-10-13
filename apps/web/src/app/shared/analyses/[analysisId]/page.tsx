@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { NewSummaryReportView } from "@/components/new-summary/NewSummaryReport";
-import { getSharedAnalysis, type SharedAnalysis, type SharedFinancial } from "@/lib/api/analysis-shares";
+import { getSharedAnalysis, SharedAnalysisLinkUnavailableError, type SharedAnalysis, type SharedFinancial } from "@/lib/api/analysis-shares";
 import type { NewSummaryReport } from "@/lib/newSummary";
 
 type Section = "summary" | "product" | "financial";
@@ -40,11 +40,11 @@ export default function SharedAnalysisPage() {
     async function refresh() {
       try {
         const result = await getSharedAnalysis(analysisId, token!);
-        if (active) setAnalysis(result);
+        if (active) { setAnalysis(result); setError(""); }
       } catch (reason) {
         if (active) {
-          setAnalysis(null);
-          setError(reason instanceof Error ? reason.message : "Ссылка недоступна.");
+          if (reason instanceof SharedAnalysisLinkUnavailableError) setAnalysis(null);
+          setError(reason instanceof Error ? reason.message : "Не удалось обновить результаты. Повторяем попытку…");
         }
       }
       if (active) timer = setTimeout(refresh, 10000);

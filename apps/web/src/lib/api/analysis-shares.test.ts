@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createAnalysisShare, getAnalysisShareStatus, getSharedAnalysis, revokeAnalysisShare } from "./analysis-shares";
+import { createAnalysisShare, getAnalysisShareStatus, getSharedAnalysis, revokeAnalysisShare, SharedAnalysisLinkUnavailableError } from "./analysis-shares";
 
 const originalFetch = global.fetch;
 
@@ -40,5 +40,12 @@ describe("analysis share API", () => {
     expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({ method: "POST", credentials: "include" }));
     expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({ credentials: "include" }));
     expect(fetchMock.mock.calls[2][1]).toEqual(expect.objectContaining({ method: "DELETE", credentials: "include" }));
+  });
+
+  it("distinguishes revoked links from transient refresh failures", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({ ok: false, status: 404 }).mockResolvedValueOnce({ ok: false, status: 502 });
+
+    await expect(getSharedAnalysis("analysis-id", "token")).rejects.toBeInstanceOf(SharedAnalysisLinkUnavailableError);
+    await expect(getSharedAnalysis("analysis-id", "token")).rejects.toThrow("Не удалось обновить результаты");
   });
 });

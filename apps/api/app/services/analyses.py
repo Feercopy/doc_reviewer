@@ -65,6 +65,7 @@ class AnalysisPreconditionError(ValueError):
 ACTIVE_RUN_STATUSES = {RunStatus.QUEUED.value, RunStatus.RUNNING.value}
 ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY = "analysis_chain_cancel_requested_at"
 ANALYSIS_CHAIN_CANCELLED_BY_USER_ID_KEY = "analysis_chain_cancelled_by_user_id"
+AUTO_IC_REVIEW_EXPECTED_KEY = "automatic_ic_review_expected"
 MODEL_ANONYMIZATION_RUN_PARAMETER_KEY = "model_anonymization"
 DOCUMENT_PARSE_DEPENDENCY_KEY = "document_parse_dependency"
 

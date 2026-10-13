@@ -1,9 +1,11 @@
 import json
+from datetime import timedelta
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
 from app.models.analysis import AnalysisCheckRun
+from app.models.base import utc_now
 from app.models.document_access import DocumentAccess
 from app.schemas.enums import EntityStatus, Role, RunStatus
 from app.services.ic_review import IC_REVIEW_CHECK_TYPE
@@ -146,3 +148,29 @@ def test_deleting_analysis_invalidates_existing_share(client, db_session, storag
     analysis.deleted_at = analysis.created_at
     db_session.commit()
     assert client.get(f"/public/analyses/{analysis.id}", headers={"X-Analysis-Share-Token": token}).status_code == 404
+
+
+def test_guest_keeps_polling_during_automatic_ic_handoff(client, db_session, storage_root, enqueued_parse_jobs):
+    owner = create_user(db_session, "owner", "secret")
+    _, analysis = _case(client, db_session, owner)
+    analysis.run_parameters = {"automatic_ic_review_expected": True}
+    analysis.completed_at = utc_now()
+    db_session.commit()
+    token = client.post(f"/analyses/{analysis.id}/share").json()["token"]
+    client.post("/auth/logout")
+    path = f"/public/analyses/{analysis.id}"
+    headers = {"X-Analysis-Share-Token": token}
+
+    assert client.get(path, headers=headers).json()["processing"] is True
+
+    analysis.completed_at = utc_now() - timedelta(minutes=11)
+    db_session.commit()
+    assert client.get(path, headers=headers).json()["processing"] is False
+
+    analysis.completed_at = utc_now()
+    analysis.run_parameters = {
+        "automatic_ic_review_expected": True,
+        "analysis_chain_cancel_requested_at": utc_now().isoformat(),
+    }
+    db_session.commit()
+    assert client.get(path, headers=headers).json()["processing"] is False
