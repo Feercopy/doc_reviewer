@@ -21,7 +21,7 @@ Primary plan index:
 
 ## Current Focus
 
-- [~] 2026-10-14: AI Summary PDF/Word problems now use black text with bold issue
+- [x] 2026-10-14: AI Summary PDF/Word problems now use black text with bold issue
   and regular supporting fact. Add owner/admin-issued, revocable capability links
   for read-only unauthenticated viewing of AI Summary, Product Analysis and
   Financial Analysis; guest token stays in the URL fragment and API header.
@@ -38,7 +38,16 @@ Primary plan index:
   the initial head flagged missing shared schema, lost revoke control after
   reload, and omitted severity/recommendation in guest findings. All three
   were addressed; full API/worker (730), web (183), and build checks pass
-  locally. Final CI, merge and production verification pending.
+  locally. PR #112 merged as `4213a4b`; production workflow
+  `38472414600` applied migration `202610140001` and passed internal/public
+  health checks. No production document was shared during verification.
+
+- [~] 2026-10-14: Follow-up for capability links. Reject malformed non-ASCII
+  bearer tokens with 404 instead of a server error; keep guest results fresh
+  while the analysis, IC Review or AI Summary is processing. Shared API schema
+  now includes a `processing` flag. Focused API tests (3), full API/worker
+  tests (730), web tests (183) and Next.js build passed locally. PR and
+  production verification pending.
 
 - [~] 2026-10-12: Publish the user's revised New Summary Traction rules. New
   generated v8 reports carry `total_source_policy=same_table_annual_sum`, use

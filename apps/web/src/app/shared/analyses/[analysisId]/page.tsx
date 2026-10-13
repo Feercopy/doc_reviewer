@@ -18,6 +18,8 @@ export default function SharedAnalysisPage() {
 
   useEffect(() => {
     let active = true;
+    setAnalysis(null);
+    setError("");
     const token = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("share");
     if (!token) {
       setError("В ссылке нет ключа доступа.");
@@ -28,6 +30,28 @@ export default function SharedAnalysisPage() {
       .catch((reason: Error) => { if (active) setError(reason.message); });
     return () => { active = false; };
   }, [analysisId]);
+
+  useEffect(() => {
+    if (!analysis?.processing) return;
+    const token = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("share");
+    if (!token) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function refresh() {
+      try {
+        const result = await getSharedAnalysis(analysisId, token!);
+        if (active) setAnalysis(result);
+      } catch (reason) {
+        if (active) {
+          setAnalysis(null);
+          setError(reason instanceof Error ? reason.message : "Ссылка недоступна.");
+        }
+      }
+      if (active) timer = setTimeout(refresh, 10000);
+    }
+    timer = setTimeout(refresh, 10000);
+    return () => { active = false; clearTimeout(timer); };
+  }, [analysis?.processing, analysisId]);
 
   const report: NewSummaryReport | null = analysis?.summary_ru && analysis.summary_en ? {
     analysis_id: analysis.id,
@@ -47,6 +71,7 @@ export default function SharedAnalysisPage() {
       {!analysis && !error ? <div className="shared-analysis__message" role="status">Загружаем результаты анализа…</div> : null}
       {analysis ? (
         <>
+          {analysis.processing ? <p className="shared-analysis__progress" role="status">Результаты обновляются по мере завершения анализа…</p> : null}
           <nav className="shared-analysis__tabs" aria-label="Разделы анализа">
             {([
               ["summary", "AI Summary"],
@@ -116,6 +141,7 @@ const sharedAnalysisStyles = `
 .shared-analysis__tabs button { min-height: 42px; padding: 8px 14px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-strong); font-weight: 700; }
 .shared-analysis__tabs button[aria-pressed="true"] { background: var(--accent-muted); color: var(--accent-strong); }
 .shared-analysis__message, .shared-analysis__panel { padding: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.shared-analysis__progress { margin: 0 0 12px; color: var(--muted-strong); font-size: 13px; }
 .shared-analysis__panel h1 { font-size: 22px; margin: 0 0 18px; }
 .shared-analysis__financial { display: grid; gap: 20px; }
 .shared-analysis__financial section + section { border-top: 1px solid var(--line); padding-top: 18px; }

@@ -4,11 +4,12 @@
   "title": "Read-only guest analysis result",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "title", "status", "created_at", "product_markdown", "summary_ru", "summary_en", "financial"],
+  "required": ["id", "title", "status", "processing", "created_at", "product_markdown", "summary_ru", "summary_en", "financial"],
   "properties": {
     "id": {"type": "string", "format": "uuid"},
     "title": {"type": "string"},
     "status": {"enum": ["queued", "running", "completed", "failed", "cancelled"]},
+    "processing": {"type": "boolean"},
     "created_at": {"type": "string", "format": "date-time"},
     "product_markdown": {"type": ["string", "null"]},
     "summary_ru": {"anyOf": [{"$ref": "#/$defs/summary"}, {"type": "null"}]},

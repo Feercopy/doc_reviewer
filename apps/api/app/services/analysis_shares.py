@@ -1,5 +1,6 @@
 """Revocable, read-only capability links for a single analysis."""
 
+import re
 from base64 import urlsafe_b64encode
 from hashlib import sha256
 from hmac import compare_digest, new as new_hmac
@@ -18,6 +19,10 @@ from app.services.analyses import AnalysisNotFoundError, get_manageable_analysis
 from app.services.audit import record_audit
 from app.services.ic_review import IC_REVIEW_CHECK_TYPE
 from app.services.new_summaries import read_new_summary, with_display_stage, with_verified_source_totals
+
+
+_SHARE_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{43}\Z")
+_ACTIVE_RUN_STATUSES = frozenset({"queued", "running", "waiting"})
 
 
 def _share_token(analysis: Analysis) -> str:
@@ -52,7 +57,7 @@ def revoke_analysis_share(*, db: Session, actor: User, analysis_id: UUID) -> Non
 
 def get_shared_analysis(*, db: Session, analysis_id: UUID, token: str | None) -> tuple[Analysis, Document]:
     analysis = db.get(Analysis, analysis_id)
-    if analysis is None or analysis.deleted_at is not None or not analysis.public_share_nonce or not token or len(token) != 43:
+    if analysis is None or analysis.deleted_at is not None or not analysis.public_share_nonce or not token or not _SHARE_TOKEN_PATTERN.fullmatch(token):
         raise AnalysisNotFoundError("Analysis not found")
     if not compare_digest(token, _share_token(analysis)):
         raise AnalysisNotFoundError("Analysis not found")
@@ -77,10 +82,17 @@ def read_shared_analysis(*, db: Session, analysis: Analysis, document: Document)
     )
     financial_run = db.execute(statement).scalars().first()
     financial_output = financial_run.structured_output if financial_run and financial_run.status == "completed" else None
+    processing = (
+        analysis.status in _ACTIVE_RUN_STATUSES
+        or (financial_run is not None and financial_run.status in _ACTIVE_RUN_STATUSES)
+        or summary.ru.status in _ACTIVE_RUN_STATUSES
+        or summary.en.status in _ACTIVE_RUN_STATUSES
+    )
     return {
         "id": analysis.id,
         "title": document.title,
         "status": analysis.status,
+        "processing": processing,
         "created_at": analysis.created_at,
         "product_markdown": product_markdown,
         "summary_ru": _public_summary(summary.ru.payload) if summary.ru.status == "completed" else None,

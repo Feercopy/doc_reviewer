@@ -188,6 +188,7 @@ class SharedAnalysisRead(BaseModel):
     id: UUID
     title: str
     status: RunStatus
+    processing: bool
     created_at: datetime
     product_markdown: str | None
     summary_ru: dict | None

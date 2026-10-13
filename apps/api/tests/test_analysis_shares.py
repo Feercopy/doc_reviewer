@@ -66,12 +66,14 @@ def test_share_requires_owner_and_exposes_only_display_results(client, db_sessio
     path = f"/public/analyses/{analysis.id}"
     assert client.get(path).status_code == 404
     assert client.get(path, headers={"X-Analysis-Share-Token": "bad"}).status_code == 404
+    assert client.get(path, headers={"X-Analysis-Share-Token": b"\xe9" * 43}).status_code == 404
     response = client.get(path, headers={"X-Analysis-Share-Token": token})
     assert response.status_code == 200
     assert response.headers["cache-control"] == "private, no-store"
     assert response.headers["x-robots-tag"] == "noindex, nofollow"
     result = response.json()
     Draft202012Validator(SHARED_ANALYSIS_SCHEMA).validate(result)
+    assert result["processing"] is False
     assert result["product_markdown"].startswith("# Product conclusion")
     assert result["summary_ru"]["context"] == "Context"
     assert result["summary_en"]["language"] == "en"
@@ -113,12 +115,27 @@ def test_share_uses_latest_completed_ic_review_without_exposing_internal_output(
     db_session.commit()
     token = client.post(f"/analyses/{analysis.id}/share").json()["token"]
     client.post("/auth/logout")
-    response = client.get(f"/public/analyses/{analysis.id}", headers={"X-Analysis-Share-Token": token})
+    path = f"/public/analyses/{analysis.id}"
+    headers = {"X-Analysis-Share-Token": token}
+    response = client.get(path, headers=headers)
     assert response.status_code == 200
     Draft202012Validator(SHARED_ANALYSIS_SCHEMA).validate(response.json())
+    assert response.json()["processing"] is False
     assert response.json()["financial"]["executive_brief"] == "Financial conclusion"
     assert "DO NOT SHARE" not in response.text
     assert "RAW IC MODEL OUTPUT" not in response.text
+
+    check.status = RunStatus.RUNNING.value
+    db_session.commit()
+    response = client.get(path, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["processing"] is True
+    assert response.json()["financial"] is None
+
+    check.status = RunStatus.COMPLETED.value
+    analysis.status = RunStatus.RUNNING.value
+    db_session.commit()
+    assert client.get(path, headers=headers).json()["processing"] is True
 
 
 def test_deleting_analysis_invalidates_existing_share(client, db_session, storage_root, enqueued_parse_jobs):
