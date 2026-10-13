@@ -46,7 +46,7 @@ export async function getSharedAnalysis(analysisId: string, token: string): Prom
     cache: "no-store",
     headers: { "X-Analysis-Share-Token": token },
   });
-  if (response.status === 403 || response.status === 404) {
+  if (response.status >= 400 && response.status < 500 && response.status !== 429) {
     throw new SharedAnalysisLinkUnavailableError("Ссылка недоступна или доступ по ней был отключён.");
   }
   if (!response.ok) throw new Error("Не удалось обновить результаты. Повторяем попытку…");
