@@ -247,14 +247,14 @@ def _append_docx_problems(document: DocxDocument, title: str, items: list[str | 
         paragraph.paragraph_format.space_after = Pt(3)
         if isinstance(item, str):
             run = paragraph.add_run(item)
-            run.font.color.rgb = RGBColor(185, 28, 28)
+            run.font.color.rgb = RGBColor(17, 24, 39)
             continue
         issue, fact = item
         issue_run = paragraph.add_run(issue)
         issue_run.bold = True
-        issue_run.font.color.rgb = RGBColor(185, 28, 28)
+        issue_run.font.color.rgb = RGBColor(17, 24, 39)
         fact_run = paragraph.add_run(f" {fact}")
-        fact_run.font.color.rgb = RGBColor(185, 28, 28)
+        fact_run.font.color.rgb = RGBColor(17, 24, 39)
 
 
 def _append_docx_traction(document: DocxDocument, content: dict[str, Any], labels: dict[str, str]) -> None:
@@ -579,7 +579,7 @@ def _append_pdf_problems(
         else:
             issue, fact = item
             markup = f"<b>{_xml(issue)}</b> {_xml(fact)}"
-        paragraphs.append(ListItem(Paragraph(f'<font color="#B91C1C">{markup}</font>', styles["body"])))
+        paragraphs.append(ListItem(Paragraph(markup, styles["body"])))
     story.append(ListFlowable(paragraphs, bulletType="bullet", leftIndent=15))
 
 

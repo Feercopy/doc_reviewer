@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -13,9 +13,12 @@ from app.schemas.analyses import (
     AnalysisCreate,
     AnalysisDetailRunRead,
     AnalysisRead,
+    AnalysisShareRead,
+    AnalysisShareStatusRead,
     AnalysisStatusesListResponse,
     AnalysisStatusRead,
     NewSummaryRead,
+    SharedAnalysisRead,
     SummaryLocalizationsRead,
 )
 from app.services.analyses import (
@@ -33,6 +36,13 @@ from app.services.analyses import (
     read_analysis,
     read_analysis_detail_run,
     request_analysis_detail_run,
+)
+from app.services.analysis_shares import (
+    analysis_share_is_active,
+    create_analysis_share,
+    get_shared_analysis,
+    read_shared_analysis,
+    revoke_analysis_share,
 )
 from app.services.analysis_jobs import (
     RunAnalysisDetailsEnqueue,
@@ -157,6 +167,68 @@ def get_analysis(
     except AnalysisNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
     return read_analysis(db=db, actor=current_user, analysis=analysis)
+
+
+@router.post("/analyses/{analysis_id}/share", response_model=AnalysisShareRead)
+def share_analysis(
+    analysis_id: UUID,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> AnalysisShareRead:
+    try:
+        token = create_analysis_share(db=db, actor=current_user, analysis_id=analysis_id)
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+    response.headers["Cache-Control"] = "no-store"
+    return AnalysisShareRead(token=token)
+
+
+@router.get("/analyses/{analysis_id}/share", response_model=AnalysisShareStatusRead)
+def get_analysis_share_status(
+    analysis_id: UUID,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> AnalysisShareStatusRead:
+    try:
+        active = analysis_share_is_active(db=db, actor=current_user, analysis_id=analysis_id)
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+    response.headers["Cache-Control"] = "no-store"
+    return AnalysisShareStatusRead(active=active)
+
+
+@router.delete("/analyses/{analysis_id}/share", status_code=status.HTTP_204_NO_CONTENT)
+def unshare_analysis(
+    analysis_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> Response:
+    try:
+        revoke_analysis_share(db=db, actor=current_user, analysis_id=analysis_id)
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/public/analyses/{analysis_id}", response_model=SharedAnalysisRead)
+def get_public_analysis(
+    analysis_id: UUID,
+    response: Response,
+    share_token: str | None = Header(default=None, alias="X-Analysis-Share-Token"),
+    db: Session = Depends(get_db),
+) -> SharedAnalysisRead:
+    try:
+        analysis, document = get_shared_analysis(db=db, analysis_id=analysis_id, token=share_token)
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+    response.headers.update({
+        "Cache-Control": "private, no-store",
+        "Referrer-Policy": "no-referrer",
+        "X-Robots-Tag": "noindex, nofollow",
+    })
+    return SharedAnalysisRead.model_validate(read_shared_analysis(db=db, analysis=analysis, document=document))
 
 
 @router.get("/analyses/{analysis_id}/status", response_model=AnalysisStatusRead)

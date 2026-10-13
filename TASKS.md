@@ -21,6 +21,25 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] 2026-10-14: AI Summary PDF/Word problems now use black text with bold issue
+  and regular supporting fact. Add owner/admin-issued, revocable capability links
+  for read-only unauthenticated viewing of AI Summary, Product Analysis and
+  Financial Analysis; guest token stays in the URL fragment and API header.
+  Public API whitelists display results and excludes source files, raw model
+  output and internal run data. Focused API/export tests (8), full API/worker
+  tests (730 with standard CORS test origins), web tests (183), and Next.js
+  production build passed. Local Alembic upgrade and Docker web restart remain
+  unverified because Alembic is not installed and Docker daemon is stopped.
+  PR #112 opened; first CI found a test-only `pdfplumber` import absent from the
+  API image. Replaced it with a PDF content-stream assertion using existing
+  `pypdf`; focused tests pass again and repeat CI passed. Before merge, the
+  guest Summary payload was further restricted to display fields (excluding
+  possible technical diagnostics), with regression coverage. Codex review of
+  the initial head flagged missing shared schema, lost revoke control after
+  reload, and omitted severity/recommendation in guest findings. All three
+  were addressed; full API/worker (730), web (183), and build checks pass
+  locally. Final CI, merge and production verification pending.
+
 - [~] 2026-10-12: Publish the user's revised New Summary Traction rules. New
   generated v8 reports carry `total_source_policy=same_table_annual_sum`, use
   annual columns, prefer the current Financial Model Revenue row in structured

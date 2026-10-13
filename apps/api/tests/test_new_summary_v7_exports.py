@@ -93,5 +93,25 @@ def test_v8_exports_keep_contextual_problem_fact_in_word_and_pdf():
 
     document = Document(BytesIO(_build_docx(report, provenance)))
     assert any(fact in paragraph.text for paragraph in document.paragraphs)
-    pdf_text = " ".join(page.extract_text() for page in PdfReader(BytesIO(_build_pdf(report, provenance))).pages)
+    problem = next(paragraph for paragraph in document.paragraphs if paragraph.text.startswith("The return estimate fell."))
+    assert problem.runs[0].bold is True
+    assert problem.runs[1].bold is not True
+    assert all(str(run.font.color.rgb) == "111827" for run in problem.runs)
+
+    pdf_bytes = _build_pdf(report, provenance)
+    pdf_text = " ".join(page.extract_text() for page in PdfReader(BytesIO(pdf_bytes)).pages)
     assert fact in pdf_text.replace("\n", " ")
+    page = PdfReader(BytesIO(pdf_bytes)).pages[0]
+    operations = page.get_contents().operations
+    fonts = page["/Resources"]["/Font"]
+    for marker, should_be_bold in (
+        ("The return estimate fell.", True),
+        ("Earlier review projected IRR 126%.", False),
+    ):
+        position = next(index for index, (args, operator) in enumerate(operations)
+                        if operator == b"Tj" and marker in str(args[0]))
+        color = next(args for args, operator in reversed(operations[:position]) if operator == b"rg")
+        font = next(args[0] for args, operator in reversed(operations[:position]) if operator == b"Tf")
+        assert all(abs(float(actual) - expected) < 0.01
+                   for actual, expected in zip(color, (17 / 255, 24 / 255, 39 / 255)))
+        assert ("Bold" in str(fonts[font].get_object()["/BaseFont"])) is should_be_bold
