@@ -3150,3 +3150,10 @@ Exit criteria:
 - 2026-10-13: Marker reconciliation now also compares individually unambiguous
   component totals directly when their locale styles conflict. A role conflict
   only suppresses a red mismatch when at least one cell remains ambiguous.
+- 2026-10-13: PR #111 review found that a conflict over the dot separator
+  discarded an independent comma-decimal role in a mixed-locale source row.
+  Role inference now retains nonconflicting separators and rejects only an
+  unresolved ambiguous cell using a conflicted separator. The source Total
+  and its block/page provenance survive the regression example. Verified 39
+  focused and 725 API/worker tests locally; remote review, merge and deploy
+  remain pending.

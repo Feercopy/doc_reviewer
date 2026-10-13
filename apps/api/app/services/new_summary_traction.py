@@ -419,8 +419,9 @@ def _possible_numbers(value: Any) -> set[Decimal]:
     return {grouped, decimal} if decimal is not None else {grouped}
 
 
-def _pinned_roles(texts: list[str]) -> dict[str, bool] | None:
+def _pinned_roles(texts: list[str]) -> tuple[dict[str, bool], set[str]]:
     roles: dict[str, bool] = {}
+    conflicts: set[str] = set()
     for text in texts:
         cell_roles: dict[str, bool] = {}
         separator = _grouped_separator(text)
@@ -434,10 +435,22 @@ def _pinned_roles(texts: list[str]) -> dict[str, bool] | None:
             for decimal_separator in ",.":
                 if decimal_separator in text:
                     cell_roles[decimal_separator] = False
-        if any(key in roles and roles[key] != role for key, role in cell_roles.items()):
-            return None
-        roles.update(cell_roles)
-    return roles
+        for key, role in cell_roles.items():
+            if key in conflicts:
+                continue
+            if key in roles and roles[key] != role:
+                del roles[key]
+                conflicts.add(key)
+            else:
+                roles[key] = role
+    return roles, conflicts
+
+
+def _ambiguous_conflict(texts: list[str], conflicts: set[str]) -> bool:
+    return any(
+        len(_possible_numbers(text)) > 1 and _grouped_separator(text) in conflicts
+        for text in texts
+    )
 
 
 def _numbers_with_roles(value: Any, roles: dict[str, bool]) -> set[Decimal]:
@@ -457,8 +470,9 @@ def _proven_total_mismatch(cells: list[Any], *, verified_total: Decimal | None =
         possibilities[2] = {verified_total}
     if not all(possibilities):
         return False
-    pinned_roles = _pinned_roles(texts[:2] if verified_total is not None else texts)
-    if pinned_roles is None:
+    role_texts = texts[:2] if verified_total is not None else texts
+    pinned_roles, conflicts = _pinned_roles(role_texts)
+    if _ambiguous_conflict(role_texts, conflicts):
         return all(len(values) == 1 for values in possibilities) and (
             next(iter(possibilities[0])) + next(iter(possibilities[1])) != next(iter(possibilities[2]))
         )
@@ -498,11 +512,10 @@ def _same_row_revenue_total(
         return None
     if any(not _possible_numbers(value) for value in values[:-1]):
         return None
-    displayed_roles = _pinned_roles([_normalized_number_syntax(value) for value in values[:-1]])
-    if displayed_roles is None:
-        if any(len(_possible_numbers(value)) > 1 for value in values[:-1]):
-            return None
-        displayed_roles = {}
+    displayed_texts = [_normalized_number_syntax(value) for value in values[:-1]]
+    displayed_roles, displayed_conflicts = _pinned_roles(displayed_texts)
+    if _ambiguous_conflict(displayed_texts, displayed_conflicts):
+        return None
     years = [key[0] for key in annual_keys if key is not None]
     if years != list(range(years[0], years[-1] + 1)):
         return None
@@ -533,11 +546,10 @@ def _same_row_revenue_total(
             source_cells = [source_values[columns[year]] for year in years if columns[year] < len(source_values)]
             if len(source_cells) != len(years):
                 continue
-            source_roles = _pinned_roles([_normalized_number_syntax(cell) for cell in [*source_cells, total_text]])
-            if source_roles is None:
-                if any(len(_possible_numbers(cell)) > 1 for cell in [*source_cells, total_text]):
-                    continue
-                source_roles = {}
+            source_texts = [_normalized_number_syntax(cell) for cell in [*source_cells, total_text]]
+            source_roles, source_conflicts = _pinned_roles(source_texts)
+            if _ambiguous_conflict(source_texts, source_conflicts):
+                continue
             separator = _grouped_separator(total_text)
             proven_total = len(_possible_numbers(total_text)) == 1 or (separator is not None and separator in source_roles)
             if separator is not None and len(_possible_numbers(total_text)) > 1 and separator not in source_roles:

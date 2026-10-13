@@ -281,6 +281,21 @@ def test_unambiguous_mixed_locale_source_row_can_verify_total():
     assert table["total_revenue_provenance"]["source_block_id"] == "mixed-locale"
 
 
+def test_source_row_retains_unconflicted_separator_role_across_mixed_locales():
+    payload = {"schema_version": "new-summary-v8", "traction_summary": {
+        "periods": ["2027", "2028", "Total"],
+        "rows": [{"label": "Total Revenue", "values": ["1", "2499", "999"]}],
+    }}
+    source = [{"metric": "revenue", "source_block_id": "mixed-role", "source_page": 7,
+               "periods": ["2027", "2028", "Total 2027–2028"],
+               "rows": [{"label": "Revenue", "values": ["1,000", "2499.0", "2.500,00"]}]}]
+    table = with_traction_totals(payload, source_tables=source, strict_total_source=True)["traction_summary"]
+    assert table["rows"][0]["values"][-1] == "2.500,00"
+    assert table["total_revenue_provenance"] == {
+        "method": "same_source_table", "source_block_id": "mixed-role", "source_page": 7,
+    }
+
+
 def test_new_traction_reconciles_consistently_grouped_component_totals():
     payload = {"schema_version": "new-summary-v8", "traction_summary": {
         "periods": ["2027", "2028", "Total"], "rows": [
