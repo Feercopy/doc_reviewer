@@ -8,7 +8,7 @@ import { MarkdownPreview } from "@/components/MarkdownPreview";
 import { NewSummaryReportView } from "@/components/new-summary/NewSummaryReport";
 import { StatusBadge } from "@/components/StatusBadge";
 import { me } from "@/lib/api/auth";
-import { createAnalysisShare, revokeAnalysisShare } from "@/lib/api/analysis-shares";
+import { createAnalysisShare, getAnalysisShareStatus, revokeAnalysisShare } from "@/lib/api/analysis-shares";
 import type { User } from "@/lib/api/types";
 import {
   ensureNewSummary,
@@ -332,6 +332,15 @@ export default function AnalysisDetailPage() {
     [icReviewProvider, providerModels],
   );
   const canManageAnalysis = Boolean(currentUser && analysisDocument && (currentUser.role === "admin" || currentUser.id === analysisDocument.owner_id));
+
+  useEffect(() => {
+    if (!analysis?.id || !canManageAnalysis) return;
+    let active = true;
+    getAnalysisShareStatus(analysis.id)
+      .then((hasLink) => { if (active) setHasSharedLink(hasLink); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [analysis?.id, canManageAnalysis]);
 
   function showShareMessage(message: string) {
     if (shareMessageTimer.current) clearTimeout(shareMessageTimer.current);

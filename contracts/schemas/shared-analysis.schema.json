@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gate-challenger.local/schemas/shared-analysis.schema.json",
+  "title": "Read-only guest analysis result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "status", "created_at", "product_markdown", "summary_ru", "summary_en", "financial"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "title": {"type": "string"},
+    "status": {"enum": ["queued", "running", "completed", "failed", "cancelled"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "product_markdown": {"type": ["string", "null"]},
+    "summary_ru": {"anyOf": [{"$ref": "#/$defs/summary"}, {"type": "null"}]},
+    "summary_en": {"anyOf": [{"$ref": "#/$defs/summary"}, {"type": "null"}]},
+    "financial": {"anyOf": [{"$ref": "#/$defs/financial"}, {"type": "null"}]}
+  },
+  "$defs": {
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "language", "title", "stage", "context", "required_elements"],
+      "properties": {
+        "schema_version": {"type": "string"},
+        "language": {"enum": ["ru", "en"]},
+        "title": {"type": "string"},
+        "stage": {"type": "string"},
+        "context": {"type": "string"},
+        "document_quality_percent": {"type": "number"},
+        "traction_summary": {"anyOf": [{"$ref": "#/$defs/traction_table"}, {"type": "object", "additionalProperties": false, "required": ["tables"], "properties": {"tables": {"type": "array", "items": {"$ref": "#/$defs/traction_table"}}}}]},
+        "required_elements": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["id", "label", "status"],
+            "properties": {
+              "id": {"type": "string"}, "label": {"type": "string"}, "status": {"type": "string"},
+              "evidence": {"type": "string"}, "detail": {"type": "object"}
+            }
+          }
+        },
+        "required_details": {"type": "object", "additionalProperties": {"type": "object"}},
+        "confirmed": {"type": "array", "items": {"type": "string"}},
+        "insufficiently_confirmed": {"type": "array", "items": {"type": "string"}},
+        "critical_problems": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "additionalProperties": false, "required": ["issue", "fact"], "properties": {"issue": {"type": "string"}, "fact": {"type": "string"}}}]}},
+        "other": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "traction_table": {
+      "type": "object", "additionalProperties": false, "required": ["periods", "rows"],
+      "properties": {
+        "metric": {"type": "string"}, "cumulative": {"type": "boolean"}, "metric_label": {"type": "string"},
+        "periods": {"type": "array", "items": {"type": "string"}},
+        "rows": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["label", "values"], "properties": {"label": {"type": "string"}, "values": {"type": "array", "items": {"type": "string"}}, "mismatch_periods": {"type": "array", "items": {"type": "string"}}}}}
+      }
+    },
+    "financial": {
+      "type": "object", "additionalProperties": false,
+      "required": ["executive_brief", "top_findings", "key_numbers", "spreadsheet_audit", "validation", "critical_risks", "data_gaps", "required_actions"],
+      "properties": {
+        "executive_brief": {"type": "string"},
+        "top_findings": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["title", "severity", "summary", "evidence", "recommendation"], "properties": {"title": {"type": "string"}, "severity": {"type": "string"}, "summary": {"type": "string"}, "evidence": {"type": "string"}, "recommendation": {"type": "string"}}}},
+        "key_numbers": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["label", "value", "unit", "source"], "properties": {"label": {"type": "string"}, "value": {"type": "string"}, "unit": {"type": "string"}, "source": {"type": "string"}}}},
+        "spreadsheet_audit": {"type": "object", "additionalProperties": false, "required": ["status", "summary"], "properties": {"status": {"type": "string"}, "summary": {"type": "string"}}},
+        "validation": {"type": "object", "additionalProperties": false, "required": ["status", "summary", "warnings_count", "failures_count"], "properties": {"status": {"type": "string"}, "summary": {"type": "string"}, "warnings_count": {"type": "integer"}, "failures_count": {"type": "integer"}}},
+        "critical_risks": {"type": "array", "items": {"type": "string"}},
+        "data_gaps": {"type": "array", "items": {"type": "string"}},
+        "required_actions": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

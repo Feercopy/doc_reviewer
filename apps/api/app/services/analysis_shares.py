@@ -36,6 +36,11 @@ def create_analysis_share(*, db: Session, actor: User, analysis_id: UUID) -> str
     return _share_token(analysis)
 
 
+def analysis_share_is_active(*, db: Session, actor: User, analysis_id: UUID) -> bool:
+    analysis = get_manageable_analysis_for_actor(db=db, actor=actor, analysis_id=analysis_id)
+    return bool(analysis.public_share_nonce)
+
+
 def revoke_analysis_share(*, db: Session, actor: User, analysis_id: UUID) -> None:
     analysis = get_manageable_analysis_for_actor(db=db, actor=actor, analysis_id=analysis_id)
     db.refresh(analysis, with_for_update=True)

@@ -142,6 +142,10 @@ class AnalysisShareRead(BaseModel):
     token: str
 
 
+class AnalysisShareStatusRead(BaseModel):
+    active: bool
+
+
 class SharedFinancialFindingRead(BaseModel):
     title: str = ""
     severity: str = ""

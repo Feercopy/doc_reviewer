@@ -1,3 +1,8 @@
+import json
+from pathlib import Path
+
+from jsonschema import Draft202012Validator
+
 from app.models.analysis import AnalysisCheckRun
 from app.models.document_access import DocumentAccess
 from app.schemas.enums import EntityStatus, Role, RunStatus
@@ -5,6 +10,12 @@ from app.services.ic_review import IC_REVIEW_CHECK_TYPE
 
 from test_document_access import _case
 from test_documents_upload import create_user, enqueued_parse_jobs, login, storage_root
+
+
+SHARED_ANALYSIS_SCHEMA = json.loads(
+    (Path(__file__).resolve().parents[3] / "contracts/schemas/shared-analysis.schema.json").read_text(encoding="utf-8")
+)
+Draft202012Validator.check_schema(SHARED_ANALYSIS_SCHEMA)
 
 
 def test_share_requires_owner_and_exposes_only_display_results(client, db_session, storage_root, enqueued_parse_jobs):
@@ -39,6 +50,7 @@ def test_share_requires_owner_and_exposes_only_display_results(client, db_sessio
     login(client, viewer.login, "secret")
     assert client.get(f"/analyses/{analysis.id}").status_code == 200
     assert client.post(f"/analyses/{analysis.id}/share").status_code == 404
+    assert client.get(f"/analyses/{analysis.id}/share").status_code == 404
 
     client.post("/auth/logout")
     login(client, owner.login, "secret")
@@ -48,6 +60,7 @@ def test_share_requires_owner_and_exposes_only_display_results(client, db_sessio
     token = issued.json()["token"]
     assert len(token) == 43
     assert client.post(f"/analyses/{analysis.id}/share").json()["token"] == token
+    assert client.get(f"/analyses/{analysis.id}/share").json() == {"active": True}
 
     client.post("/auth/logout")
     path = f"/public/analyses/{analysis.id}"
@@ -58,6 +71,7 @@ def test_share_requires_owner_and_exposes_only_display_results(client, db_sessio
     assert response.headers["cache-control"] == "private, no-store"
     assert response.headers["x-robots-tag"] == "noindex, nofollow"
     result = response.json()
+    Draft202012Validator(SHARED_ANALYSIS_SCHEMA).validate(result)
     assert result["product_markdown"].startswith("# Product conclusion")
     assert result["summary_ru"]["context"] == "Context"
     assert result["summary_en"]["language"] == "en"
@@ -72,6 +86,7 @@ def test_share_requires_owner_and_exposes_only_display_results(client, db_sessio
 
     login(client, owner.login, "secret")
     assert client.delete(f"/analyses/{analysis.id}/share").status_code == 204
+    assert client.get(f"/analyses/{analysis.id}/share").json() == {"active": False}
     assert client.get(path, headers={"X-Analysis-Share-Token": token}).status_code == 404
     new_token = client.post(f"/analyses/{analysis.id}/share").json()["token"]
     assert new_token != token
@@ -100,6 +115,7 @@ def test_share_uses_latest_completed_ic_review_without_exposing_internal_output(
     client.post("/auth/logout")
     response = client.get(f"/public/analyses/{analysis.id}", headers={"X-Analysis-Share-Token": token})
     assert response.status_code == 200
+    Draft202012Validator(SHARED_ANALYSIS_SCHEMA).validate(response.json())
     assert response.json()["financial"]["executive_brief"] == "Financial conclusion"
     assert "DO NOT SHARE" not in response.text
     assert "RAW IC MODEL OUTPUT" not in response.text

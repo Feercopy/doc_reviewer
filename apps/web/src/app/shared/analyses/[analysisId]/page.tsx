@@ -84,7 +84,12 @@ function FinancialResult({ result }: { result: SharedFinancial }) {
     <div className="shared-analysis__financial">
       {result.executive_brief ? <p>{result.executive_brief}</p> : null}
       {result.top_findings.length ? <section><h2>Ключевые выводы</h2><ol>{result.top_findings.map((item, index) => (
-        <li key={index}><strong>{item.title}</strong>{item.summary ? <p>{item.summary}</p> : null}{item.evidence ? <p>{item.evidence}</p> : null}</li>
+        <li key={index}>
+          <strong>{item.title}{item.severity ? ` · ${item.severity}` : ""}</strong>
+          {item.summary ? <p>{item.summary}</p> : null}
+          {item.evidence ? <p>Подтверждение: {item.evidence}</p> : null}
+          {item.recommendation ? <p>Рекомендация: {item.recommendation}</p> : null}
+        </li>
       ))}</ol></section> : null}
       {result.key_numbers.length ? <section><h2>Ключевые показатели</h2><div className="shared-analysis__table"><table><thead><tr><th>Показатель</th><th>Значение</th><th>Источник</th></tr></thead><tbody>{result.key_numbers.map((item, index) => (
         <tr key={index}><td>{item.label}</td><td>{item.value} {item.unit}</td><td>{item.source}</td></tr>

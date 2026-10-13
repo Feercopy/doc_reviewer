@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createAnalysisShare, getSharedAnalysis, revokeAnalysisShare } from "./analysis-shares";
+import { createAnalysisShare, getAnalysisShareStatus, getSharedAnalysis, revokeAnalysisShare } from "./analysis-shares";
 
 const originalFetch = global.fetch;
 
@@ -26,16 +26,19 @@ describe("analysis share API", () => {
     );
   });
 
-  it("requires an authenticated session for creating and revoking a link", async () => {
+  it("requires an authenticated session for creating, checking and revoking a link", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "share-token" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ active: true }) })
       .mockResolvedValueOnce({ ok: true });
     global.fetch = fetchMock;
 
     expect(await createAnalysisShare("analysis-id")).toBe("share-token");
+    expect(await getAnalysisShareStatus("analysis-id")).toBe(true);
     await revokeAnalysisShare("analysis-id");
 
     expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({ method: "POST", credentials: "include" }));
-    expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({ method: "DELETE", credentials: "include" }));
+    expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({ credentials: "include" }));
+    expect(fetchMock.mock.calls[2][1]).toEqual(expect.objectContaining({ method: "DELETE", credentials: "include" }));
   });
 });

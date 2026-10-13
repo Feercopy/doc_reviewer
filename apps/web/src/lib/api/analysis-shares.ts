@@ -28,6 +28,11 @@ export async function createAnalysisShare(analysisId: string): Promise<string> {
   return result.token;
 }
 
+export async function getAnalysisShareStatus(analysisId: string): Promise<boolean> {
+  const result = await apiFetch<{ active: boolean }>(`/analyses/${analysisId}/share`);
+  return result.active;
+}
+
 export async function revokeAnalysisShare(analysisId: string): Promise<void> {
   await apiFetchNoContent(`/analyses/${analysisId}/share`, { method: "DELETE" });
 }

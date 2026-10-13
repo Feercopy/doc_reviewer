@@ -14,6 +14,7 @@ from app.schemas.analyses import (
     AnalysisDetailRunRead,
     AnalysisRead,
     AnalysisShareRead,
+    AnalysisShareStatusRead,
     AnalysisStatusesListResponse,
     AnalysisStatusRead,
     NewSummaryRead,
@@ -37,6 +38,7 @@ from app.services.analyses import (
     request_analysis_detail_run,
 )
 from app.services.analysis_shares import (
+    analysis_share_is_active,
     create_analysis_share,
     get_shared_analysis,
     read_shared_analysis,
@@ -180,6 +182,21 @@ def share_analysis(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
     response.headers["Cache-Control"] = "no-store"
     return AnalysisShareRead(token=token)
+
+
+@router.get("/analyses/{analysis_id}/share", response_model=AnalysisShareStatusRead)
+def get_analysis_share_status(
+    analysis_id: UUID,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> AnalysisShareStatusRead:
+    try:
+        active = analysis_share_is_active(db=db, actor=current_user, analysis_id=analysis_id)
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found") from exc
+    response.headers["Cache-Control"] = "no-store"
+    return AnalysisShareStatusRead(active=active)
 
 
 @router.delete("/analyses/{analysis_id}/share", status_code=status.HTTP_204_NO_CONTENT)
