@@ -32,8 +32,10 @@ Primary plan index:
   unverified because Alembic is not installed and Docker daemon is stopped.
   PR #112 opened; first CI found a test-only `pdfplumber` import absent from the
   API image. Replaced it with a PDF content-stream assertion using existing
-  `pypdf`; focused tests pass again. CI rerun, review, merge and production
-  verification pending.
+  `pypdf`; focused tests pass again and repeat CI passed. Before merge, the
+  guest Summary payload was further restricted to display fields (excluding
+  possible technical diagnostics), with regression coverage. Review, final CI,
+  merge and production verification pending.
 
 - [~] 2026-10-12: Publish the user's revised New Summary Traction rules. New
   generated v8 reports carry `total_source_policy=same_table_annual_sum`, use
