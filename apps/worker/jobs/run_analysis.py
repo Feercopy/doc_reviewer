@@ -22,7 +22,7 @@ from app.schemas.enums import EntityStatus, Provider, RunStatus, SkillSourceType
 from app.security.secrets import decrypt_secret
 from app.services.audit import record_audit
 from app.services.analysis_jobs import enqueue_run_ic_agentic_review
-from app.services.analyses import ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY
+from app.services.analyses import ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY, AUTO_IC_REVIEW_EXPECTED_KEY
 from app.services.devils_retrieval import create_devils_retrieval_snapshot
 from app.services.ic_review import create_automatic_ic_review_run_for_analysis, mark_ic_review_run_enqueue_failed
 from app.services.provider_keys import get_shared_provider_key
@@ -220,6 +220,7 @@ def run_analysis(
             run_parameters["provider_api"] = "responses"
             completed_run_parameters = run_parameters
         completed_run_parameters = dict(completed_run_parameters or {})
+        completed_run_parameters[AUTO_IC_REVIEW_EXPECTED_KEY] = True
         completed_run_parameters["gate_challenger_provider_metadata"] = _provider_attempt_metadata(
             result=result,
             attempt=len(provider_attempts),

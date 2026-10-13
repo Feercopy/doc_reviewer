@@ -24,6 +24,10 @@ export type SharedAnalysis = {
   financial: SharedFinancial | null;
 };
 
+export class SharedAnalysisLinkUnavailableError extends Error {}
+
+const RETRYABLE_CLIENT_STATUSES = new Set([408, 425, 429]);
+
 export async function createAnalysisShare(analysisId: string): Promise<string> {
   const result = await apiFetch<{ token: string }>(`/analyses/${analysisId}/share`, { method: "POST" });
   return result.token;
@@ -44,8 +48,9 @@ export async function getSharedAnalysis(analysisId: string, token: string): Prom
     cache: "no-store",
     headers: { "X-Analysis-Share-Token": token },
   });
-  if (!response.ok) {
-    throw new Error("Ссылка недоступна или доступ по ней был отключён.");
+  if (response.status >= 400 && response.status < 500 && !RETRYABLE_CLIENT_STATUSES.has(response.status)) {
+    throw new SharedAnalysisLinkUnavailableError("Ссылка недоступна или доступ по ней был отключён.");
   }
+  if (!response.ok) throw new Error("Не удалось обновить результаты. Повторяем попытку…");
   return response.json() as Promise<SharedAnalysis>;
 }

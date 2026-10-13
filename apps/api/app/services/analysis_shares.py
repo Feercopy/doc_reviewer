@@ -2,6 +2,7 @@
 
 import re
 from base64 import urlsafe_b64encode
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from hmac import compare_digest, new as new_hmac
 from secrets import token_urlsafe
@@ -15,7 +16,12 @@ from app.models.analysis import Analysis, AnalysisCheckRun
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.enums import EntityStatus
-from app.services.analyses import AnalysisNotFoundError, get_manageable_analysis_for_actor
+from app.services.analyses import (
+    ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY,
+    AUTO_IC_REVIEW_EXPECTED_KEY,
+    AnalysisNotFoundError,
+    get_manageable_analysis_for_actor,
+)
 from app.services.audit import record_audit
 from app.services.ic_review import IC_REVIEW_CHECK_TYPE
 from app.services.new_summaries import read_new_summary, with_display_stage, with_verified_source_totals
@@ -23,6 +29,7 @@ from app.services.new_summaries import read_new_summary, with_display_stage, wit
 
 _SHARE_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 _ACTIVE_RUN_STATUSES = frozenset({"queued", "running", "waiting"})
+_HANDOFF_GRACE_PERIOD = timedelta(minutes=10)
 
 
 def _share_token(analysis: Analysis) -> str:
@@ -82,8 +89,21 @@ def read_shared_analysis(*, db: Session, analysis: Analysis, document: Document)
     )
     financial_run = db.execute(statement).scalars().first()
     financial_output = financial_run.structured_output if financial_run and financial_run.status == "completed" else None
+    # Product completion is committed before the automatic IC row is created.
+    completed_at = analysis.completed_at
+    if completed_at is not None and completed_at.tzinfo is None:
+        completed_at = completed_at.replace(tzinfo=timezone.utc)
+    awaiting_automatic_ic_review = (
+        financial_run is None
+        and analysis.status == "completed"
+        and (analysis.run_parameters or {}).get(AUTO_IC_REVIEW_EXPECTED_KEY) is True
+        and not (analysis.run_parameters or {}).get(ANALYSIS_CHAIN_CANCEL_REQUESTED_AT_KEY)
+        and completed_at is not None
+        and timedelta(0) <= datetime.now(timezone.utc) - completed_at <= _HANDOFF_GRACE_PERIOD
+    )
     processing = (
         analysis.status in _ACTIVE_RUN_STATUSES
+        or awaiting_automatic_ic_review
         or (financial_run is not None and financial_run.status in _ACTIVE_RUN_STATUSES)
         or summary.ru.status in _ACTIVE_RUN_STATUSES
         or summary.en.status in _ACTIVE_RUN_STATUSES

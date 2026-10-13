@@ -347,8 +347,10 @@ def test_run_analysis_requests_automatic_ic_review_after_completed_gate_run(tmp_
         captured = {}
 
         def fake_create_automatic_ic_review_run_for_analysis(*, db, analysis, output_language):
+            db.refresh(analysis)
             captured["analysis_id"] = analysis.id
             captured["output_language"] = output_language
+            captured["handoff_expected"] = analysis.run_parameters.get("automatic_ic_review_expected")
             return SimpleNamespace(id=check_run_id, status=RunStatus.QUEUED.value, created_for_request=True)
 
         monkeypatch.setattr(
@@ -361,7 +363,7 @@ def test_run_analysis_requests_automatic_ic_review_after_completed_gate_run(tmp_
 
         db.refresh(analysis)
         assert analysis.status == RunStatus.COMPLETED.value
-        assert captured == {"analysis_id": analysis.id, "output_language": "en"}
+        assert captured == {"analysis_id": analysis.id, "output_language": "en", "handoff_expected": True}
         assert enqueued_ic_review_run_ids == [check_run_id]
     finally:
         _close_session(db)
