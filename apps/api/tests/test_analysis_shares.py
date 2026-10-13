@@ -20,6 +20,11 @@ def test_share_requires_owner_and_exposes_only_display_results(client, db_sessio
             "ru": {"status": "completed", "payload": {
                 "schema_version": "new-summary-v8", "language": "ru", "title": "Case - AI Summary",
                 "stage": "Gate 2", "context": "Context", "required_elements": [],
+                "private_diagnostic": "DO NOT SHARE SUMMARY DIAGNOSTICS",
+                "traction_summary": {
+                    "periods": ["2026", "Total"], "rows": [{"label": "Total Revenue", "values": ["1", "1"]}],
+                    "total_revenue_provenance": {"method": "same_source_table", "source_block_id": "internal-block-42"},
+                },
             }},
             "en": {"status": "completed", "payload": {
                 "schema_version": "new-summary-v8", "language": "en", "title": "Case - AI Summary",
@@ -59,6 +64,9 @@ def test_share_requires_owner_and_exposes_only_display_results(client, db_sessio
     assert "raw_output" not in result
     assert "run_parameters" not in result
     assert "SECRET RAW MODEL OUTPUT" not in response.text
+    assert "DO NOT SHARE SUMMARY DIAGNOSTICS" not in response.text
+    assert "internal-block-42" not in response.text
+    assert result["summary_ru"]["traction_summary"]["rows"][0]["values"] == ["1", "1"]
     assert client.get(f"/analyses/{analysis.id}").status_code == 401
     assert client.get(f"/documents/{document.id}").status_code == 401
 

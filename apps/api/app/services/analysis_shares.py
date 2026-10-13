@@ -78,10 +78,41 @@ def read_shared_analysis(*, db: Session, analysis: Analysis, document: Document)
         "status": analysis.status,
         "created_at": analysis.created_at,
         "product_markdown": product_markdown,
-        "summary_ru": summary.ru.payload if summary.ru.status == "completed" else None,
-        "summary_en": summary.en.payload if summary.en.status == "completed" else None,
+        "summary_ru": _public_summary(summary.ru.payload) if summary.ru.status == "completed" else None,
+        "summary_en": _public_summary(summary.en.payload) if summary.en.status == "completed" else None,
         "financial": _public_financial(financial_output),
     }
+
+
+def _public_summary(value: object) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    display_fields = (
+        "schema_version", "language", "title", "stage", "context", "document_quality_percent",
+        "required_elements", "required_details", "confirmed",
+        "insufficiently_confirmed", "critical_problems", "other",
+    )
+    result = {key: value[key] for key in display_fields if key in value}
+    traction = value.get("traction_summary")
+    if isinstance(traction, dict):
+        if isinstance(traction.get("tables"), list):
+            result["traction_summary"] = {"tables": [
+                _public_traction_table(table) for table in traction["tables"] if isinstance(table, dict)
+            ]}
+        else:
+            result["traction_summary"] = _public_traction_table(traction)
+    return result
+
+
+def _public_traction_table(value: dict) -> dict:
+    visible = {key: value[key] for key in ("metric", "cumulative", "metric_label", "periods") if key in value}
+    rows = value.get("rows")
+    if isinstance(rows, list):
+        visible["rows"] = [
+            {key: row[key] for key in ("label", "values", "mismatch_periods") if key in row}
+            for row in rows if isinstance(row, dict)
+        ]
+    return visible
 
 
 def _public_financial(value: object) -> dict | None:
