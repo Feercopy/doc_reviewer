@@ -18,40 +18,35 @@ export default function SharedAnalysisPage() {
 
   useEffect(() => {
     let active = true;
+    let timer: ReturnType<typeof setTimeout>;
     setAnalysis(null);
     setError("");
-    const token = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("share");
+    const token = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("share") ?? "";
     if (!token) {
       setError("В ссылке нет ключа доступа.");
       return;
     }
-    getSharedAnalysis(analysisId, token)
-      .then((result) => { if (active) setAnalysis(result); })
-      .catch((reason: Error) => { if (active) setError(reason.message); });
-    return () => { active = false; };
-  }, [analysisId]);
-
-  useEffect(() => {
-    if (!analysis?.processing) return;
-    const token = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("share");
-    if (!token) return;
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
     async function refresh() {
       try {
-        const result = await getSharedAnalysis(analysisId, token!);
-        if (active) { setAnalysis(result); setError(""); }
+        const result = await getSharedAnalysis(analysisId, token);
+        if (!active) return;
+        setAnalysis(result);
+        setError("");
+        if (result.processing) timer = setTimeout(refresh, 10000);
       } catch (reason) {
-        if (active) {
-          if (reason instanceof SharedAnalysisLinkUnavailableError) setAnalysis(null);
-          setError(reason instanceof Error ? reason.message : "Не удалось обновить результаты. Повторяем попытку…");
+        if (!active) return;
+        if (reason instanceof SharedAnalysisLinkUnavailableError) {
+          setAnalysis(null);
+          setError(reason.message);
+        } else {
+          setError("Не удалось обновить результаты. Повторяем попытку…");
+          timer = setTimeout(refresh, 10000);
         }
       }
-      if (active) timer = setTimeout(refresh, 10000);
     }
-    timer = setTimeout(refresh, 10000);
+    void refresh();
     return () => { active = false; clearTimeout(timer); };
-  }, [analysis?.processing, analysisId]);
+  }, [analysisId]);
 
   const report: NewSummaryReport | null = analysis?.summary_ru && analysis.summary_en ? {
     analysis_id: analysis.id,
