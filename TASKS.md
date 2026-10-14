@@ -21,6 +21,11 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] 2026-10-14: Follow-up to SuperUser PR #115 after independent review:
+  PATCH status=deleted must revoke owner scope just like DELETE. Use a shared
+  cleanup path and test immediate loss of document/analysis access. 735
+  API/worker tests passed locally; follow-up PR/CI/deploy pending.
+
 - [~] 2026-10-14: Implement SuperUser owner scopes. Admin can change source
   owners; backend grants dynamic read/download of their existing and future
   cases and analyses, plus a narrow new-analysis launch permission. Other
