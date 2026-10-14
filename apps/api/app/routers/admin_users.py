@@ -1,20 +1,28 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.dependencies.auth import require_admin
 from app.models.audit_log import AuditLog
+from app.models.superuser_owner_access import SuperuserOwnerAccess
 from app.models.user import User
-from app.schemas.enums import UserStatus
-from app.schemas.users import PasswordReset, UserCreate, UserPatch, UserRead, UsersListResponse
+from app.schemas.enums import Role, UserStatus
+from app.schemas.users import PasswordReset, SuperuserOwnerScope, UserCreate, UserPatch, UserRead, UsersListResponse
 from app.security.passwords import hash_password
 from app.services.audit import record_audit
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
+
+
+def _superuser_or_404(db: Session, user_id: UUID) -> User:
+    user = db.get(User, user_id)
+    if user is None or user.status == UserStatus.DELETED.value or user.role != Role.SUPERUSER.value:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SuperUser not found")
+    return user
 
 
 def _audit(db: Session, actor: User, action: str, target: User, metadata: dict | None = None) -> None:
@@ -96,6 +104,8 @@ def patch_user(
             {"role": {"from": user.role, "to": payload.role.value}},
         )
         user.role = payload.role.value
+        if user.role != Role.SUPERUSER.value:
+            db.execute(delete(SuperuserOwnerAccess).where(SuperuserOwnerAccess.superuser_id == user.id))
     if payload.status is not None and payload.status.value != user.status:
         action = "user.status_changed"
         _audit(
@@ -109,6 +119,57 @@ def patch_user(
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.get("/{user_id}/owner-scope", response_model=SuperuserOwnerScope)
+def get_superuser_owner_scope(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> SuperuserOwnerScope:
+    _superuser_or_404(db, user_id)
+    owner_ids = db.scalars(
+        select(SuperuserOwnerAccess.owner_id)
+        .where(SuperuserOwnerAccess.superuser_id == user_id)
+        .order_by(SuperuserOwnerAccess.owner_id)
+    ).all()
+    return SuperuserOwnerScope(owner_ids=list(owner_ids))
+
+
+@router.put("/{user_id}/owner-scope", response_model=SuperuserOwnerScope)
+def put_superuser_owner_scope(
+    user_id: UUID,
+    payload: SuperuserOwnerScope,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> SuperuserOwnerScope:
+    superuser = _superuser_or_404(db, user_id)
+    desired = set(payload.owner_ids)
+    if superuser.id in desired:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="SuperUser cannot follow self")
+    owners = db.scalars(select(User).where(User.id.in_(desired))).all() if desired else []
+    if len(owners) != len(desired) or any(owner.status != UserStatus.ACTIVE.value for owner in owners):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Owners must be active users")
+
+    current = set(db.scalars(
+        select(SuperuserOwnerAccess.owner_id).where(SuperuserOwnerAccess.superuser_id == user_id)
+    ).all())
+    removed = current - desired
+    added = desired - current
+    if removed:
+        db.execute(delete(SuperuserOwnerAccess).where(
+            SuperuserOwnerAccess.superuser_id == user_id,
+            SuperuserOwnerAccess.owner_id.in_(removed),
+        ))
+    for owner_id in added:
+        db.add(SuperuserOwnerAccess(superuser_id=user_id, owner_id=owner_id, granted_by_id=admin.id))
+    if removed or added:
+        _audit(db, admin, "superuser.owner_scope_changed", superuser, {
+            "added_owner_ids": sorted(str(value) for value in added),
+            "removed_owner_ids": sorted(str(value) for value in removed),
+        })
+    db.commit()
+    return SuperuserOwnerScope(owner_ids=sorted(desired))
 
 
 @router.post("/{user_id}/reset-password", response_model=UserRead)
@@ -143,5 +204,7 @@ def delete_user(
 
     previous_status = user.status
     user.status = UserStatus.DELETED.value
+    db.execute(delete(SuperuserOwnerAccess).where(SuperuserOwnerAccess.superuser_id == user.id))
+    db.execute(delete(SuperuserOwnerAccess).where(SuperuserOwnerAccess.owner_id == user.id))
     _audit(db, admin, "user.deleted", user, {"status": {"from": previous_status, "to": user.status}})
     db.commit()

@@ -3,6 +3,7 @@ from enum import StrEnum
 
 class Role(StrEnum):
     USER = "user"
+    SUPERUSER = "superuser"
     ANNOTATOR = "annotator"
     ADMIN = "admin"
 

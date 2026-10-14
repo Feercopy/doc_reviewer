@@ -13,7 +13,7 @@ from app.models.document import Document
 from app.models.user import User
 from app.schemas.enums import DocumentParseStatus, DocumentRole, DocumentType, EntityStatus, Role
 from app.services.audit import record_audit
-from app.services.document_access import can_manage_document, can_view_document, readable_document_clause
+from app.services.document_access import can_launch_document_analysis, can_manage_document, can_view_document, readable_document_clause
 from app.storage.local import LocalDocumentStorage, StoredFileTooLargeError, safe_filename
 
 
@@ -372,6 +372,13 @@ def get_document_for_actor(*, db: Session, actor: User, document_id: UUID) -> Do
 def get_manageable_document_for_actor(*, db: Session, actor: User, document_id: UUID) -> Document:
     document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
     if not can_manage_document(actor=actor, document=document):
+        raise DocumentNotFoundError("Document not found")
+    return document
+
+
+def get_analyzable_document_for_actor(*, db: Session, actor: User, document_id: UUID) -> Document:
+    document = get_document_for_actor(db=db, actor=actor, document_id=document_id)
+    if not can_launch_document_analysis(db=db, actor=actor, document=document):
         raise DocumentNotFoundError("Document not found")
     return document
 

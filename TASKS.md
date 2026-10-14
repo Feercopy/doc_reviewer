@@ -21,6 +21,19 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] 2026-10-14: Implement SuperUser owner scopes. Admin can change source
+  owners; backend grants dynamic read/download of their existing and future
+  cases and analyses, plus a narrow new-analysis launch permission. Other
+  mutations and admin/raw-output access remain denied. Owner may delete a
+  SuperUser-launched result in their own case, but the prior restriction on
+  admin-created results remains unchanged. Added migration,
+  admin editor, SuperUser case-list refresh, and focused authorization tests.
+  Focused API tests, 734 API/worker tests (with standard CORS test origins),
+  184 web tests, Next build, and isolated migration upgrade/downgrade passed.
+  Full historical SQLite migration chain is not supported by an older
+  PostgreSQL-specific migration; production migration awaits deployment.
+  PR and production verification pending.
+
 - [x] 2026-10-14: AI Summary PDF/Word problems now use black text with bold issue
   and regular supporting fact. Add owner/admin-issued, revocable capability links
   for read-only unauthenticated viewing of AI Summary, Product Analysis and

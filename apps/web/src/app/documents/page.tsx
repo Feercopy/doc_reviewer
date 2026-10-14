@@ -398,10 +398,10 @@ export default function DocumentsPage() {
   const primaryFileInputRef = useRef<HTMLInputElement | null>(null);
   const finSummaryFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (recoverAdminHistory = true) => {
     const response = await listDocuments();
     const nextDocuments =
-      response.documents.length > 0 ? response.documents : await recoverDocumentsFromAdminDocuments();
+      response.documents.length > 0 ? response.documents : recoverAdminHistory ? await recoverDocumentsFromAdminDocuments() : [];
     setDocuments(nextDocuments);
     setCaseAnalysesByDocumentId((current) => latestAnalysesByDocumentId(nextDocuments, current));
   }, []);
@@ -430,7 +430,7 @@ export default function DocumentsPage() {
     let timer: number | undefined;
     const poll = async () => {
       if (document.visibilityState === "visible") {
-        await refresh().catch(() => undefined);
+        await refresh(currentUser?.role === "admin").catch(() => undefined);
       }
       if (!cancelled) {
         timer = window.setTimeout(poll, 5000);
@@ -444,7 +444,15 @@ export default function DocumentsPage() {
         window.clearTimeout(timer);
       }
     };
-  }, [hasActiveCases, refresh]);
+  }, [currentUser?.role, hasActiveCases, refresh]);
+
+  useEffect(() => {
+    if (currentUser?.role !== "superuser" || hasActiveCases) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh(false).catch(() => undefined);
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [currentUser?.role, hasActiveCases, refresh]);
 
   useEffect(() => {
     let ignore = false;

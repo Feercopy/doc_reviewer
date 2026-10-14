@@ -19,6 +19,8 @@ export type PatchUserPayload = {
   status?: UserStatus;
 };
 
+export type SuperuserOwnerScope = { owner_ids: string[] };
+
 export async function listUsers(): Promise<UsersListResponse> {
   return apiFetch<UsersListResponse>("/admin/users");
 }
@@ -34,6 +36,17 @@ export async function patchUser(userId: string, payload: PatchUserPayload): Prom
   return apiFetch<User>(`/admin/users/${userId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function getSuperuserOwnerScope(userId: string): Promise<SuperuserOwnerScope> {
+  return apiFetch<SuperuserOwnerScope>(`/admin/users/${userId}/owner-scope`);
+}
+
+export async function putSuperuserOwnerScope(userId: string, ownerIds: string[]): Promise<SuperuserOwnerScope> {
+  return apiFetch<SuperuserOwnerScope>(`/admin/users/${userId}/owner-scope`, {
+    method: "PUT",
+    body: JSON.stringify({ owner_ids: ownerIds }),
   });
 }
 
