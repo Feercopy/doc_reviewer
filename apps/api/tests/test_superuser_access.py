@@ -98,6 +98,25 @@ def test_owner_scope_validation_and_role_downgrade(client, db_session):
     assert client.get(scope_url).status_code == 404
 
 
+def test_patch_deleted_owner_revokes_superuser_scope(client, db_session, storage_root, enqueued_parse_jobs):
+    admin = create_user(db_session, "admin", "secret", Role.ADMIN)
+    owner = create_user(db_session, "owner", "secret")
+    superuser = create_user(db_session, "super", "secret", Role.SUPERUSER)
+    document, analysis = _case(client, db_session, owner)
+    _switch(client, admin)
+    scope_url = f"/admin/users/{superuser.id}/owner-scope"
+    assert client.put(scope_url, json={"owner_ids": [str(owner.id)]}).status_code == 200
+    _switch(client, superuser)
+    assert client.get(f"/analyses/{analysis.id}").status_code == 200
+    _switch(client, admin)
+    assert client.patch(f"/admin/users/{owner.id}", json={"status": "deleted"}).status_code == 200
+    assert client.get(scope_url).json() == {"owner_ids": []}
+    assert db_session.get(SuperuserOwnerAccess, (superuser.id, owner.id)) is None
+    _switch(client, superuser)
+    assert client.get(f"/documents/{document.id}").status_code == 404
+    assert client.get(f"/analyses/{analysis.id}").status_code == 404
+
+
 def test_superuser_can_launch_new_full_analysis_but_not_delete_it(client, db_session, storage_root, enqueued_parse_jobs, tmp_path):
     from app.main import app
     from app.routers import analyses as analyses_router

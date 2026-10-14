@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,13 @@ def _superuser_or_404(db: Session, user_id: UUID) -> User:
     if user is None or user.status == UserStatus.DELETED.value or user.role != Role.SUPERUSER.value:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SuperUser not found")
     return user
+
+
+def _clear_owner_scopes_for_deleted_user(db: Session, user_id: UUID) -> None:
+    db.execute(delete(SuperuserOwnerAccess).where(or_(
+        SuperuserOwnerAccess.superuser_id == user_id,
+        SuperuserOwnerAccess.owner_id == user_id,
+    )))
 
 
 def _audit(db: Session, actor: User, action: str, target: User, metadata: dict | None = None) -> None:
@@ -116,6 +123,8 @@ def patch_user(
             {"status": {"from": user.status, "to": payload.status.value}},
         )
         user.status = payload.status.value
+        if user.status == UserStatus.DELETED.value:
+            _clear_owner_scopes_for_deleted_user(db, user.id)
     db.commit()
     db.refresh(user)
     return user
@@ -204,7 +213,6 @@ def delete_user(
 
     previous_status = user.status
     user.status = UserStatus.DELETED.value
-    db.execute(delete(SuperuserOwnerAccess).where(SuperuserOwnerAccess.superuser_id == user.id))
-    db.execute(delete(SuperuserOwnerAccess).where(SuperuserOwnerAccess.owner_id == user.id))
+    _clear_owner_scopes_for_deleted_user(db, user.id)
     _audit(db, admin, "user.deleted", user, {"status": {"from": previous_status, "to": user.status}})
     db.commit()
