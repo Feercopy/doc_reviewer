@@ -1,4 +1,4 @@
-export type Role = "user" | "annotator" | "admin";
+export type Role = "user" | "superuser" | "annotator" | "admin";
 export type UserStatus = "active" | "blocked" | "deleted";
 
 export type User = {

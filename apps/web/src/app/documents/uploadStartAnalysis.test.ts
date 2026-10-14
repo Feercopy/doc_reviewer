@@ -37,8 +37,9 @@ describe("documents upload start analysis flow", () => {
     expect(pageSource).toContain("Promise.allSettled");
     expect(pageSource).toContain("const adminHistoryRecoveryLimit = 100");
     expect(pageSource).toContain(
-      "response.documents.length > 0 ? response.documents : await recoverDocumentsFromAdminDocuments()",
+      "response.documents.length > 0 ? response.documents : recoverAdminHistory ? await recoverDocumentsFromAdminDocuments() : []",
     );
+    expect(pageSource).toContain('currentUser?.role !== "superuser" || hasActiveCases');
     expect(pageSource).toContain("document.latest_analysis ?? current[document.id]");
     expect(pageSource).not.toContain("listAnalyses(document.id)");
     expect(pageSource).not.toContain("Loading documents...");

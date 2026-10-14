@@ -33,11 +33,12 @@ from app.schemas.enums import (
     DocumentType,
     EntityStatus,
     Provider,
+    Role,
     RunStatus,
     SkillType,
 )
 from app.services.document_access import can_view_document, readable_document_clause
-from app.services.documents import DocumentNotFoundError, get_document_for_actor, get_manageable_document_for_actor
+from app.services.documents import DocumentNotFoundError, get_analyzable_document_for_actor, get_document_for_actor, get_manageable_document_for_actor
 from app.services.external_sources import SourceUnavailableError
 from app.services.new_summaries import (
     NEW_SUMMARY_EXPECTED_PARAMETER,
@@ -109,7 +110,7 @@ def create_analysis_for_document(
     run_parameters: dict,
     defer_until_document_parsed: bool = False,
 ) -> Analysis:
-    document = get_manageable_document_for_actor(db=db, actor=actor, document_id=document_id)
+    document = get_analyzable_document_for_actor(db=db, actor=actor, document_id=document_id)
     parse_completed = document.parse_status == DocumentParseStatus.COMPLETED.value and bool(document.parsed_text)
     if not parse_completed and not defer_until_document_parsed:
         raise AnalysisPreconditionError("Document parse is not completed")
@@ -138,6 +139,9 @@ def create_analysis_for_document(
         raise AnalysisPreconditionError("Hermes provider is disabled")
 
     merged_parameters = dict(run_parameters)
+    merged_parameters.pop("launched_by_superuser", None)
+    if actor.role == Role.SUPERUSER.value:
+        merged_parameters["launched_by_superuser"] = True
     merged_parameters.setdefault("output_language", "ru")
     merged_parameters["document_type"] = document_type
     merged_parameters["skill_source_snapshot"] = skill_source_snapshot(skill)
@@ -627,7 +631,13 @@ def _analysis_source_traces(*, db: Session, analysis_ids: list[UUID]) -> dict[UU
 
 def delete_analysis_for_actor(*, db: Session, actor: User, analysis_id: UUID) -> None:
     analysis = db.get(Analysis, analysis_id)
-    if analysis is None or analysis.deleted_at is not None or not can_delete_analysis(actor, analysis):
+    if analysis is None or analysis.deleted_at is not None:
+        raise AnalysisNotFoundError("Analysis not found")
+    try:
+        document = get_manageable_document_for_actor(db=db, actor=actor, document_id=analysis.document_id)
+    except DocumentNotFoundError as exc:
+        raise AnalysisNotFoundError("Analysis not found") from exc
+    if not _can_delete_document_analysis(actor=actor, analysis=analysis, document=document):
         raise AnalysisNotFoundError("Analysis not found")
     context = _analysis_deletion_context(db=db, analysis=analysis)
     _ensure_deletable_analysis_chain(context)
@@ -646,7 +656,7 @@ def delete_document_analysis_results_for_actor(*, db: Session, actor: User, docu
         .scalars()
         .all()
     )
-    forbidden = [analysis for analysis in analyses if not can_delete_analysis(actor, analysis)]
+    forbidden = [analysis for analysis in analyses if not _can_delete_document_analysis(actor=actor, analysis=analysis, document=document)]
     if forbidden:
         raise AnalysisNotFoundError("Analysis not found")
 
@@ -669,6 +679,12 @@ def delete_document_analysis_results_for_actor(*, db: Session, actor: User, docu
         },
     )
     db.commit()
+
+
+def _can_delete_document_analysis(*, actor: User, analysis: Analysis, document: Document) -> bool:
+    return can_delete_analysis(actor, analysis) or (
+        document.owner_id == actor.id and (analysis.run_parameters or {}).get("launched_by_superuser") is True
+    )
 
 
 def _analysis_deletion_context(*, db: Session, analysis: Analysis) -> AnalysisDeletionContext:

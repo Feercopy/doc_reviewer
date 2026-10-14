@@ -10,6 +10,7 @@ from app.models.etalon import Etalon  # noqa: F401
 from app.models.feedback import Feedback  # noqa: F401
 from app.models.provider_key import ProviderKey  # noqa: F401
 from app.models.skill import Skill  # noqa: F401
+from app.models.superuser_owner_access import SuperuserOwnerAccess  # noqa: F401
 from app.models.user import User  # noqa: F401
 
 __all__ = ["Base"]

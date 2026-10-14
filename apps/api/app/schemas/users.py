@@ -35,3 +35,7 @@ class UserPatch(BaseModel):
 
 class PasswordReset(BaseModel):
     password: str = Field(min_length=8, max_length=256)
+
+
+class SuperuserOwnerScope(BaseModel):
+    owner_ids: list[UUID]

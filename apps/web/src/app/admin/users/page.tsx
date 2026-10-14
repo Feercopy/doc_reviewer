@@ -1,16 +1,16 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { AdminTabs } from "@/components/AdminTabs";
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge } from "@/components/StatusBadge";
-import { createUser, deleteUser, listUsers, patchUser, resetPassword } from "@/lib/api/admin-users";
+import { createUser, deleteUser, getSuperuserOwnerScope, listUsers, patchUser, putSuperuserOwnerScope, resetPassword } from "@/lib/api/admin-users";
 import { me } from "@/lib/api/auth";
 import { grantDocumentAccess, type DocumentAccessGrantResult } from "@/lib/api/document-access";
 import type { Role, User, UserStatus } from "@/lib/api/types";
 
-const roles: Role[] = ["user", "annotator", "admin"];
+const roles: Role[] = ["user", "superuser", "annotator", "admin"];
 const statuses: UserStatus[] = ["active", "blocked"];
 
 export default function AdminUsersPage() {
@@ -29,6 +29,15 @@ export default function AdminUsersPage() {
   const [accessPending, setAccessPending] = useState(false);
   const [accessError, setAccessError] = useState("");
   const [accessResult, setAccessResult] = useState<DocumentAccessGrantResult | null>(null);
+  const [scopeUser, setScopeUser] = useState<User | null>(null);
+  const [scopeOwnerIds, setScopeOwnerIds] = useState<string[]>([]);
+  const [scopeFilter, setScopeFilter] = useState("");
+  const [scopePending, setScopePending] = useState(false);
+  const [scopeLoading, setScopeLoading] = useState(false);
+  const [scopeLoaded, setScopeLoaded] = useState(false);
+  const [scopeError, setScopeError] = useState("");
+  const [scopeSaved, setScopeSaved] = useState(false);
+  const scopeRequestRef = useRef(0);
 
   async function refresh() {
     const user = await me();
@@ -75,6 +84,10 @@ export default function AdminUsersPage() {
     setError("");
     try {
       await patchUser(user.id, { role: nextRole, status: nextStatus });
+      if (scopeUser?.id === user.id && nextRole !== "superuser") {
+        scopeRequestRef.current += 1;
+        setScopeUser(null);
+      }
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update user");
@@ -107,6 +120,51 @@ export default function AdminUsersPage() {
       setError(err instanceof Error ? err.message : "Failed to delete user");
     } finally {
       setDeletingId("");
+    }
+  }
+
+  async function editOwnerScope(user: User) {
+    const requestId = ++scopeRequestRef.current;
+    setScopeUser(user);
+    setScopeOwnerIds([]);
+    setScopeError("");
+    setScopeSaved(false);
+    setScopePending(false);
+    setScopeLoading(true);
+    setScopeLoaded(false);
+    try {
+      const scope = await getSuperuserOwnerScope(user.id);
+      if (scopeRequestRef.current === requestId) {
+        setScopeOwnerIds(scope.owner_ids);
+        setScopeLoaded(true);
+      }
+    } catch (err) {
+      if (scopeRequestRef.current === requestId) {
+        setScopeError(err instanceof Error ? err.message : "Failed to load owner scope");
+      }
+    } finally {
+      if (scopeRequestRef.current === requestId) setScopeLoading(false);
+    }
+  }
+
+  async function saveOwnerScope() {
+    if (!scopeUser || !scopeLoaded) return;
+    const requestId = scopeRequestRef.current;
+    setScopePending(true);
+    setScopeError("");
+    setScopeSaved(false);
+    try {
+      const scope = await putSuperuserOwnerScope(scopeUser.id, scopeOwnerIds);
+      if (scopeRequestRef.current === requestId) {
+        setScopeOwnerIds(scope.owner_ids);
+        setScopeSaved(true);
+      }
+    } catch (err) {
+      if (scopeRequestRef.current === requestId) {
+        setScopeError(err instanceof Error ? err.message : "Failed to save owner scope");
+      }
+    } finally {
+      if (scopeRequestRef.current === requestId) setScopePending(false);
     }
   }
 
@@ -181,7 +239,7 @@ export default function AdminUsersPage() {
               <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
                 {roles.map((item) => (
                   <option key={item} value={item}>
-                    {item}
+                    {item === "superuser" ? "SuperUser" : item}
                   </option>
                 ))}
               </select>
@@ -256,7 +314,7 @@ export default function AdminUsersPage() {
                         >
                           {roles.map((item) => (
                             <option key={item} value={item}>
-                              {item}
+                              {item === "superuser" ? "SuperUser" : item}
                             </option>
                           ))}
                         </select>
@@ -277,6 +335,9 @@ export default function AdminUsersPage() {
                         <StatusBadge status={user.status} />
                       </td>
                       <td className="button-row">
+                        {user.role === "superuser" ? <button className="secondary" type="button" onClick={() => editOwnerScope(user)}>
+                          Owners
+                        </button> : null}
                         <button className="secondary" type="button" onClick={() => handleResetPassword(user)}>
                           Reset password
                         </button>
@@ -296,6 +357,47 @@ export default function AdminUsersPage() {
             </div>
           ) : null}
         </section>
+
+        {scopeUser ? <section className="panel stack" aria-label={`Owner scope for ${scopeUser.login}`}>
+          <div className="toolbar">
+            <div>
+              <h2>Owners visible to {scopeUser.login}</h2>
+              <p className="muted">Existing and future cases owned by selected users, including their analyses.</p>
+            </div>
+            <button className="secondary" type="button" onClick={() => { scopeRequestRef.current += 1; setScopeUser(null); }}>Close</button>
+          </div>
+          <label>
+            Find owner
+            <input value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)} placeholder="Login or name" />
+          </label>
+          {scopeLoading ? <p className="muted">Loading owners...</p> : null}
+          {!scopeLoading ? <div style={{ maxHeight: 280, overflowY: "auto" }}>
+            {users.filter((candidate) => candidate.id !== scopeUser.id && (candidate.status === "active" || scopeOwnerIds.includes(candidate.id)) &&
+              `${candidate.login} ${candidate.display_name}`.toLowerCase().includes(scopeFilter.toLowerCase())).map((candidate) => (
+                <label key={candidate.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0" }}>
+                  <input
+                    type="checkbox"
+                    checked={scopeOwnerIds.includes(candidate.id)}
+                    disabled={scopePending}
+                    onChange={(event) => {
+                      setScopeSaved(false);
+                      setScopeOwnerIds((current) => event.target.checked
+                        ? [...current, candidate.id]
+                        : current.filter((id) => id !== candidate.id));
+                    }}
+                  />
+                  {candidate.login} <span className="muted">{candidate.display_name}{candidate.status !== "active" ? ` (${candidate.status})` : ""}</span>
+                </label>
+              ))}
+          </div> : null}
+          <div className="button-row">
+            <button disabled={!scopeLoaded || scopeLoading || scopePending} type="button" onClick={saveOwnerScope}>
+              {scopePending ? "Saving..." : `Save ${scopeOwnerIds.length} owners`}
+            </button>
+            {scopeSaved ? <span className="muted">Saved</span> : null}
+          </div>
+          {scopeError ? <p className="error">{scopeError}</p> : null}
+        </section> : null}
       </main>
     </AppShell>
   );

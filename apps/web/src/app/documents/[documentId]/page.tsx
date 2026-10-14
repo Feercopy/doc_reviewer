@@ -532,6 +532,7 @@ export default function DocumentDetailPage() {
 
   const configuredProviderModels = useMemo(() => providerModels.filter((item) => item.has_key), [providerModels]);
   const canManageDocument = Boolean(currentUser && document && (currentUser.role === "admin" || currentUser.id === document.owner_id));
+  const canStartAnalysis = canManageDocument || currentUser?.role === "superuser";
   const selectedProviderModel = useMemo(
     () => providerModels.find((item) => item.provider === provider) ?? null,
     [provider, providerModels],
@@ -869,7 +870,7 @@ export default function DocumentDetailPage() {
                   <h2>Analysis history</h2>
                 </div>
 
-                {canManageDocument ? <div className="gc-analysis-toolbar" aria-label="Analysis setup">
+                {canStartAnalysis ? <div className="gc-analysis-toolbar" aria-label="Analysis setup">
                   <select
                     aria-label="Model"
                     className="gc-analysis-model-button"
