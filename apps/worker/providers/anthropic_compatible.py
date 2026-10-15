@@ -1,8 +1,6 @@
 import time
 from collections.abc import Callable
 
-import httpx2
-
 from providers.base import AnalysisProviderResult, ProviderAdapter, ProviderRunRequest
 from providers.proxy import outbound_proxy_kwargs
 
@@ -68,7 +66,7 @@ class AnthropicCompatibleAdapter(ProviderAdapter):
         *, api_key: str, base_url: str | None, max_retries: int | None = None,
         timeout_seconds: float | None = None, connect_timeout_seconds: float | None = None,
     ) -> object:
-        from anthropic import Anthropic, DefaultHttpxClient
+        from anthropic import Anthropic, DefaultHttpxClient, Timeout
 
         kwargs: dict[str, object] = {"api_key": api_key}
         if base_url:
@@ -77,7 +75,7 @@ class AnthropicCompatibleAdapter(ProviderAdapter):
             kwargs["max_retries"] = max_retries
         if type(timeout_seconds) in (int, float) and timeout_seconds > 0:
             connect = connect_timeout_seconds if type(connect_timeout_seconds) in (int, float) and connect_timeout_seconds > 0 else min(timeout_seconds, 30)
-            kwargs["timeout"] = httpx2.Timeout(timeout_seconds, connect=connect)
+            kwargs["timeout"] = Timeout(timeout_seconds, connect=connect)
         proxy_kwargs = outbound_proxy_kwargs(base_url)
         if proxy_kwargs:
             kwargs["http_client"] = DefaultHttpxClient(**proxy_kwargs)
