@@ -36,6 +36,9 @@ class LoggingProviderAdapter(ProviderAdapter):
     def __init__(self, wrapped: ProviderAdapter) -> None:
         self._wrapped = wrapped
 
+    def is_retryable_transport_error(self, exc: BaseException) -> bool:
+        return self._wrapped.is_retryable_transport_error(exc)
+
     def run(self, request: ProviderRunRequest) -> AnalysisProviderResult:
         try:
             result = self._wrapped.run(request)

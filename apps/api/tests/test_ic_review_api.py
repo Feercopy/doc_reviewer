@@ -447,6 +447,8 @@ def test_failed_ic_review_exposes_public_error_but_hides_internal_diagnostics(
             step_name="ic-financial-auditor",
             status=RunStatus.FAILED.value,
             error_message="schema_validation_failed:minLength",
+            artifacts=[{"key": "role_transport_retry", "kind": "metadata", "internal_only": True,
+                        "attempts": [{"attempt": 1, "request_id": "req-internal"}]}],
         )
     )
     admin = create_user(db_session, "admin", "secret", Role.ADMIN)
@@ -469,6 +471,7 @@ def test_failed_ic_review_exposes_public_error_but_hides_internal_diagnostics(
         "retryable": True,
     }
     assert "ic_review_error_diagnostics" not in user_payload["run_parameters"]
+    assert user_payload["steps"][0]["artifacts"] == []
 
     client.post("/auth/logout")
     login(client, admin.login, "secret")
@@ -477,6 +480,7 @@ def test_failed_ic_review_exposes_public_error_but_hides_internal_diagnostics(
     admin_payload = admin_response.json()
     assert admin_payload["public_error"]["failed_stage_label"] == "финансовый аудитор"
     assert "ic_review_error_diagnostics" not in admin_payload["run_parameters"]
+    assert admin_payload["steps"][0]["artifacts"] == []
     assert "internal-job-1" not in admin_response.text
     assert "internal-job-1" not in user_response.text
 

@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 
+import anthropic
+import httpx
+import openai
 import pytest
 
 from app.core.config import get_settings
@@ -8,6 +11,24 @@ from providers.anthropic_compatible import AnthropicCompatibleAdapter
 from providers.base import ProviderResponseRequest, ProviderRunRequest
 from providers.hermes import HermesAdapter
 from providers.openai_compatible import OpenAICompatibleAdapter
+from providers.registry import get_provider_adapter
+
+
+def test_transport_retry_classification_stays_behind_provider_adapters():
+    request = httpx.Request("POST", "https://provider.test/v1")
+    openai_adapter = get_provider_adapter(Provider.OPENAI_COMPATIBLE)
+    anthropic_adapter = get_provider_adapter(Provider.ANTHROPIC_COMPATIBLE)
+    hermes_adapter = get_provider_adapter(Provider.HERMES)
+
+    assert openai_adapter.is_retryable_transport_error(openai.APIConnectionError(request=request))
+    assert not openai_adapter.is_retryable_transport_error(openai.APITimeoutError(request=request))
+    assert anthropic_adapter.is_retryable_transport_error(anthropic.APIConnectionError(request=request))
+    assert not anthropic_adapter.is_retryable_transport_error(anthropic.APITimeoutError(request=request))
+    assert hermes_adapter.is_retryable_transport_error(httpx.RemoteProtocolError("remote disconnect"))
+    assert not hermes_adapter.is_retryable_transport_error(httpx.ReadTimeout("timeout"))
+    assert not get_provider_adapter(
+        Provider.OPENAI_COMPATIBLE, {"mock_provider_result": {}}
+    ).is_retryable_transport_error(openai.APIConnectionError(request=request))
 
 
 def test_openai_compatible_adapter_normalizes_chat_completion():
@@ -37,6 +58,38 @@ def test_openai_compatible_adapter_normalizes_chat_completion():
     assert result.input_tokens == 11
     assert result.output_tokens == 22
     assert result.provider_metadata["finish_reason"] == "length"
+    assert result.provider_metadata == {"provider": Provider.OPENAI_COMPATIBLE.value, "finish_reason": "length"}
+
+
+def test_openai_compatible_adapter_captures_ic_role_http_metadata():
+    class FakeCompletions:
+        def create(self, **kwargs):
+            pytest.fail("plain completion must not be used for IC role metadata")
+
+        with_raw_response = SimpleNamespace(create=lambda **kwargs: SimpleNamespace(
+            headers={"x-request-id": "req-raw-1", "authorization": "PRIVATE_KEY"},
+            status_code=200,
+            parse=lambda: SimpleNamespace(
+                id="chatcmpl-raw-1",
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"summary":"ok"}'), finish_reason="stop")],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=2),
+                model_dump_json=lambda: '{"raw":true}',
+            ),
+        ))
+
+    class FakeClient:
+        chat = SimpleNamespace(completions=FakeCompletions())
+
+    request = _request(
+        Provider.OPENAI_COMPATIBLE, api_key="sk-test", base_url="https://provider.test/v1",
+        run_parameters={"capture_http_metadata": True},
+    )
+    result = OpenAICompatibleAdapter(client_factory=lambda **_: FakeClient()).run(request)
+
+    assert result.provider_metadata["request_id"] == "req-raw-1"
+    assert result.provider_metadata["response_id"] == "chatcmpl-raw-1"
+    assert result.provider_metadata["response_status"] == 200
+    assert "PRIVATE_KEY" not in str(result.provider_metadata)
 
 
 def test_openai_compatible_adapter_passes_timeout_options_to_client_factory():
@@ -395,6 +448,64 @@ def test_anthropic_compatible_adapter_normalizes_message_response():
     assert result.provider_metadata["stop_reason"] == "max_tokens"
 
 
+@pytest.mark.parametrize("headers", [
+    {"request-id": "req-anthropic"},
+    {"x-request-id": "req-anthropic"},
+    {},
+])
+def test_anthropic_compatible_adapter_captures_ic_role_http_metadata(headers):
+    captured_client = {}
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            pytest.fail("plain message call must not be used for IC role metadata")
+
+        with_raw_response = SimpleNamespace(create=lambda **kwargs: SimpleNamespace(
+            headers=headers,
+            status_code=200,
+            parse=lambda: SimpleNamespace(
+                id="msg-anthropic", _request_id="req-anthropic", content=[SimpleNamespace(text="{}")],
+                stop_reason="end_turn", usage=SimpleNamespace(input_tokens=1, output_tokens=2),
+                model_dump_json=lambda: '{"raw":true}',
+            ),
+        ))
+
+    class FakeClient:
+        messages = FakeMessages()
+
+    def fake_client_factory(**kwargs):
+        captured_client.update(kwargs)
+        return FakeClient()
+
+    result = AnthropicCompatibleAdapter(client_factory=fake_client_factory).run(_request(
+        Provider.ANTHROPIC_COMPATIBLE, api_key="anthropic-test",
+        run_parameters={"capture_http_metadata": True, "max_retries": 0,
+                        "timeout_seconds": 300, "connect_timeout_seconds": 30},
+    ))
+    assert captured_client["max_retries"] == 0
+    assert captured_client["timeout_seconds"] == 300
+    assert result.provider_metadata["request_id"] == "req-anthropic"
+    assert result.provider_metadata["response_id"] == "msg-anthropic"
+    assert result.provider_metadata["response_status"] == 200
+
+
+def test_anthropic_ic_client_uses_bounded_timeout_and_disables_sdk_retries(monkeypatch):
+    captured = {}
+
+    class FakeAnthropic:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("anthropic.Anthropic", FakeAnthropic)
+    AnthropicCompatibleAdapter._default_client_factory(
+        api_key="anthropic-test", base_url="https://provider.test",
+        max_retries=0, timeout_seconds=300, connect_timeout_seconds=30,
+    )
+    assert captured["max_retries"] == 0
+    assert captured["timeout"].read == 300
+    assert captured["timeout"].connect == 30
+
+
 def test_anthropic_compatible_adapter_builds_proxy_http_client(monkeypatch):
     monkeypatch.setenv("OUTBOUND_PROXY_URL", "socks5h://proxy.test:44435")
     get_settings.cache_clear()
@@ -460,6 +571,30 @@ def test_hermes_adapter_normalizes_http_response(monkeypatch):
     assert result.input_tokens == 55
     assert result.output_tokens == 66
     assert result.latency_ms == 77
+    get_settings.cache_clear()
+
+
+def test_hermes_adapter_captures_http_metadata_without_forwarding_internal_flag(monkeypatch):
+    monkeypatch.setenv("HERMES_ENABLED", "true")
+    get_settings.cache_clear()
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs)
+        return httpx.Response(
+            200, headers={"x-request-id": "req-hermes"},
+            json={"id": "response-hermes", "structured_text": "{}"},
+            request=httpx.Request("POST", url),
+        )
+
+    result = HermesAdapter(post=fake_post).run(_request(
+        Provider.HERMES, api_key=None,
+        run_parameters={"capture_http_metadata": True, "timeout_seconds": 300},
+    ))
+    assert "capture_http_metadata" not in captured["json"]["run_parameters"]
+    assert result.provider_metadata["request_id"] == "req-hermes"
+    assert result.provider_metadata["response_id"] == "response-hermes"
+    assert result.provider_metadata["response_status"] == 200
     get_settings.cache_clear()
 
 

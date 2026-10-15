@@ -21,6 +21,13 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] 2026-10-15: PR #119 adds one bounded IC Review transport retry per role,
+  adapter-owned error classification, cancellation checks, and private per-attempt
+  diagnostics. Review follow-ups cover cancellation after the final failed request,
+  Anthropic request IDs, direct Hermes transport errors, and an atomic guard
+  against a cancellation/terminal-failure race. Local 761 API/worker
+  tests passed with test CORS origins; merge and production release remain pending.
+
 - [x] 2026-10-15: Detect a later Stream Review or Progress Review from paired
   Previous/Current Review rows when the current row omits a literal stage.
   Explicit current stage and explicit title still win. A previous Gate points
