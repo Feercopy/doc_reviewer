@@ -111,3 +111,10 @@ no nested cause. All three paths now have focused regression tests. The adapter
 uses Anthropic's exported timeout type rather than importing its transitive
 HTTPX package. The final local API/worker suite passed 760 tests with explicit
 test CORS origins.
+
+A further review found a check-to-write cancellation race in terminal failure
+recovery. That path now conditionally claims the failed status in the database
+only while the run is not cancelled; a concurrent cancellation retains its
+status and the step is marked cancelled. A regression test cancels the run
+during diagnostic logging, after the last provider failure. The revised local
+API/worker suite passed 761 tests with explicit test CORS origins.

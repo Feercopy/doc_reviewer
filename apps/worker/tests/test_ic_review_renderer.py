@@ -643,6 +643,37 @@ def test_role_transport_retry_stops_when_run_is_cancelled(tmp_path, monkeypatch,
         db.close()
 
 
+def test_role_terminal_failure_does_not_overwrite_late_cancellation(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        check_run = _check_run(analysis_id=analysis.id, run_parameters={})
+        db.add_all([analysis, check_run])
+        db.commit()
+
+        def cancel_during_diagnostics(_diagnostic):
+            check_run.status = RunStatus.CANCELLED.value
+            db.commit()
+
+        def fail_provider(**_kwargs):
+            raise ValueError("provider failed")
+
+        monkeypatch.setattr(role_runner, "_call_role_provider", fail_provider)
+        monkeypatch.setattr(role_runner, "log_ic_review_error_diagnostics", cancel_during_diagnostics)
+        with pytest.raises(role_runner.IcReviewRunCancelled):
+            run_role_step(
+                session=db, check_run=check_run, analysis=analysis, role="ic-product-analyst",
+                context=_context(), source_snapshot=_snapshot(),
+                storage=LocalDocumentStorage(tmp_path / "storage"),
+            )
+        db.refresh(check_run)
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        assert check_run.status == RunStatus.CANCELLED.value
+        assert step.status == RunStatus.CANCELLED.value
+    finally:
+        db.close()
+
+
 @pytest.mark.parametrize("error_factory", [
     lambda: APIStatusError(
         "status failed", response=httpx.Response(503, request=httpx.Request("POST", "https://provider.test")), body=None,

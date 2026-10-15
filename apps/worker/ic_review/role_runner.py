@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from jsonschema import validate
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -297,6 +298,19 @@ def run_role_step(
                 flag_modified(fallback_run, "run_parameters")
             session.commit()
             return structured
+        claimed_failure = session.execute(
+            update(AnalysisCheckRun)
+            .where(
+                AnalysisCheckRun.id == check_run.id,
+                AnalysisCheckRun.status != RunStatus.CANCELLED.value,
+            )
+            .values(status=RunStatus.FAILED.value)
+        )
+        if claimed_failure.rowcount != 1:
+            session.rollback()
+            if _check_run_cancelled(session=session, check_run=check_run, step=step):
+                raise IcReviewRunCancelled("ic_review_cancelled") from exc
+            raise
         failed_step = session.get(AnalysisCheckStep, step.id)
         if failed_step is None:
             raise
