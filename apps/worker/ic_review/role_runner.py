@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import validate
+from openai import APIConnectionError, APITimeoutError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -35,8 +36,10 @@ from .errors import (
     IcReviewRunCancelled,
     append_ic_review_error_diagnostics,
     build_ic_review_error_diagnostics,
+    build_ic_review_provider_attempt,
     ic_review_diagnostic_context,
     log_ic_review_error_diagnostics,
+    log_ic_review_provider_attempt,
     safe_ic_review_error_message,
 )
 
@@ -44,6 +47,8 @@ from .errors import (
 IC_REVIEW_PROVIDER_TIMEOUT_SECONDS = 300
 IC_REVIEW_PROVIDER_CONNECT_TIMEOUT_SECONDS = 30
 IC_REVIEW_PROVIDER_MAX_RETRIES = 0
+IC_REVIEW_ROLE_TRANSPORT_RETRIES = 1
+IC_REVIEW_ROLE_TRANSPORT_RETRY_DELAY_SECONDS = 0.5
 IC_REVIEW_ROLE_MAX_OUTPUT_TOKENS = 32000
 FINANCIAL_AUDITOR_ROLE = "ic-financial-auditor"
 
@@ -88,6 +93,7 @@ def run_role_step(
     prompt_artifact_path: Path | None = None
     prompt_fingerprint: str | None = None
     prompt_artifact_committed = False
+    provider_attempts: list[dict[str, Any]] = []
     try:
         prompt = render_role_prompt(
             role=role,
@@ -134,6 +140,8 @@ def run_role_step(
             response_schema=schema,
             run_parameters=effective_run_parameters,
             role=role,
+            attempt_history=provider_attempts,
+            attempt_context=diagnostic_context,
         )
         provider_raw_output = result.raw_output
         provider_structured_text = result.structured_text
@@ -144,6 +152,11 @@ def run_role_step(
         step.estimated_cost = result.estimated_cost
         if json_retry is not None:
             step.artifacts = [*list(step.artifacts or []), json_retry]
+        if any(attempt.get("retry_delay_ms") is not None for attempt in provider_attempts):
+            step.artifacts = [
+                *list(step.artifacts or []),
+                {"key": "role_transport_retry", "kind": "metadata", "internal_only": True, "attempts": provider_attempts},
+            ]
         operation = "save_provider_output"
         session.commit()
         if _check_run_cancelled(session=session, check_run=check_run, step=step):
@@ -216,6 +229,7 @@ def run_role_step(
             elapsed_ms=int((time.monotonic() - started) * 1000),
             provider_raw_output_present=bool(provider_raw_output or provider_structured_text),
             prompt_artifact_present=prompt_artifact_path is not None,
+            provider_attempts=provider_attempts,
         )
         log_ic_review_error_diagnostics(diagnostic)
         if timed_out:
@@ -335,6 +349,7 @@ def _role_run_parameters(
     ):
         parameters["mock_provider_result"] = role_mock_results[role]
     apply_ic_review_provider_defaults(parameters)
+    parameters["capture_http_metadata"] = True
     parameters.setdefault("max_output_tokens", IC_REVIEW_ROLE_MAX_OUTPUT_TOKENS)
     parameters["ic_review_role"] = role
     return parameters
@@ -350,8 +365,12 @@ def _run_role_provider_with_json_retry(
     response_schema: dict,
     run_parameters: dict[str, Any],
     role: str,
+    attempt_history: list[dict[str, Any]] | None = None,
+    attempt_context: dict[str, Any] | None = None,
 ) -> tuple[AnalysisProviderResult, dict[str, Any] | None]:
-    result = _call_role_provider(
+    history = attempt_history if attempt_history is not None else []
+    retry_budget = [IC_REVIEW_ROLE_TRANSPORT_RETRIES]
+    result = _call_role_provider_with_transport_retry(
         provider=provider,
         model=model,
         api_key=api_key,
@@ -359,12 +378,16 @@ def _run_role_provider_with_json_retry(
         prompt=prompt,
         response_schema=response_schema,
         run_parameters=run_parameters,
+        role=role,
+        attempt_history=history,
+        attempt_context=attempt_context or {},
+        retry_budget=retry_budget,
     )
     try:
         parse_json_output(result.structured_text)
     except json.JSONDecodeError as exc:
         retry_parameters = _role_json_retry_run_parameters(run_parameters=run_parameters, role=role)
-        retry_result = _call_role_provider(
+        retry_result = _call_role_provider_with_transport_retry(
             provider=provider,
             model=model,
             api_key=api_key,
@@ -372,6 +395,10 @@ def _run_role_provider_with_json_retry(
             prompt=_role_json_retry_prompt(prompt=prompt, error=exc),
             response_schema=response_schema,
             run_parameters=retry_parameters,
+            role=role,
+            attempt_history=history,
+            attempt_context=attempt_context or {},
+            retry_budget=retry_budget,
         )
         return retry_result, {
             "key": "role_json_retry",
@@ -381,6 +408,83 @@ def _run_role_provider_with_json_retry(
             "retry_step": retry_parameters["ic_review_step"],
         }
     return result, None
+
+
+def _call_role_provider_with_transport_retry(
+    *,
+    provider: Provider,
+    model: str,
+    api_key: str | None,
+    base_url: str | None,
+    prompt: str,
+    response_schema: dict,
+    run_parameters: dict[str, Any],
+    role: str,
+    attempt_history: list[dict[str, Any]],
+    attempt_context: dict[str, Any],
+    retry_budget: list[int],
+) -> AnalysisProviderResult:
+    while True:
+        started = time.monotonic()
+        try:
+            result = _call_role_provider(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                prompt=prompt,
+                response_schema=response_schema,
+                run_parameters=run_parameters,
+            )
+        except Exception as exc:
+            retry = (
+                retry_budget[0] > 0
+                and isinstance(exc, APIConnectionError)
+                and not isinstance(exc, APITimeoutError)
+                and not _is_provider_timeout(exc)
+            )
+            attempt = build_ic_review_provider_attempt(
+                attempt=len(attempt_history) + 1,
+                elapsed_ms=int((time.monotonic() - started) * 1000),
+                error=exc,
+                retry_delay_ms=int(IC_REVIEW_ROLE_TRANSPORT_RETRY_DELAY_SECONDS * 1000) if retry else None,
+            )
+            attempt_history.append(attempt)
+            _log_provider_attempt(
+                context=attempt_context, role=role, prompt=prompt,
+                run_parameters=run_parameters, attempt=attempt,
+            )
+            if not retry:
+                raise
+            retry_budget[0] -= 1
+            time.sleep(IC_REVIEW_ROLE_TRANSPORT_RETRY_DELAY_SECONDS)
+        else:
+            attempt = build_ic_review_provider_attempt(
+                attempt=len(attempt_history) + 1,
+                elapsed_ms=int((time.monotonic() - started) * 1000),
+                provider_metadata=result.provider_metadata,
+            )
+            attempt_history.append(attempt)
+            _log_provider_attempt(
+                context=attempt_context, role=role, prompt=prompt,
+                run_parameters=run_parameters, attempt=attempt,
+            )
+            return result
+
+
+def _log_provider_attempt(
+    *, context: dict[str, Any], role: str, prompt: str,
+    run_parameters: dict[str, Any], attempt: dict[str, Any],
+) -> None:
+    log_ic_review_provider_attempt(
+        context=context,
+        role=role,
+        attempt=attempt,
+        prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        prompt_chars=len(prompt),
+        timeout_seconds=run_parameters.get("timeout_seconds"),
+        connect_timeout_seconds=run_parameters.get("connect_timeout_seconds"),
+    )
 
 
 def _call_role_provider(

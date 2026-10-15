@@ -21,6 +21,8 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] 2026-10-15: Add one bounded transport retry per IC Review role for OpenAI SDK connection/protocol errors, excluding timeouts, HTTP status errors, JSON and schema failures. Log safe per-attempt timing, HTTP status, request/response IDs when received, transport class, prompt fingerprint/length, run/step/release identifiers and timeout settings. Persist failed attempt history in internal diagnostics and successful retry history as an internal-only step artifact; no user/admin API exposure. Local API/worker tests pass with test CORS origins; production release remains pending.
+
 - [x] 2026-10-15: Detect a later Stream Review or Progress Review from paired
   Previous/Current Review rows when the current row omits a literal stage.
   Explicit current stage and explicit title still win. A previous Gate points

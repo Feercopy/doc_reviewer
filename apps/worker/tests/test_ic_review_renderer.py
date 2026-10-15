@@ -4,8 +4,10 @@ from dataclasses import dataclass
 import json
 from uuid import uuid4
 
+import httpx
 import pytest
 from jsonschema import ValidationError
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import sessionmaker
@@ -20,6 +22,7 @@ from ic_review.context_pack import build_ic_review_context_pack
 from ic_review.renderer import ROLE_ORDER, render_role_prompt, render_synthesis_prompt
 from ic_review import role_runner
 from ic_review.role_runner import run_role_step, _role_run_parameters
+from providers.base import AnalysisProviderResult
 
 
 @dataclass(frozen=True)
@@ -515,10 +518,122 @@ def test_role_run_parameters_add_provider_timeouts_and_preserve_overrides():
     assert defaulted["connect_timeout_seconds"] == 30
     assert defaulted["max_retries"] == 0
     assert defaulted["max_output_tokens"] == 32000
+    assert defaulted["capture_http_metadata"] is True
     assert defaulted["ic_review_role"] == "ic-product-analyst"
     assert overridden["timeout_seconds"] == 240
     assert overridden["connect_timeout_seconds"] == 15
     assert overridden["max_retries"] == 1
+
+
+def test_role_transport_retry_reuses_prompt_and_records_attempts(tmp_path, monkeypatch, caplog):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        check_run = _check_run(analysis_id=analysis.id, run_parameters={})
+        db.add_all([analysis, check_run])
+        db.commit()
+        calls = []
+        result = AnalysisProviderResult(
+            structured_text=json.dumps(_role_result("ic-product-analyst")),
+            raw_output="private raw output", latency_ms=10,
+            provider_metadata={"request_id": "req-success"},
+        )
+
+        def call_provider(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                error = APIConnectionError(request=httpx.Request("POST", "https://provider.test/v1"))
+                raise error from httpx.RemoteProtocolError("PRIVATE_DOCUMENT")
+            return result
+
+        monkeypatch.setattr(role_runner, "_call_role_provider", call_provider)
+        monkeypatch.setattr(role_runner.time, "sleep", lambda seconds: None)
+        structured = run_role_step(
+            session=db, check_run=check_run, analysis=analysis, role="ic-product-analyst",
+            context=_context(), source_snapshot=_snapshot(),
+            storage=LocalDocumentStorage(tmp_path / "storage"),
+        )
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        assert structured["role"] == "ic-product-analyst"
+        assert step.status == RunStatus.COMPLETED.value
+        assert len(calls) == 2
+        assert calls[0]["prompt"] == calls[1]["prompt"]
+        assert calls[0]["run_parameters"]["max_retries"] == 0
+        assert calls[0]["run_parameters"]["capture_http_metadata"] is True
+        retry = step.artifacts[-1]
+        assert retry["key"] == "role_transport_retry"
+        assert retry["internal_only"] is True
+        assert [item["outcome"] for item in retry["attempts"]] == ["error", "completed"]
+        assert retry["attempts"][1]["request_id"] == "req-success"
+        assert "PRIVATE_DOCUMENT" not in caplog.text
+        assert "private raw output" not in caplog.text
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("error_factory", [
+    lambda: APIStatusError(
+        "status failed", response=httpx.Response(503, request=httpx.Request("POST", "https://provider.test")), body=None,
+    ),
+    lambda: APITimeoutError(request=httpx.Request("POST", "https://provider.test")),
+    lambda: ValueError("invalid provider output"),
+])
+def test_role_transport_retry_does_not_repeat_non_connection_errors(monkeypatch, error_factory):
+    calls = []
+    error = error_factory()
+
+    def call_provider(**kwargs):
+        calls.append(kwargs)
+        raise error
+
+    monkeypatch.setattr(role_runner, "_call_role_provider", call_provider)
+    monkeypatch.setattr(role_runner.time, "sleep", lambda seconds: pytest.fail("unexpected retry"))
+    history = []
+    with pytest.raises(type(error)):
+        role_runner._run_role_provider_with_json_retry(
+            provider=Provider.OPENAI_COMPATIBLE, model="test", api_key=None,
+            base_url=None, prompt="private prompt", response_schema={},
+            run_parameters={"timeout_seconds": 300, "connect_timeout_seconds": 30, "max_retries": 0},
+            role="ic-product-analyst", attempt_history=history,
+        )
+    assert len(calls) == 1
+    assert len(history) == 1
+    assert "retry_delay_ms" not in history[0]
+
+
+def test_role_connection_failure_persists_bounded_attempt_history(tmp_path, monkeypatch):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        check_run = _check_run(analysis_id=analysis.id, run_parameters={})
+        db.add_all([analysis, check_run])
+        db.commit()
+        calls = []
+
+        def call_provider(**kwargs):
+            calls.append(kwargs)
+            error = APIConnectionError(request=httpx.Request("POST", "https://provider.test/v1"))
+            raise error from httpx.RemoteProtocolError("PRIVATE_DOCUMENT")
+
+        monkeypatch.setattr(role_runner, "_call_role_provider", call_provider)
+        monkeypatch.setattr(role_runner.time, "sleep", lambda seconds: None)
+        with pytest.raises(APIConnectionError):
+            run_role_step(
+                session=db, check_run=check_run, analysis=analysis, role="ic-product-analyst",
+                context=_context(), source_snapshot=_snapshot(),
+                storage=LocalDocumentStorage(tmp_path / "storage"),
+            )
+        db.refresh(check_run)
+        assert len(calls) == 2
+        assert check_run.status == RunStatus.FAILED.value
+        diagnostic = check_run.run_parameters["ic_review_error_diagnostics"][-1]
+        assert diagnostic["context"]["step_id"]
+        assert [item["attempt"] for item in diagnostic["provider_attempts"]] == [1, 2]
+        assert diagnostic["provider_attempts"][0]["retry_delay_ms"] == 500
+        assert diagnostic["provider_attempts"][1]["transport_error_class"] == "RemoteProtocolError"
+        assert "PRIVATE_DOCUMENT" not in json.dumps(diagnostic)
+    finally:
+        db.close()
 
 
 def test_run_role_step_provider_timeout_falls_back_without_failing_run(tmp_path, monkeypatch):

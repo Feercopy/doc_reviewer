@@ -14,6 +14,7 @@ from parsers.anonymizer import (
 
 RUN_PARAMETER_KEY = "model_anonymization"
 PROVIDER_RUN_PARAMETER_ALLOWLIST = {
+    "capture_http_metadata",
     "connect_timeout_seconds",
     "json_schema_strict",
     "max_output_tokens",

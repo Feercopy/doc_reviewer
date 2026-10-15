@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import json
+import logging
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+import httpx
 from jsonschema import ValidationError, validate
+from openai import APIConnectionError, APIStatusError
 from sqlalchemy.exc import ProgrammingError
 
 from ic_review.errors import (
     append_ic_review_error_diagnostics,
     build_ic_review_error_diagnostics,
+    build_ic_review_provider_attempt,
     ic_review_diagnostic_context,
     log_ic_review_error_diagnostics,
+    log_ic_review_provider_attempt,
     safe_ic_review_error_message,
 )
 import ic_review.errors as errors
@@ -125,6 +130,45 @@ def test_json_location_and_provider_status_are_safe_even_in_wrapped_errors():
     diagnostic = build_ic_review_error_diagnostics(error, phase="role_step", stage="role")
     assert diagnostic["provider_error"] == {"status_code": 429, "request_id": "req-123"}
     assert diagnostic["json_error"] == {"line": 1, "column": 5, "position": 4}
+    assert "PRIVATE_" not in json.dumps(diagnostic)
+
+
+def test_provider_attempts_capture_safe_http_and_transport_metadata(caplog):
+    response = httpx.Response(
+        503,
+        request=httpx.Request("POST", "https://provider.test/v1?secret=PRIVATE_TOKEN"),
+        headers={"x-request-id": "req-503", "authorization": "PRIVATE_KEY"},
+        json={"message": "PRIVATE_DOCUMENT"},
+    )
+    status_error = APIStatusError("PRIVATE_RESPONSE", response=response, body={"private": "PRIVATE_BODY"})
+    failed = build_ic_review_provider_attempt(attempt=1, elapsed_ms=42, error=status_error)
+    assert failed["http_status"] == 503
+    assert failed["request_id"] == "req-503"
+
+    connection_error = APIConnectionError(request=httpx.Request("POST", "https://provider.test/v1"))
+    connection_error.__cause__ = httpx.RemoteProtocolError("PRIVATE_RESPONSE")
+    disconnected = build_ic_review_provider_attempt(
+        attempt=2, elapsed_ms=43, error=connection_error, retry_delay_ms=500,
+    )
+    assert disconnected["http_status"] is None
+    assert disconnected["request_id"] is None
+    assert disconnected["transport_error_class"] == "RemoteProtocolError"
+    diagnostic = build_ic_review_error_diagnostics(
+        connection_error, phase="role_step", stage="role:ic-financial-auditor",
+        provider_attempts=[failed, disconnected],
+    )
+    assert diagnostic["provider_attempts"] == [failed, disconnected]
+    with caplog.at_level(logging.INFO, logger="gate_challenger.worker"):
+        log_ic_review_provider_attempt(
+            context={"check_run_id": "run-1", "api_key": "PRIVATE_KEY"},
+            role="ic-financial-auditor", attempt=failed,
+            prompt_sha256="a" * 64, prompt_chars=200,
+            timeout_seconds=300, connect_timeout_seconds=30,
+        )
+    logged = json.loads(caplog.records[-1].getMessage().removeprefix("ic_review_provider_attempt "))
+    assert logged["request_id"] == "req-503"
+    assert logged["context"] == {"check_run_id": "run-1"}
+    assert "PRIVATE_" not in caplog.text
     assert "PRIVATE_" not in json.dumps(diagnostic)
 
 

@@ -3,7 +3,7 @@
 IC Review stores the last ten diagnostic records in
 `analysis_check_runs.run_parameters.ic_review_error_diagnostics`. These records
 are removed from all API responses, including admin responses. The public error
-contract, analysis rules, provider calls, and existing fallback policy are unchanged.
+contract and analysis rules are unchanged.
 
 Version 2 adds:
 
@@ -57,3 +57,42 @@ missing release/schema data. Do not re-run a user's analysis just to fill logs.
 Request IDs may be absent when the adapter/provider did not return one. Logs
 must never be augmented with document text, workbook values, provider keys,
 raw model responses, SQL parameters, or full exception messages.
+
+## 2026-10-15: Role transport retry and attempt log
+
+The incident investigation found two completed Gate Challenger runs followed by
+IC Review failures on different roles. Both failures were `APIConnectionError`
+caused by `RemoteProtocolError`, before a model response was available. A later
+run completed the financial role that had failed earlier. The user confirmed
+that other documents complete successfully. This does **not** establish a
+stage-specific bug or a provider-wide outage; the closing network hop remains
+unknown until an attempt with response headers or more detailed transport logs.
+
+The worker now makes at most one additional request per IC Review role after an
+OpenAI SDK connection/protocol failure, with a 500 ms delay. It reuses the same
+role prompt and does not rerun completed roles. The retry budget is shared with
+the existing invalid-JSON regeneration. SDK retries remain zero by default for
+roles. Timeouts keep their existing fallback; HTTP status errors, invalid JSON,
+schema failures, and persistence errors do not trigger this transport retry.
+
+Each role provider attempt emits `ic_review_provider_attempt {JSON}` to the
+worker log. Failed attempts use warning level. The record includes the release
+SHA, analysis/check-run/step and queue IDs, provider/model, role, prompt SHA-256
+and character count, configured timeouts, attempt number, elapsed milliseconds,
+error and transport classes, retry delay, HTTP status, `x-request-id`, and model
+response ID when available. IC Review OpenAI-compatible calls use the SDK's
+raw-response wrapper to capture status and headers on successful requests;
+other analysis calls retain their existing invocation path. A connection that
+ends before an HTTP response has `null` status and IDs; these values must not
+be inferred. No response body, document content, URL, token, or exception
+message is recorded.
+
+Failed attempt history is also saved in the internal diagnostic record above.
+Successful retry history is stored as an `internal_only` step artifact. Neither
+is exposed by user or admin API responses. Read-only investigation can search
+worker logs by `ic_review_provider_attempt` and check-run ID, or inspect the
+database's `run_parameters.ic_review_error_diagnostics` and step artifacts.
+
+Verification before publication: 749 API/worker tests with test CORS origins,
+82 focused tests, and an OpenAI SDK raw-response check against a local mock
+transport passed. No live provider run was used to verify this change.

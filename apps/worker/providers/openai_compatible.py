@@ -43,22 +43,34 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             kwargs["max_tokens"] = request.run_parameters["max_output_tokens"]
 
         started = time.monotonic()
-        response = client.chat.completions.create(**kwargs)
+        raw_response = None
+        if request.run_parameters.get("capture_http_metadata") is True:
+            raw_response = client.chat.completions.with_raw_response.create(**kwargs)
+            response = raw_response.parse()
+        else:
+            response = client.chat.completions.create(**kwargs)
         latency_ms = int((time.monotonic() - started) * 1000)
 
         choice = response.choices[0]
         structured_text = choice.message.content or ""
         usage = getattr(response, "usage", None)
+        metadata = {
+            "provider": request.provider.value,
+            "finish_reason": getattr(choice, "finish_reason", None),
+        }
+        if raw_response is not None:
+            metadata.update({
+                "request_id": raw_response.headers.get("x-request-id"),
+                "response_id": getattr(response, "id", None),
+                "response_status": raw_response.status_code,
+            })
         return AnalysisProviderResult(
             structured_text=structured_text,
             raw_output=_dump_response(response),
             input_tokens=getattr(usage, "prompt_tokens", None),
             output_tokens=getattr(usage, "completion_tokens", None),
             latency_ms=latency_ms,
-            provider_metadata={
-                "provider": request.provider.value,
-                "finish_reason": getattr(choice, "finish_reason", None),
-            },
+            provider_metadata=metadata,
         )
 
     def run_response(self, request: ProviderResponseRequest) -> AnalysisProviderResult:

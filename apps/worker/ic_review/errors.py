@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -104,6 +105,7 @@ def build_ic_review_error_diagnostics(
     schema: dict[str, Any] | None = None,
     schema_name: str | None = None,
     elapsed_ms: int | None = None,
+    provider_attempts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     message = str(exc)
     diagnostic: dict[str, Any] = {
@@ -122,6 +124,8 @@ def build_ic_review_error_diagnostics(
     }
     if elapsed_ms is not None:
         diagnostic["elapsed_ms"] = max(0, elapsed_ms)
+    if provider_attempts:
+        diagnostic["provider_attempts"] = provider_attempts[:4]
     if schema is not None:
         diagnostic["schema"] = {
             "name": _identifier(schema_name),
@@ -147,13 +151,97 @@ def build_ic_review_error_diagnostics(
             diagnostic["validation"] = _validation_details(error, schema or {})
         if isinstance(error, json.JSONDecodeError) and "json_error" not in diagnostic:
             diagnostic["json_error"] = {"line": error.lineno, "column": error.colno, "position": error.pos}
-        status = getattr(error, "status_code", None)
+        response = getattr(error, "response", None)
+        status = getattr(error, "status_code", None) or getattr(response, "status_code", None)
         if type(status) is int and 100 <= status <= 599 and "provider_error" not in diagnostic:
             diagnostic["provider_error"] = {
                 "status_code": status,
-                "request_id": _identifier(getattr(error, "request_id", None)),
+                "request_id": _provider_request_id(error),
             }
     return diagnostic
+
+
+def build_ic_review_provider_attempt(
+    *,
+    attempt: int,
+    elapsed_ms: int,
+    error: BaseException | None = None,
+    provider_metadata: dict[str, Any] | None = None,
+    retry_delay_ms: int | None = None,
+) -> dict[str, Any]:
+    """Record transport metadata only; exception messages and response bodies are untrusted."""
+    details: dict[str, Any] = {
+        "attempt": attempt,
+        "outcome": "error" if error is not None else "completed",
+        "elapsed_ms": max(0, elapsed_ms),
+        "http_status": None,
+        "request_id": None,
+        "response_id": None,
+    }
+    if error is not None:
+        details["error_class"] = error.__class__.__name__
+        details["transport_error_class"] = next(
+            (cause.__class__.__name__ for cause in _exception_chain(error)[1:]
+             if cause.__class__.__module__.startswith(("httpx", "httpcore"))),
+            None,
+        )
+        for cause in _exception_chain(error):
+            response = getattr(cause, "response", None)
+            status = getattr(cause, "status_code", None) or getattr(response, "status_code", None)
+            if details["http_status"] is None and type(status) is int and 100 <= status <= 599:
+                details["http_status"] = status
+            if details["request_id"] is None:
+                details["request_id"] = _provider_request_id(cause)
+    else:
+        metadata = provider_metadata or {}
+        status = metadata.get("response_status")
+        if type(status) is int and 100 <= status <= 599:
+            details["http_status"] = status
+        details["request_id"] = _identifier(metadata.get("request_id"))
+        details["response_id"] = _identifier(metadata.get("response_id"))
+    if retry_delay_ms is not None:
+        details["retry_delay_ms"] = max(0, retry_delay_ms)
+    return details
+
+
+def log_ic_review_provider_attempt(
+    *,
+    context: dict[str, Any],
+    role: str,
+    attempt: dict[str, Any],
+    prompt_sha256: str,
+    prompt_chars: int,
+    timeout_seconds: float | None,
+    connect_timeout_seconds: float | None,
+) -> None:
+    try:
+        payload = {
+            "context": _safe_context(context),
+            "role": _identifier(role),
+            "prompt_sha256": prompt_sha256,
+            "prompt_chars": prompt_chars,
+            "timeout_seconds": _safe_duration(timeout_seconds),
+            "connect_timeout_seconds": _safe_duration(connect_timeout_seconds),
+            **attempt,
+        }
+        log = worker_logger.warning if attempt.get("outcome") == "error" else worker_logger.info
+        log("ic_review_provider_attempt %s", json.dumps(payload, ensure_ascii=True, sort_keys=True))
+    except Exception:
+        pass
+
+
+def _provider_request_id(error: BaseException) -> str | None:
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    return _identifier(getattr(error, "request_id", None)) or _identifier(
+        headers.get("x-request-id") if headers is not None else None
+    )
+
+
+def _safe_duration(value: Any) -> float | None:
+    if type(value) not in (int, float) or not 0 < value <= 3600 or not math.isfinite(value):
+        return None
+    return float(value)
 
 
 def ic_review_diagnostic_context(

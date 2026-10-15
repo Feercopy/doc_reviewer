@@ -37,6 +37,38 @@ def test_openai_compatible_adapter_normalizes_chat_completion():
     assert result.input_tokens == 11
     assert result.output_tokens == 22
     assert result.provider_metadata["finish_reason"] == "length"
+    assert result.provider_metadata == {"provider": Provider.OPENAI_COMPATIBLE.value, "finish_reason": "length"}
+
+
+def test_openai_compatible_adapter_captures_ic_role_http_metadata():
+    class FakeCompletions:
+        def create(self, **kwargs):
+            pytest.fail("plain completion must not be used for IC role metadata")
+
+        with_raw_response = SimpleNamespace(create=lambda **kwargs: SimpleNamespace(
+            headers={"x-request-id": "req-raw-1", "authorization": "PRIVATE_KEY"},
+            status_code=200,
+            parse=lambda: SimpleNamespace(
+                id="chatcmpl-raw-1",
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"summary":"ok"}'), finish_reason="stop")],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=2),
+                model_dump_json=lambda: '{"raw":true}',
+            ),
+        ))
+
+    class FakeClient:
+        chat = SimpleNamespace(completions=FakeCompletions())
+
+    request = _request(
+        Provider.OPENAI_COMPATIBLE, api_key="sk-test", base_url="https://provider.test/v1",
+        run_parameters={"capture_http_metadata": True},
+    )
+    result = OpenAICompatibleAdapter(client_factory=lambda **_: FakeClient()).run(request)
+
+    assert result.provider_metadata["request_id"] == "req-raw-1"
+    assert result.provider_metadata["response_id"] == "chatcmpl-raw-1"
+    assert result.provider_metadata["response_status"] == 200
+    assert "PRIVATE_KEY" not in str(result.provider_metadata)
 
 
 def test_openai_compatible_adapter_passes_timeout_options_to_client_factory():
