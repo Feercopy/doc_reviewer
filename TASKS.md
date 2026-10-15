@@ -21,6 +21,16 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] 2026-10-15: Detect a later Stream Review or Progress Review from paired
+  Previous/Current Review rows when the current row omits a literal stage.
+  Explicit current stage and explicit title still win. A previous Gate points
+  to Progress Review; a Stream/стрим cue in the current row or filename points
+  to Stream Review 2+; conflicting or missing cues stay unknown. Handle a
+  Cyrillic lookalike C in Current. Focused detector tests and all 740 API/worker
+  tests pass with standard CORS test origins; PR/deployment pending. Existing
+  stored document detections require a reparse, and historical runs are not
+  reclassified.
+
 - [~] 2026-10-14: Follow-up to SuperUser PR #115 after independent review:
   PATCH status=deleted must revoke owner scope just like DELETE. Use a shared
   cleanup path and test immediate loss of document/analysis access. 735

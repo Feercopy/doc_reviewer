@@ -83,7 +83,11 @@ _RULES = (
 )
 
 _UNKNOWN_THRESHOLD = Decimal("0.45")
-_CURRENT_DEFENSE = re.compile(r"^current(?:\s+(?:defen[cs]e|gate|review))?", re.IGNORECASE)
+_CURRENT_DEFENSE = re.compile(r"^[cс]urrent(?:\s+(?:defen[cs]e|gate|review))?", re.IGNORECASE)
+_PREVIOUS_REVIEW = re.compile(r"^[pр]revious\s+review\b", re.IGNORECASE)
+_CURRENT_REVIEW = re.compile(r"^[cс]urrent\s+review\b", re.IGNORECASE)
+_STREAM_CUE = re.compile(r"\bstream[\s_-]*review(?=\b|_)|\bстрим\w*\b", re.IGNORECASE)
+_PAST_GATE = re.compile(r"\b(?:gate|гейт)\s*[-–]?\s*[1-4]\b", re.IGNORECASE)
 _PROGRESS_REVIEW = re.compile(r"\b(?:progress|progres\s+s)\s+review\b", re.IGNORECASE)
 _STAGE_PATTERNS = (
     (DocumentType.GATE_2, re.compile(r"\bgate\s*[-–]?\s*2\b", re.IGNORECASE)),
@@ -119,6 +123,10 @@ def detect_document_type(text: str, *, title: str | None = None) -> DocumentType
         if title_stage[0] == DocumentType.UNKNOWN:
             explanation += " (unsupported document type)"
         return DocumentTypeDetection(title_stage[0], Decimal("0.90"), explanation)
+
+    review_stage = _paired_review_stage(text, title=title)
+    if review_stage is not None:
+        return review_stage
 
     normalized_text = text.casefold()
     scored_results = [_score_rule(rule, normalized_text) for rule in _RULES]
@@ -180,7 +188,7 @@ def _current_defense_stage(text: str) -> tuple[DocumentType, str] | None:
             marker = _CURRENT_DEFENSE.match(line)
             if marker is None:
                 continue
-            if marker.group().casefold() == "current" and (
+            if marker.group().casefold() in {"current", "сurrent"} and (
                 last_summary_index is None or index - last_summary_index > 180
             ):
                 continue
@@ -210,6 +218,56 @@ def _current_defense_stage(text: str) -> tuple[DocumentType, str] | None:
                 stage = _explicit_stage(" ".join(following), at_start=True)
                 if stage is not None:
                     return stage
+    return None
+
+
+def _paired_review_stage(text: str, *, title: str | None) -> DocumentTypeDetection | None:
+    previous: tuple[int, bool, list[str]] | None = None
+    for index, raw_line in enumerate(text[:16000].splitlines()):
+        cells = _markdown_table_cells(raw_line)
+        row = cells if cells is not None else [_normalize_stage_cell(raw_line)]
+        if not row:
+            continue
+        label = row[0]
+        if _PREVIOUS_REVIEW.match(label):
+            previous = (index, cells is not None, row)
+            continue
+        if not _CURRENT_REVIEW.match(label):
+            continue
+        if previous is None or index - previous[0] > 5 or (cells is not None) != previous[1]:
+            continue
+
+        previous_label = previous[2][0]
+        previous_detail = previous[2][1] if len(previous[2]) > 1 else ""
+        past_gate = bool(
+            _PAST_GATE.search(previous_label)
+            or _PAST_GATE.match(previous_detail)
+        )
+        current_scope = " ".join(row[:2])
+        stream = bool(_STREAM_CUE.search(current_scope) or (title and _STREAM_CUE.search(title)))
+        if past_gate and stream:
+            return DocumentTypeDetection(
+                DocumentType.UNKNOWN,
+                Decimal("0.44"),
+                "Current review is ambiguous: previous Gate and Stream Review signals conflict",
+            )
+        if past_gate:
+            return DocumentTypeDetection(
+                DocumentType.PROGRESS_REVIEW,
+                Decimal("0.80"),
+                "Previous Review is a Gate; Current Review is a subsequent product review",
+            )
+        if stream:
+            return DocumentTypeDetection(
+                DocumentType.STREAM_REVIEW_2_PLUS,
+                Decimal("0.80"),
+                "Previous and Current Review rows with a Stream Review signal",
+            )
+        return DocumentTypeDetection(
+            DocumentType.UNKNOWN,
+            Decimal("0.44"),
+            "Previous and Current Review are present, but the current review type is unclear",
+        )
     return None
 
 
