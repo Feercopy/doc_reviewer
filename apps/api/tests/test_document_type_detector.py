@@ -194,6 +194,20 @@ def test_review_history_with_cyrillic_current_and_stream_title_is_later_stream_r
     assert result.explanation == "Previous and Current Review rows with a Stream Review signal"
 
 
+def test_linked_previous_review_is_unwrapped_without_using_link_url_as_a_stage_cue():
+    text = """Previous and current review executive summary
+    | Review | Executive summary |
+    | --- | --- |
+    | [Previous review](https://example.test/notes/gate3)<br>Nov 2025 | Outcomes from the prior review |
+    | Сurrent review<br>May 2026 | Progress across all стримам |
+    """
+
+    result = detect_document_type(text, title="Stream review initiative.docx")
+
+    assert result.document_type == DocumentType.STREAM_REVIEW_2_PLUS
+    assert result.confidence == Decimal("0.80")
+
+
 def test_review_history_after_previous_gate_is_progress_review():
     text = """Executive Summary
     | Review | Stage |

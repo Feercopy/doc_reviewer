@@ -1,4 +1,5 @@
 from io import BytesIO
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 import json
@@ -84,6 +85,37 @@ def test_parse_document_persists_native_progress_review_type(tmp_path):
         assert document.parse_status == DocumentParseStatus.COMPLETED.value
         assert document.detected_document_type == DocumentType.PROGRESS_REVIEW.value
         assert document.display_stage == "Progress Review"
+    finally:
+        _close_session(db)
+
+
+def test_parse_document_persists_later_stream_review_from_linked_review_history(tmp_path):
+    db = _create_session()
+    try:
+        owner = _create_user(db)
+        storage = LocalDocumentStorage(tmp_path)
+        document = _create_document(
+            db,
+            storage,
+            owner,
+            filename="stream-review.md",
+            content=(
+                "Previous and current review executive summary\n"
+                "| Review | Executive summary |\n"
+                "| --- | --- |\n"
+                "| [Previous review](https://example.test/prior)<br>Nov 2025 | Prior outcomes |\n"
+                "| Сurrent review<br>May 2026 | Results across all стримам |\n"
+            ).encode("utf-8"),
+            mime_type="text/markdown",
+        )
+
+        parse_document(str(document.id), db=db, storage=storage)
+
+        db.refresh(document)
+        assert document.parse_status == DocumentParseStatus.COMPLETED.value
+        assert document.detected_document_type == DocumentType.STREAM_REVIEW_2_PLUS.value
+        assert document.document_type_confidence == Decimal("0.80")
+        assert db.query(Analysis).filter_by(document_id=document.id).count() == 0
     finally:
         _close_session(db)
 

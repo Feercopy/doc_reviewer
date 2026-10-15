@@ -86,6 +86,7 @@ _UNKNOWN_THRESHOLD = Decimal("0.45")
 _CURRENT_DEFENSE = re.compile(r"^[cс]urrent(?:\s+(?:defen[cs]e|gate|review))?", re.IGNORECASE)
 _PREVIOUS_REVIEW = re.compile(r"^[pр]revious\s+review\b", re.IGNORECASE)
 _CURRENT_REVIEW = re.compile(r"^[cс]urrent\s+review\b", re.IGNORECASE)
+_REVIEW_LABEL_LINK = re.compile(r"^\[([^\]]+)\]\((?:[^()]|\([^()]*\))*\)")
 _STREAM_CUE = re.compile(r"\bstream[\s_-]*review(?=\b|_)|\bстрим\w*\b", re.IGNORECASE)
 _PAST_GATE = re.compile(r"\b(?:gate|гейт)\s*[-–]?\s*[1-4]\b", re.IGNORECASE)
 _PROGRESS_REVIEW = re.compile(r"\b(?:progress|progres\s+s)\s+review\b", re.IGNORECASE)
@@ -228,9 +229,9 @@ def _paired_review_stage(text: str, *, title: str | None) -> DocumentTypeDetecti
         row = cells if cells is not None else [_normalize_stage_cell(raw_line)]
         if not row:
             continue
-        label = row[0]
+        label = _REVIEW_LABEL_LINK.sub(r"\1", row[0], count=1)
         if _PREVIOUS_REVIEW.match(label):
-            previous = (index, cells is not None, row)
+            previous = (index, cells is not None, [label, *row[1:]])
             continue
         if not _CURRENT_REVIEW.match(label):
             continue
@@ -243,7 +244,7 @@ def _paired_review_stage(text: str, *, title: str | None) -> DocumentTypeDetecti
             _PAST_GATE.search(previous_label)
             or _PAST_GATE.match(previous_detail)
         )
-        current_scope = " ".join(row[:2])
+        current_scope = " ".join([label, *row[1:2]])
         stream = bool(_STREAM_CUE.search(current_scope) or (title and _STREAM_CUE.search(title)))
         if past_gate and stream:
             return DocumentTypeDetection(

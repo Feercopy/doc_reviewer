@@ -21,15 +21,22 @@ Primary plan index:
 
 ## Current Focus
 
-- [~] 2026-10-15: Detect a later Stream Review or Progress Review from paired
+- [x] 2026-10-15: Detect a later Stream Review or Progress Review from paired
   Previous/Current Review rows when the current row omits a literal stage.
   Explicit current stage and explicit title still win. A previous Gate points
   to Progress Review; a Stream/стрим cue in the current row or filename points
   to Stream Review 2+; conflicting or missing cues stay unknown. Handle a
   Cyrillic lookalike C in Current. Focused detector tests and all 740 API/worker
-  tests pass with standard CORS test origins; PR/deployment pending. Existing
+  tests passed with standard CORS test origins; PR #117 merged and deployed as
+  `457b77e`. Existing
   stored document detections require a reparse, and historical runs are not
   reclassified.
+
+- [~] 2026-10-15: Follow-up to PR #117. The source DOCX has a Markdown link
+  around the Previous Review label, so the paired-row rule missed it. Unwrap
+  only that review label; do not use the link URL as a stage cue. The real DOCX
+  now detects Stream Review 2+; 742 API/worker tests pass. No parser storage,
+  analysis dispatch, agent, or schema code changed. PR/deployment pending.
 
 - [~] 2026-10-14: Follow-up to SuperUser PR #115 after independent review:
   PATCH status=deleted must revoke owner scope just like DELETE. Use a shared
