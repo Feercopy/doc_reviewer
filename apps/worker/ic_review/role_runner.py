@@ -5,10 +5,9 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from jsonschema import validate
-from openai import APIConnectionError, APITimeoutError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -131,6 +130,10 @@ def run_role_step(
         prompt_artifact_committed = True
 
         operation = "provider_request"
+        def ensure_not_cancelled() -> None:
+            if _check_run_cancelled(session=session, check_run=check_run, step=step):
+                raise IcReviewRunCancelled("ic_review_cancelled")
+
         result, json_retry = _run_role_provider_with_json_retry(
             provider=provider,
             model=check_run.model,
@@ -142,6 +145,7 @@ def run_role_step(
             role=role,
             attempt_history=provider_attempts,
             attempt_context=diagnostic_context,
+            ensure_not_cancelled=ensure_not_cancelled,
         )
         provider_raw_output = result.raw_output
         provider_structured_text = result.structured_text
@@ -367,6 +371,7 @@ def _run_role_provider_with_json_retry(
     role: str,
     attempt_history: list[dict[str, Any]] | None = None,
     attempt_context: dict[str, Any] | None = None,
+    ensure_not_cancelled: Callable[[], None] | None = None,
 ) -> tuple[AnalysisProviderResult, dict[str, Any] | None]:
     history = attempt_history if attempt_history is not None else []
     retry_budget = [IC_REVIEW_ROLE_TRANSPORT_RETRIES]
@@ -382,6 +387,7 @@ def _run_role_provider_with_json_retry(
         attempt_history=history,
         attempt_context=attempt_context or {},
         retry_budget=retry_budget,
+        ensure_not_cancelled=ensure_not_cancelled,
     )
     try:
         parse_json_output(result.structured_text)
@@ -399,6 +405,7 @@ def _run_role_provider_with_json_retry(
             attempt_history=history,
             attempt_context=attempt_context or {},
             retry_budget=retry_budget,
+            ensure_not_cancelled=ensure_not_cancelled,
         )
         return retry_result, {
             "key": "role_json_retry",
@@ -423,8 +430,11 @@ def _call_role_provider_with_transport_retry(
     attempt_history: list[dict[str, Any]],
     attempt_context: dict[str, Any],
     retry_budget: list[int],
+    ensure_not_cancelled: Callable[[], None] | None,
 ) -> AnalysisProviderResult:
     while True:
+        if ensure_not_cancelled is not None:
+            ensure_not_cancelled()
         started = time.monotonic()
         try:
             result = _call_role_provider(
@@ -439,8 +449,9 @@ def _call_role_provider_with_transport_retry(
         except Exception as exc:
             retry = (
                 retry_budget[0] > 0
-                and isinstance(exc, APIConnectionError)
-                and not isinstance(exc, APITimeoutError)
+                and get_provider_adapter(
+                    provider, provider_safe_run_parameters(run_parameters)
+                ).is_retryable_transport_error(exc)
                 and not _is_provider_timeout(exc)
             )
             attempt = build_ic_review_provider_attempt(
@@ -456,6 +467,8 @@ def _call_role_provider_with_transport_retry(
             )
             if not retry:
                 raise
+            if ensure_not_cancelled is not None:
+                ensure_not_cancelled()
             retry_budget[0] -= 1
             time.sleep(IC_REVIEW_ROLE_TRANSPORT_RETRY_DELAY_SECONDS)
         else:

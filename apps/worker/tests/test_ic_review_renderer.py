@@ -5,6 +5,7 @@ import json
 from uuid import uuid4
 
 import httpx
+import anthropic
 import pytest
 from jsonschema import ValidationError
 from openai import APIConnectionError, APIStatusError, APITimeoutError
@@ -567,6 +568,77 @@ def test_role_transport_retry_reuses_prompt_and_records_attempts(tmp_path, monke
         assert retry["attempts"][1]["request_id"] == "req-success"
         assert "PRIVATE_DOCUMENT" not in caplog.text
         assert "private raw output" not in caplog.text
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("provider,error_factory", [
+    (Provider.ANTHROPIC_COMPATIBLE,
+     lambda: anthropic.APIConnectionError(request=httpx.Request("POST", "https://provider.test"))),
+    (Provider.HERMES, lambda: httpx.RemoteProtocolError("remote disconnect")),
+])
+def test_role_transport_retry_supports_other_provider_adapters(monkeypatch, provider, error_factory):
+    calls = []
+    result = AnalysisProviderResult(structured_text="{}", raw_output="{}", latency_ms=1)
+
+    def call_provider(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise error_factory()
+        return result
+
+    monkeypatch.setattr(role_runner, "_call_role_provider", call_provider)
+    monkeypatch.setattr(role_runner.time, "sleep", lambda seconds: None)
+    history = []
+    actual, json_retry = role_runner._run_role_provider_with_json_retry(
+        provider=provider, model="test", api_key=None, base_url=None, prompt="private prompt",
+        response_schema={}, run_parameters={"max_retries": 0},
+        role="ic-product-analyst", attempt_history=history,
+    )
+    assert actual is result
+    assert json_retry is None
+    assert len(calls) == 2
+    assert history[0]["retry_delay_ms"] == 500
+
+
+@pytest.mark.parametrize("cancel_during", ["failure", "delay"])
+def test_role_transport_retry_stops_when_run_is_cancelled(tmp_path, monkeypatch, cancel_during):
+    db = _create_session()
+    try:
+        analysis = _analysis()
+        check_run = _check_run(analysis_id=analysis.id, run_parameters={})
+        db.add_all([analysis, check_run])
+        db.commit()
+        calls = []
+
+        def cancel_run():
+            check_run.status = RunStatus.CANCELLED.value
+            db.commit()
+
+        def call_provider(**kwargs):
+            calls.append(kwargs)
+            if cancel_during == "failure":
+                cancel_run()
+            raise APIConnectionError(request=httpx.Request("POST", "https://provider.test/v1"))
+
+        def pause(seconds):
+            if cancel_during == "delay":
+                cancel_run()
+
+        monkeypatch.setattr(role_runner, "_call_role_provider", call_provider)
+        monkeypatch.setattr(role_runner.time, "sleep", pause)
+        with pytest.raises(role_runner.IcReviewRunCancelled):
+            run_role_step(
+                session=db, check_run=check_run, analysis=analysis, role="ic-product-analyst",
+                context=_context(), source_snapshot=_snapshot(),
+                storage=LocalDocumentStorage(tmp_path / "storage"),
+            )
+        db.refresh(check_run)
+        step = db.execute(select(AnalysisCheckStep)).scalar_one()
+        assert len(calls) == 1
+        assert check_run.status == RunStatus.CANCELLED.value
+        assert step.status == RunStatus.CANCELLED.value
+        assert "ic_review_error_diagnostics" not in (check_run.run_parameters or {})
     finally:
         db.close()
 

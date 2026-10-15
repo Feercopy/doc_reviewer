@@ -13,6 +13,11 @@ class OpenAICompatibleAdapter(ProviderAdapter):
     def __init__(self, client_factory: Callable[..., object] | None = None) -> None:
         self._client_factory = client_factory or self._default_client_factory
 
+    def is_retryable_transport_error(self, exc: BaseException) -> bool:
+        from openai import APIConnectionError, APITimeoutError
+
+        return isinstance(exc, APIConnectionError) and not isinstance(exc, APITimeoutError)
+
     def run(self, request: ProviderRunRequest) -> AnalysisProviderResult:
         if not request.api_key:
             raise RuntimeError("provider_key_missing")

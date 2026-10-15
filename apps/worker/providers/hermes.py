@@ -13,6 +13,9 @@ class HermesAdapter(ProviderAdapter):
     def __init__(self, post: Callable[..., object] | None = None) -> None:
         self._post = post
 
+    def is_retryable_transport_error(self, exc: BaseException) -> bool:
+        return isinstance(exc, httpx.TransportError) and not isinstance(exc, httpx.TimeoutException)
+
     def run(self, request: ProviderRunRequest) -> AnalysisProviderResult:
         settings = get_settings()
         if not settings.hermes_enabled:
@@ -26,7 +29,7 @@ class HermesAdapter(ProviderAdapter):
             "model": request.model,
             "prompt": request.prompt,
             "response_schema": request.response_schema,
-            "run_parameters": request.run_parameters,
+            "run_parameters": {key: value for key, value in request.run_parameters.items() if key != "capture_http_metadata"},
         }
 
         started = time.monotonic()
@@ -42,6 +45,15 @@ class HermesAdapter(ProviderAdapter):
         response.raise_for_status()
         data = response.json()
         usage = data.get("usage") or {}
+        supplied_metadata = data.get("provider_metadata")
+        metadata = supplied_metadata if isinstance(supplied_metadata, dict) and supplied_metadata else {"provider": request.provider.value}
+        if request.run_parameters.get("capture_http_metadata") is True:
+            metadata = {
+                **metadata,
+                "request_id": response.headers.get("x-request-id"),
+                "response_id": data.get("id"),
+                "response_status": response.status_code,
+            }
 
         return AnalysisProviderResult(
             structured_text=data.get("structured_text") or data.get("content") or data.get("output") or "",
@@ -50,5 +62,5 @@ class HermesAdapter(ProviderAdapter):
             output_tokens=usage.get("output_tokens") or usage.get("completion_tokens"),
             latency_ms=data.get("latency_ms") or latency_ms,
             estimated_cost=data.get("estimated_cost"),
-            provider_metadata=data.get("provider_metadata") or {"provider": request.provider.value},
+            provider_metadata=metadata,
         )

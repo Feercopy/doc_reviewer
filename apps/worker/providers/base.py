@@ -38,6 +38,9 @@ class AnalysisProviderResult(BaseModel):
 
 
 class ProviderAdapter:
+    def is_retryable_transport_error(self, exc: BaseException) -> bool:
+        return False
+
     def run(self, request: ProviderRunRequest) -> AnalysisProviderResult:
         raise NotImplementedError
 

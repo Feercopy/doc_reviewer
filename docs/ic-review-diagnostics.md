@@ -68,11 +68,15 @@ that other documents complete successfully. This does **not** establish a
 stage-specific bug or a provider-wide outage; the closing network hop remains
 unknown until an attempt with response headers or more detailed transport logs.
 
-The worker now makes at most one additional request per IC Review role after an
-OpenAI SDK connection/protocol failure, with a 500 ms delay. It reuses the same
-role prompt and does not rerun completed roles. The retry budget is shared with
+The worker now makes at most one transport retry per IC Review role after a
+provider adapter classifies a connection/protocol failure, with a 500 ms delay.
+OpenAI-compatible, Anthropic-compatible, and Hermes adapters each classify
+their own transport errors. The retry reuses the same role prompt and does not
+rerun completed roles. Its budget is shared between the initial request and
 the existing invalid-JSON regeneration. SDK retries remain zero by default for
-roles. Timeouts keep their existing fallback; HTTP status errors, invalid JSON,
+IC roles. Before each request and before the retry delay, the worker rechecks
+whether the run was cancelled; cancellation does not become a failed run.
+Timeouts keep their existing fallback; HTTP status errors, invalid JSON,
 schema failures, and persistence errors do not trigger this transport retry.
 
 Each role provider attempt emits `ic_review_provider_attempt {JSON}` to the
@@ -80,9 +84,10 @@ worker log. Failed attempts use warning level. The record includes the release
 SHA, analysis/check-run/step and queue IDs, provider/model, role, prompt SHA-256
 and character count, configured timeouts, attempt number, elapsed milliseconds,
 error and transport classes, retry delay, HTTP status, `x-request-id`, and model
-response ID when available. IC Review OpenAI-compatible calls use the SDK's
-raw-response wrapper to capture status and headers on successful requests;
-other analysis calls retain their existing invocation path. A connection that
+response ID when available. IC Review OpenAI- and Anthropic-compatible calls
+use their SDKs' raw-response wrappers to capture status and headers; Hermes
+captures them from its HTTP response. Other analysis calls retain their
+existing invocation path. A connection that
 ends before an HTTP response has `null` status and IDs; these values must not
 be inferred. No response body, document content, URL, token, or exception
 message is recorded.
@@ -93,6 +98,11 @@ is exposed by user or admin API responses. Read-only investigation can search
 worker logs by `ic_review_provider_attempt` and check-run ID, or inspect the
 database's `run_parameters.ic_review_error_diagnostics` and step artifacts.
 
-Verification before publication: 749 API/worker tests with test CORS origins,
-82 focused tests, and an OpenAI SDK raw-response check against a local mock
-transport passed. No live provider run was used to verify this change.
+The initial PR review identified two risks: OpenAI-only retry classification
+in shared orchestration, and a cancelled run making a second billable request.
+Both were addressed with adapter-owned classification and a cancellation guard.
+Focused tests cover both paths, including Anthropic/Hermes and cancellation
+during the first error or retry delay. OpenAI and Anthropic SDK raw-response
+paths were checked against local mock transports. No live provider run was used
+to verify this change. The revised implementation passed 757 API/worker tests
+with explicit test CORS origins.
