@@ -178,6 +178,72 @@ def test_current_stage_is_read_from_its_table_cell_not_historical_stage():
     assert result.explanation == "Current defense: Progress Review"
 
 
+def test_review_history_with_cyrillic_current_and_stream_title_is_later_stream_review():
+    text = """[Page 1]
+    Initiative summary
+    | Review | Executive summary |
+    | --- | --- |
+    | Previous review<br>Nov 2025 | Results since last review |
+    | Сurrent review<br>May 2026 | Plan and fact across the стримам |
+    FAQ: A future Gate 3 is planned.
+    """
+
+    result = detect_document_type(text, title="Stream_review_TnS_May_2026.docx")
+
+    assert result.document_type == DocumentType.STREAM_REVIEW_2_PLUS
+    assert result.explanation == "Previous and Current Review rows with a Stream Review signal"
+
+
+def test_review_history_after_previous_gate_is_progress_review():
+    text = """Executive Summary
+    | Review | Stage |
+    | --- | --- |
+    | Previous Review | Gate 3, June 2025 |
+    | Current Review | Product results and next milestones |
+    """
+
+    result = detect_document_type(text)
+
+    assert result.document_type == DocumentType.PROGRESS_REVIEW
+    assert result.confidence == Decimal("0.80")
+
+
+def test_explicit_current_stage_wins_over_review_history_inference():
+    text = """Executive Summary
+    | Review | Stage |
+    | --- | --- |
+    | Previous Review | Gate 3 |
+    | Current Review | Stream Review 2+ |
+    """
+
+    result = detect_document_type(text)
+
+    assert result.document_type == DocumentType.STREAM_REVIEW_2_PLUS
+    assert result.explanation == "Current defense: Stream Review 2+"
+
+
+def test_review_history_with_conflicting_cues_is_unknown():
+    text = """Executive Summary
+    | Review | Stage |
+    | --- | --- |
+    | Previous Review | Gate 3 |
+    | Current Review | Results across all streams |
+    """
+
+    result = detect_document_type(text, title="Stream_review_initiative.docx")
+
+    assert result.document_type == DocumentType.UNKNOWN
+    assert "conflict" in result.explanation
+
+
+def test_unpaired_or_unspecified_review_history_does_not_guess_a_stage():
+    unpaired = "Executive Summary\n| Review | Stage |\n| Current Review | Across the streams |"
+    unspecified = "Executive Summary\n| Previous Review | May |\n| Current Review | Nov |"
+
+    assert detect_document_type(unpaired).document_type == DocumentType.UNKNOWN
+    assert detect_document_type(unspecified).document_type == DocumentType.UNKNOWN
+
+
 def test_current_gate_in_long_adjacent_table_cell_keeps_explicit_stage():
     text = """
     Executive Summary
