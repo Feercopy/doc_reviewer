@@ -448,7 +448,12 @@ def test_anthropic_compatible_adapter_normalizes_message_response():
     assert result.provider_metadata["stop_reason"] == "max_tokens"
 
 
-def test_anthropic_compatible_adapter_captures_ic_role_http_metadata():
+@pytest.mark.parametrize("headers", [
+    {"request-id": "req-anthropic"},
+    {"x-request-id": "req-anthropic"},
+    {},
+])
+def test_anthropic_compatible_adapter_captures_ic_role_http_metadata(headers):
     captured_client = {}
 
     class FakeMessages:
@@ -456,10 +461,10 @@ def test_anthropic_compatible_adapter_captures_ic_role_http_metadata():
             pytest.fail("plain message call must not be used for IC role metadata")
 
         with_raw_response = SimpleNamespace(create=lambda **kwargs: SimpleNamespace(
-            headers={"x-request-id": "req-anthropic"},
+            headers=headers,
             status_code=200,
             parse=lambda: SimpleNamespace(
-                id="msg-anthropic", content=[SimpleNamespace(text="{}")],
+                id="msg-anthropic", _request_id="req-anthropic", content=[SimpleNamespace(text="{}")],
                 stop_reason="end_turn", usage=SimpleNamespace(input_tokens=1, output_tokens=2),
                 model_dump_json=lambda: '{"raw":true}',
             ),

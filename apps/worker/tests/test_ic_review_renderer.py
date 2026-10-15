@@ -601,7 +601,7 @@ def test_role_transport_retry_supports_other_provider_adapters(monkeypatch, prov
     assert history[0]["retry_delay_ms"] == 500
 
 
-@pytest.mark.parametrize("cancel_during", ["failure", "delay"])
+@pytest.mark.parametrize("cancel_during", ["failure", "delay", "final_failure"])
 def test_role_transport_retry_stops_when_run_is_cancelled(tmp_path, monkeypatch, cancel_during):
     db = _create_session()
     try:
@@ -617,7 +617,7 @@ def test_role_transport_retry_stops_when_run_is_cancelled(tmp_path, monkeypatch,
 
         def call_provider(**kwargs):
             calls.append(kwargs)
-            if cancel_during == "failure":
+            if cancel_during == "failure" or (cancel_during == "final_failure" and len(calls) == 2):
                 cancel_run()
             raise APIConnectionError(request=httpx.Request("POST", "https://provider.test/v1"))
 
@@ -635,7 +635,7 @@ def test_role_transport_retry_stops_when_run_is_cancelled(tmp_path, monkeypatch,
             )
         db.refresh(check_run)
         step = db.execute(select(AnalysisCheckStep)).scalar_one()
-        assert len(calls) == 1
+        assert len(calls) == (2 if cancel_during == "final_failure" else 1)
         assert check_run.status == RunStatus.CANCELLED.value
         assert step.status == RunStatus.CANCELLED.value
         assert "ic_review_error_diagnostics" not in (check_run.run_parameters or {})

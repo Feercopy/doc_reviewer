@@ -47,7 +47,9 @@ class AnthropicCompatibleAdapter(ProviderAdapter):
         metadata = {"provider": request.provider.value, "stop_reason": getattr(response, "stop_reason", None)}
         if raw_response is not None:
             metadata.update({
-                "request_id": raw_response.headers.get("x-request-id"),
+                "request_id": raw_response.headers.get("request-id")
+                    or raw_response.headers.get("x-request-id")
+                    or getattr(response, "_request_id", None),
                 "response_id": getattr(response, "id", None),
                 "response_status": raw_response.status_code,
             })

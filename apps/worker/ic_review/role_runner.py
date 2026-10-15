@@ -465,10 +465,10 @@ def _call_role_provider_with_transport_retry(
                 context=attempt_context, role=role, prompt=prompt,
                 run_parameters=run_parameters, attempt=attempt,
             )
-            if not retry:
-                raise
             if ensure_not_cancelled is not None:
                 ensure_not_cancelled()
+            if not retry:
+                raise
             retry_budget[0] -= 1
             time.sleep(IC_REVIEW_ROLE_TRANSPORT_RETRY_DELAY_SECONDS)
         else:

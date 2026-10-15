@@ -181,7 +181,7 @@ def build_ic_review_provider_attempt(
     if error is not None:
         details["error_class"] = error.__class__.__name__
         details["transport_error_class"] = next(
-            (cause.__class__.__name__ for cause in _exception_chain(error)[1:]
+            (cause.__class__.__name__ for cause in _exception_chain(error)
              if cause.__class__.__module__.startswith(("httpx", "httpcore"))),
             None,
         )
@@ -234,7 +234,7 @@ def _provider_request_id(error: BaseException) -> str | None:
     response = getattr(error, "response", None)
     headers = getattr(response, "headers", None)
     return _identifier(getattr(error, "request_id", None)) or _identifier(
-        headers.get("x-request-id") if headers is not None else None
+        (headers.get("request-id") or headers.get("x-request-id")) if headers is not None else None
     )
 
 

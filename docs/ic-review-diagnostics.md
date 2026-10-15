@@ -104,5 +104,10 @@ Both were addressed with adapter-owned classification and a cancellation guard.
 Focused tests cover both paths, including Anthropic/Hermes and cancellation
 during the first error or retry delay. OpenAI and Anthropic SDK raw-response
 paths were checked against local mock transports. No live provider run was used
-to verify this change. The revised implementation passed 757 API/worker tests
-with explicit test CORS origins.
+to verify this change. Follow-up review also found that cancellation after the
+final failed provider request needed the same guard, Anthropic's standard
+correlation header is `request-id`, and a direct Hermes transport exception has
+no nested cause. All three paths now have focused regression tests. The adapter
+uses Anthropic's exported timeout type rather than importing its transitive
+HTTPX package. The final local API/worker suite passed 760 tests with explicit
+test CORS origins.

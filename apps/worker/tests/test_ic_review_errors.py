@@ -153,6 +153,10 @@ def test_provider_attempts_capture_safe_http_and_transport_metadata(caplog):
     assert disconnected["http_status"] is None
     assert disconnected["request_id"] is None
     assert disconnected["transport_error_class"] == "RemoteProtocolError"
+    direct_transport_error = build_ic_review_provider_attempt(
+        attempt=3, elapsed_ms=44, error=httpx.RemoteProtocolError("PRIVATE_RESPONSE"),
+    )
+    assert direct_transport_error["transport_error_class"] == "RemoteProtocolError"
     diagnostic = build_ic_review_error_diagnostics(
         connection_error, phase="role_step", stage="role:ic-financial-auditor",
         provider_attempts=[failed, disconnected],
