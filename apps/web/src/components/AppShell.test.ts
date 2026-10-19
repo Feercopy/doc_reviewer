@@ -15,4 +15,14 @@ describe("AppShell anonymizer banner", () => {
     expect(globalsSource).toContain("min-height: 35px;");
     expect(globalsSource).toContain("font-size: 12px;");
   });
+
+  it("shows the personal-data warning only on the documents list", () => {
+    const shellSource = readFileSync(join(process.cwd(), "src/components/AppShell.tsx"), "utf8");
+    const globalsSource = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+
+    expect(shellSource).toContain('stripAppBasePath(pathname) === "/documents"');
+    expect(shellSource).toContain("{isDocumentsList ? (");
+    expect(shellSource).toContain("ВНИМАНИЕ! Перед загрузкой документов убедитесь, что в них нет ПД!");
+    expect(globalsSource).toMatch(/\.anonymizer-warning\s*\{[^}]*font-size: 20px;/);
+  });
 });

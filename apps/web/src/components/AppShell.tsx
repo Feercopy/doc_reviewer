@@ -33,6 +33,7 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
   }
 
   const visibleNav = useMemo(() => getVisibleNavItems(user?.role), [user?.role]);
+  const isDocumentsList = stripAppBasePath(pathname) === "/documents";
 
   if (!user) {
     return (
@@ -85,6 +86,11 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
             <span className="anonymizer-banner__dot" aria-hidden="true" />
             <span>Анонимизатор включен</span>
           </div>
+          {isDocumentsList ? (
+            <p className="anonymizer-warning">
+              ВНИМАНИЕ! Перед загрузкой документов убедитесь, что в них нет ПД! Ответственность за загрузку документов с ПД лежит на каждом пользователе!
+            </p>
+          ) : null}
         </div>
         <div className="content-scroll">{children}</div>
       </div>
