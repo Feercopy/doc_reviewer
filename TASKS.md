@@ -21,6 +21,13 @@ Primary plan index:
 
 ## Current Focus
 
+- [x] 2026-10-19: Show a red personal-data upload warning under the anonymizer
+  indicator on the Documents list only. The 20px warning is 2px larger than the
+  Instruction heading; the upload flow is unchanged. All 185 web tests and the
+  Next.js production build passed. Local Next.js responds at 127.0.0.1:3000;
+  Docker is unavailable on this machine. PR and production merge were subsequently
+  requested; release verification remains pending.
+
 - [~] 2026-10-15: PR #119 adds one bounded IC Review transport retry per role,
   adapter-owned error classification, cancellation checks, and private per-attempt
   diagnostics. Review follow-ups cover cancellation after the final failed request,

@@ -451,6 +451,14 @@ tbody tr:last-child td {
   box-shadow: 0 0 0 3px rgba(14, 159, 110, 0.14);
 }
 
+.anonymizer-warning {
+  margin: 12px 0 0;
+  color: #c92036;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .user-chip {
   display: inline-flex;
   min-height: 34px;
