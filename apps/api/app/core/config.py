@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     )
     skill_source_snapshot_mode: str | None = Field(default=None, alias="SKILL_SOURCE_SNAPSHOT_MODE")
     document_anonymization_enabled: bool = Field(default=False, alias="DOCUMENT_ANONYMIZATION_ENABLED")
+    external_access_disabled: bool = Field(default=False, alias="EXTERNAL_ACCESS_DISABLED")
 
     model_config = SettingsConfigDict(
         env_file=".env",

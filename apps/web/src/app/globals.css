@@ -52,6 +52,56 @@ body {
   min-height: 100dvh;
 }
 
+.transition-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 48px 24px;
+}
+
+.transition-content {
+  width: min(100%, 760px);
+  text-align: center;
+}
+
+.transition-brand {
+  margin-bottom: 28px;
+  color: var(--accent-strong);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.transition-content h1 {
+  margin: 0 0 28px;
+  font-size: 34px;
+  line-height: 1.2;
+}
+
+@media (max-width: 600px) {
+  .transition-content h1 {
+    font-size: 26px;
+  }
+}
+
+.transition-content p {
+  margin: 0 0 18px;
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.transition-content p a {
+  color: var(--info);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.transition-admin-link {
+  display: inline-block;
+  margin-top: 26px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 a {
   color: inherit;
   text-decoration: none;

@@ -21,6 +21,14 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] 2026-10-19: Move the public site into admin-only transition mode.
+  Show a centered internal-migration notice to non-admin and guest visitors;
+  restrict production API data and mutations to admins while retaining login
+  and API health checks. The existing analysis and skill flow is untouched.
+  All 356 API tests (with standard CORS test origins), 189 web tests, the
+  Next.js production build, Docker Compose config, and live local redirect
+  smoke checks passed. PR, merge, and production deployment remain pending.
+
 - [x] 2026-10-19: Show a red personal-data upload warning under the anonymizer
   indicator on the Documents list only. The 20px warning is 2px larger than the
   Instruction heading; the upload flow is unchanged. All 185 web tests and the

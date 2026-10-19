@@ -1,7 +1,8 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import cors_allow_origins
+from app.dependencies.auth import require_admin_when_external_access_disabled
 from app.logging import RequestIdMiddleware
 from app.routers import (
     admin_analyses,
@@ -40,21 +41,25 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     api.include_router(auth.router)
-    api.include_router(admin_users.router)
-    api.include_router(admin_documents.router)
-    api.include_router(admin_analyses.router)
-    api.include_router(admin_etalons.router)
-    api.include_router(admin_benchmarks.router)
-    api.include_router(admin_feedback.router)
-    api.include_router(provider_settings.router)
-    api.include_router(skills.router)
-    api.include_router(skills.admin_router)
-    api.include_router(analyses.router)
-    api.include_router(ic_review.router)
-    api.include_router(etalons.router)
-    api.include_router(benchmarks.router)
-    api.include_router(feedback.router)
-    api.include_router(documents.router)
+    private_access = [Depends(require_admin_when_external_access_disabled)]
+    for router in (
+        admin_users.router,
+        admin_documents.router,
+        admin_analyses.router,
+        admin_etalons.router,
+        admin_benchmarks.router,
+        admin_feedback.router,
+        provider_settings.router,
+        skills.router,
+        skills.admin_router,
+        analyses.router,
+        ic_review.router,
+        etalons.router,
+        benchmarks.router,
+        feedback.router,
+        documents.router,
+    ):
+        api.include_router(router, dependencies=private_access)
     return api
 
 
