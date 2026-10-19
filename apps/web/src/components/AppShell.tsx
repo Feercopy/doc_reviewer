@@ -16,9 +16,15 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
 
   useEffect(() => {
     me()
-      .then(setUser)
+      .then((currentUser) => {
+        if (process.env.NEXT_PUBLIC_EXTERNAL_ACCESS_DISABLED === "true" && currentUser.role !== "admin") {
+          window.location.replace(appPath("/transition"));
+          return;
+        }
+        setUser(currentUser);
+      })
       .catch(() => {
-        window.location.href = appPath("/login");
+        window.location.replace(appPath(process.env.NEXT_PUBLIC_EXTERNAL_ACCESS_DISABLED === "true" ? "/transition" : "/login"));
       });
   }, []);
 

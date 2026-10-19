@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import Cookie, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.enums import Role, UserStatus
@@ -40,3 +41,14 @@ def require_admin(current_user: User = Depends(require_current_user)) -> User:
     if current_user.role != Role.ADMIN.value:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
     return current_user
+
+
+def require_admin_when_external_access_disabled(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> None:
+    if not get_settings().external_access_disabled:
+        return
+    current_user = require_current_user(request, db, request.cookies.get(SESSION_COOKIE_NAME))
+    if current_user.role != Role.ADMIN.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")

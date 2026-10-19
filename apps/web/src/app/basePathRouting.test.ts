@@ -40,9 +40,12 @@ describe("base path routing", () => {
 
     expect(appShell).toContain('from "@/lib/routing"');
     expect(appShell).toContain('window.location.href = appPath("/login")');
+    expect(appShell).toContain("window.location.replace(appPath(");
     expect(appShell).toContain("stripAppBasePath(pathname)");
-    expect(loginPage).toContain('window.location.href = appPath("/documents")');
-    expect(homePage).toContain('redirect(appPath("/login"))');
+    expect(loginPage).toContain("window.location.replace(appPath(");
+    expect(loginPage).toContain('"/transition"');
+    expect(loginPage).toContain('"/documents"');
+    expect(homePage).toContain("redirect(appPath(");
     expect(adminPage).toContain('redirect(appPath("/admin/users"))');
     expect(documentsPage).not.toContain("window.location.href");
     expect(documentDetailPage).toContain('window.location.href = appPath("/documents")');

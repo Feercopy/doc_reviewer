@@ -13,8 +13,12 @@ export default function LoginPage() {
 
   useEffect(() => {
     me()
-      .then(() => {
-        window.location.href = appPath("/documents");
+      .then((user) => {
+        window.location.replace(appPath(
+          process.env.NEXT_PUBLIC_EXTERNAL_ACCESS_DISABLED === "true" && user.role !== "admin"
+            ? "/transition"
+            : "/documents",
+        ));
       })
       .catch(() => {});
   }, []);
@@ -24,8 +28,12 @@ export default function LoginPage() {
     setError("");
     setPending(true);
     try {
-      await login(loginName, password);
-      window.location.href = appPath("/documents");
+      const result = await login(loginName, password);
+      window.location.replace(appPath(
+        process.env.NEXT_PUBLIC_EXTERNAL_ACCESS_DISABLED === "true" && result.user.role !== "admin"
+          ? "/transition"
+          : "/documents",
+      ));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
