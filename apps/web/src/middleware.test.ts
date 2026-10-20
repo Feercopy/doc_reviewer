@@ -35,10 +35,10 @@ describe("private access redirects", () => {
     expect((await guard("/login")).headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("redirects signed-in non-admins, including from login", async () => {
+  it("redirects signed-in non-admins but keeps the login form available", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ role: "user" }) }));
     expect((await guard("/documents", "session=user")).status).toBe(307);
-    expect((await guard("/login", "session=user")).status).toBe(307);
+    expect((await guard("/login", "session=user")).headers.get("x-middleware-next")).toBe("1");
   });
 
   it("allows an expired session to return to admin login", async () => {

@@ -14,11 +14,9 @@ export default function LoginPage() {
   useEffect(() => {
     me()
       .then((user) => {
-        window.location.replace(appPath(
-          process.env.NEXT_PUBLIC_EXTERNAL_ACCESS_DISABLED === "true" && user.role !== "admin"
-            ? "/transition"
-            : "/documents",
-        ));
+        if (process.env.NEXT_PUBLIC_EXTERNAL_ACCESS_DISABLED !== "true" || user.role === "admin") {
+          window.location.replace(appPath("/documents"));
+        }
       })
       .catch(() => {});
   }, []);

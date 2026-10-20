@@ -21,6 +21,12 @@ Primary plan index:
 
 ## Current Focus
 
+- [~] 2026-10-20: Restore admin sign-in from the transition page for browsers
+  holding a non-admin session. Keep `/login` reachable, show its credential form
+  instead of redirecting the existing user back to the notice, and retain the
+  backend admin-only guard on all other pages and data routes. PR and production
+  verification pending. All 189 web tests and the Next.js production build pass.
+
 - [~] 2026-10-19: Move the public site into admin-only transition mode.
   Show a centered internal-migration notice to non-admin and guest visitors;
   restrict production API data and mutations to admins while retaining login

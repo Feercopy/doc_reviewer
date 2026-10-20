@@ -10,13 +10,13 @@ export async function middleware(request: NextRequest) {
   }
 
   const path = stripAppBasePath(request.nextUrl.pathname);
-  if (path === "/transition") {
+  if (path === "/transition" || path === "/login") {
     return NextResponse.next();
   }
 
   const cookie = request.headers.get("cookie");
   if (!cookie) {
-    return path === "/login" ? NextResponse.next() : redirectToTransition(request);
+    return redirectToTransition(request);
   }
 
   try {
@@ -28,13 +28,8 @@ export async function middleware(request: NextRequest) {
     if (response.ok && (await response.json()).role === "admin") {
       return NextResponse.next();
     }
-    if (path === "/login" && !response.ok) {
-      return NextResponse.next();
-    }
   } catch {
-    if (path === "/login") {
-      return NextResponse.next();
-    }
+    return redirectToTransition(request);
   }
 
   return redirectToTransition(request);
